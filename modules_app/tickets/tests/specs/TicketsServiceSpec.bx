@@ -1,0 +1,238 @@
+/**
+ * TicketsServiceSpec: behavioral specs for the tickets service.
+ *
+ * Exercises creation (both contact-backed and accountless), the
+ * status workflow, message public-vs-internal visibility, the
+ * promote-sender-to-contact flow, tenant isolation, and the per-
+ * ticket event + cross-module audit integration.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.tickets  = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.audit    = getController().getWireBox().getInstance( "AuditService@audit" );
+    }
+
+    function run(){
+        describe( "TicketsService", function(){
+
+            it( "creates a contact-backed ticket and inherits the contact's organization", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "Cannot log in",
+                    source             : "portal"
+                } );
+                expect( t.getId() ).notToBeEmpty();
+                expect( t.getOrganizationId() ).toBe( f.org.getId() );
+                expect( t.getRequesterContactId() ).toBe( f.contact.getId() );
+                expect( t.getStatus() ).toBe( "new" );
+                expect( t.getTicketNumber() ).notToBeNull();
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "creates an accountless ticket without an organization", function(){
+                var t = variables.tickets.createAccountlessTicket( {
+                    originatingEmail : "stranger-" & createUUID() & "@example.com",
+                    subject          : "Help me",
+                    source           : "email"
+                } );
+                expect( t.isAccountless() ).toBeTrue();
+                expect( len( t.getOrganizationId() ?: "" ) ).toBe( 0 );
+                expect( len( t.getRequesterContactId() ?: "" ) ).toBe( 0 );
+                cleanupFixture( {}, [ t.getId() ] );
+            } );
+
+            it( "rejects an accountless ticket with no originating email", function(){
+                expect( function(){
+                    variables.tickets.createAccountlessTicket( { subject : "x" } );
+                } ).toThrow( "TicketsService.MissingEmail" );
+            } );
+
+            it( "moves through a valid status workflow", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "x"
+                } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open",     actorId : f.agentId } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "pending",  actorId : f.agentId } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "resolved", actorId : f.agentId } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getStatus() ).toBe( "resolved" );
+                expect( isNull( refreshed.getResolvedAt() ) ).toBeFalse();
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "rejects an invalid status transition", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "x"
+                } );
+                expect( function(){
+                    variables.tickets.changeStatus( { ticketId : t.getId(), status : "pending" } );
+                } ).toThrow( "TicketsService.InvalidTransition" );
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "assigns and reassigns to agents", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "x"
+                } );
+                variables.tickets.assignToAgent( { ticketId : t.getId(), agentId : f.agentId } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getAssignedToAgentId() ).toBe( f.agentId );
+
+                variables.tickets.assignToAgent( { ticketId : t.getId(), agentId : "" } );
+                refreshed = variables.tickets.getTicket( t.getId() );
+                expect( len( refreshed.getAssignedToAgentId() ?: "" ) ).toBe( 0 );
+
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "internal notes are excluded from the client-visible message list", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "x"
+                } );
+                variables.tickets.addMessage( {
+                    ticketId        : t.getId(),
+                    body            : "public reply",
+                    authorAgentId   : f.agentId,
+                    isInternal      : false
+                } );
+                variables.tickets.addMessage( {
+                    ticketId        : t.getId(),
+                    body            : "agent-only note",
+                    authorAgentId   : f.agentId,
+                    isInternal      : true
+                } );
+
+                var clientVisible = variables.tickets.listMessagesForTicket( t.getId() );
+                var agentVisible  = variables.tickets.listMessagesForTicket( t.getId(), true );
+
+                expect( arrayLen( clientVisible ) ).toBe( 1 );
+                expect( clientVisible[ 1 ].getBody() ).toBe( "public reply" );
+                expect( arrayLen( agentVisible ) ).toBe( 2 );
+
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "promotes an accountless ticket sender into a contact", function(){
+                var f = makeFixture();
+                var email = "promoted-" & createUUID() & "@example.com";
+                var t = variables.tickets.createAccountlessTicket( {
+                    originatingEmail : email,
+                    subject          : "from a stranger"
+                } );
+                expect( t.isAccountless() ).toBeTrue();
+
+                var result = variables.tickets.promoteSenderToContact( {
+                    ticketId       : t.getId(),
+                    organizationId : f.org.getId(),
+                    password       : "spec-password"
+                } );
+
+                expect( result.contact.getEmail() ).toBe( email );
+                expect( result.contact.getOrganizationId() ).toBe( f.org.getId() );
+
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.isAccountless() ).toBeFalse();
+                expect( refreshed.getOrganizationId() ).toBe( f.org.getId() );
+                expect( refreshed.getRequesterContactId() ).toBe( result.contact.getId() );
+
+                queryExecute(
+                    "DELETE FROM contacts WHERE id = :id",
+                    { id : result.contact.getId() }
+                );
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "writes ticket_events for lifecycle operations", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "x"
+                } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open", actorId : f.agentId } );
+                variables.tickets.assignToAgent( { ticketId : t.getId(), agentId : f.agentId } );
+
+                var events = variables.tickets.listEventsForTicket( t.getId() );
+                var types = [];
+                for ( var e in events ) types.append( e.getEventType() );
+                expect( types ).toInclude( "ticket.created" );
+                expect( types ).toInclude( "ticket.status_changed" );
+                expect( types ).toInclude( "ticket.assigned" );
+
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+            it( "writes audit events for ticket lifecycle operations", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "x"
+                } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open", actorId : f.agentId } );
+
+                var audits = variables.audit.search( entityId : t.getId(), limit : 50 );
+                var types = [];
+                for ( var a in audits ) types.append( a.getEventType() );
+                expect( types ).toInclude( "ticket.created" );
+                expect( types ).toInclude( "ticket.status_changed" );
+
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : t.getId() } );
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Tickets Spec Org " & createUUID(),
+            slug : "tickets-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        // Borrow the seeded admin agent as the actor (already exists).
+        var agent = queryExecute(
+            "SELECT id FROM agents WHERE email = 'agent@example.com' LIMIT 1",
+            {}, { returntype : "array" }
+        )[ 1 ];
+        return {
+            org     : org,
+            contact : contact,
+            agentId : agent.id
+        };
+    }
+
+    private void function cleanupFixture( required any fixture, array ticketIds = [] ){
+        for ( var tid in arguments.ticketIds ) {
+            queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM attachments WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM tickets WHERE id = :id", { id : tid } );
+        }
+        if ( !structIsEmpty( arguments.fixture ) ) {
+            queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+            queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+        }
+    }
+
+}

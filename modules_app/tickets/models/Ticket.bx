@@ -1,0 +1,74 @@
+/**
+ * Ticket: the core help-desk record.
+ *
+ * Tenant-scoped via TenantScope: a client user sees only tickets in
+ * their organization. Accountless tickets (organization_id IS NULL,
+ * no requester_contact_id) fall outside the scope entirely and are
+ * visible only to provider agents. Agents bypass the scope (probe
+ * returns null) and see across all organizations.
+ *
+ * Status workflow: new -> open -> pending|on-hold -> resolved -> closed.
+ * The service enforces transitions; the entity just stores the value.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="tickets"
+    accessors="true"
+{
+
+    property name="id";
+    property name="ticketNumber"        column="ticket_number";
+    property name="organizationId"      column="organization_id";
+    property name="requesterContactId"  column="requester_contact_id";
+    property name="assignedToAgentId"   column="assigned_to_agent_id";
+    property name="originatingEmail"    column="originating_email";
+    property name="subject";
+    property name="status";
+    property name="priority";
+    property name="ticketType"          column="ticket_type";
+    property name="source";
+    property name="resolvedAt"          column="resolved_at"   sqltype="timestamp";
+    property name="closedAt"            column="closed_at"     sqltype="timestamp";
+    property name="createdAt"           column="created_at"    sqltype="timestamp";
+    property name="updatedAt"           column="updated_at"    sqltype="timestamp";
+
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+    function requester(){
+        return belongsTo( "Contact@contacts", "requester_contact_id" );
+    }
+
+    function assignedAgent(){
+        return belongsTo( "Agent@agent", "assigned_to_agent_id" );
+    }
+
+    function messages(){
+        return hasMany( "TicketMessage@tickets", "ticket_id" );
+    }
+
+    function events(){
+        return hasMany( "TicketEvent@tickets", "ticket_id" );
+    }
+
+    function attachments(){
+        return hasMany( "Attachment@tickets", "ticket_id" );
+    }
+
+    /**
+     * Convenience: a Ticket with no organization_id and no
+     * requester_contact_id is "accountless" (originated from an
+     * unrecognized email sender) and visible only to agents.
+     */
+    public boolean function isAccountless(){
+        var orgId = getOrganizationId();
+        return isNull( orgId ) || !len( orgId );
+    }
+
+}

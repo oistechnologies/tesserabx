@@ -1,0 +1,52 @@
+/**
+ * TicketMessage: one entry in a ticket's threaded conversation.
+ *
+ * is_internal flags an agent-only note that must NEVER reach any
+ * client-side role (CLAUDE.md hard constraint). The portal / widget
+ * surfaces filter on this flag at the service layer; the UI never
+ * receives internal-note records.
+ *
+ * Not tenant-scoped directly: parent Ticket is tenant-scoped and
+ * messages travel with the ticket. Service-layer lookups always go
+ * through the ticket id.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="ticket_messages"
+    accessors="true"
+{
+
+    property name="id";
+    property name="ticketId"          column="ticket_id";
+    property name="authorContactId"   column="author_contact_id";
+    property name="authorAgentId"     column="author_agent_id";
+    property name="authorEmail"       column="author_email";
+    property name="body";
+    property name="isInternal"        column="is_internal";
+    property name="createdAt"         column="created_at" sqltype="timestamp";
+
+    function ticket(){
+        return belongsTo( "Ticket@tickets", "ticket_id" );
+    }
+
+    function authorContact(){
+        return belongsTo( "Contact@contacts", "author_contact_id" );
+    }
+
+    function authorAgent(){
+        return belongsTo( "Agent@agent", "author_agent_id" );
+    }
+
+    function attachments(){
+        return hasMany( "Attachment@tickets", "message_id" );
+    }
+
+    /**
+     * Convenience: was the message authored by a provider agent?
+     */
+    public boolean function isFromAgent(){
+        var id = getAuthorAgentId();
+        return !isNull( id ) && len( id );
+    }
+
+}

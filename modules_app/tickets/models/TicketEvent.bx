@@ -1,0 +1,37 @@
+/**
+ * TicketEvent: one entry in the per-ticket timeline.
+ *
+ * Distinct from audit_events: ticket_events is the agent-facing
+ * history shown inline on the ticket detail (status_changed,
+ * assigned, message_sent, etc.). Significant ticket events also
+ * write to the central audit log via AuditService.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="ticket_events"
+    accessors="true"
+{
+
+    property name="id";
+    property name="ticketId"      column="ticket_id";
+    property name="eventType"     column="event_type";
+    property name="actorType"     column="actor_type";
+    property name="actorId"       column="actor_id";
+    property name="metadataJson"  column="metadata_json";
+    property name="occurredAt"    column="occurred_at" sqltype="timestamp";
+
+    function ticket(){
+        return belongsTo( "Ticket@tickets", "ticket_id" );
+    }
+
+    public struct function getMetadataAsStruct(){
+        var raw = getMetadataJson();
+        if ( isNull( raw ) || !len( raw ) ) return {};
+        try {
+            return jsonDeserialize( raw );
+        } catch ( any e ) {
+            return { "_rawMetadata" : raw, "_decodeError" : e.message };
+        }
+    }
+
+}

@@ -1,0 +1,533 @@
+/**
+ * TicketsService: the public surface other modules use to create,
+ * read, and act on tickets.
+ *
+ * Per CLAUDE.md, no other module imports Ticket / TicketMessage /
+ * TicketEvent / Attachment directly. portal / widget / channels
+ * create tickets through createTicket() and createAccountlessTicket().
+ *
+ * Every write operation records a TicketEvent (per-ticket timeline)
+ * and emits a corresponding audit event through AuditService for
+ * the central compliance log.
+ */
+class singleton=true {
+
+    property name="wirebox"         inject="wirebox";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="auditService"    inject="AuditService@audit";
+    property name="cbfs"            inject="DiskService@cbfs";
+
+    // ---------- Status workflow ----------
+
+    variables.STATUSES = [ "new", "open", "pending", "on-hold", "resolved", "closed" ];
+    variables.PRIORITIES = [ "low", "normal", "high", "urgent" ];
+    variables.TYPES = [ "incident", "request", "problem", "question" ];
+    variables.SOURCES = [ "email", "portal", "widget", "agent" ];
+    variables.TRANSITIONS = {
+        "new"      : [ "open", "on-hold", "resolved", "closed" ],
+        "open"     : [ "pending", "on-hold", "resolved", "closed" ],
+        "pending"  : [ "open", "on-hold", "resolved", "closed" ],
+        "on-hold"  : [ "open", "pending", "resolved", "closed" ],
+        "resolved" : [ "open", "closed" ],
+        "closed"   : [ "open" ]
+    };
+
+    public array function listStatuses() { return variables.STATUSES; }
+    public array function listPriorities() { return variables.PRIORITIES; }
+    public array function listTypes() { return variables.TYPES; }
+
+    public boolean function isValidTransition( required string from, required string to ){
+        if ( !structKeyExists( variables.TRANSITIONS, arguments.from ) ) return false;
+        return arrayFindNoCase( variables.TRANSITIONS[ arguments.from ], arguments.to ) > 0;
+    }
+
+    // ---------- Reads ----------
+
+    /**
+     * Single ticket lookup. Bypasses tenant scope; service callers
+     * (the agent UI) handle authorization. Returns null when not
+     * found.
+     */
+    public any function getTicket( required string id ){
+        var t = wirebox.getInstance( "Ticket@tickets" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( t ) ? javaCast( "null", "" ) : t;
+    }
+
+    /**
+     * List tickets for the agent surface. Bypasses tenant scope so
+     * agents see across organizations. Filters are all optional.
+     */
+    public array function listTickets(
+        string status,
+        string priority,
+        string organizationId,
+        string assignedToAgentId,
+        boolean accountlessOnly = false,
+        numeric limit = 100,
+        numeric offset = 0
+    ){
+        var q = wirebox.getInstance( "Ticket@tickets" ).withoutGlobalScope();
+        if ( structKeyExists( arguments, "status" ) && len( arguments.status ?: "" ) ) q = q.where( "status", arguments.status );
+        if ( structKeyExists( arguments, "priority" ) && len( arguments.priority ?: "" ) ) q = q.where( "priority", arguments.priority );
+        if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) q = q.where( "organization_id", arguments.organizationId );
+        if ( structKeyExists( arguments, "assignedToAgentId" ) && len( arguments.assignedToAgentId ?: "" ) ) q = q.where( "assigned_to_agent_id", arguments.assignedToAgentId );
+        if ( arguments.accountlessOnly ) q = q.whereNull( "organization_id" );
+        return q.orderBy( "created_at", "desc" ).limit( arguments.limit ).offset( arguments.offset ).get();
+    }
+
+    /**
+     * List tickets for a Contact (portal view). Uses tenant scope so
+     * a leak (Contact for the wrong org) returns nothing. Excludes
+     * accountless tickets explicitly.
+     */
+    public array function listTicketsForContact( required string contactId ){
+        return wirebox.getInstance( "Ticket@tickets" )
+            .where( "requester_contact_id", arguments.contactId )
+            .whereNotNull( "organization_id" )
+            .orderBy( "created_at", "desc" )
+            .get();
+    }
+
+    /**
+     * Messages for a ticket. includeInternal defaults to false so the
+     * portal can call this directly without leaking internal notes.
+     * The agent UI passes true.
+     */
+    public array function listMessagesForTicket(
+        required string ticketId,
+        boolean includeInternal = false
+    ){
+        var q = wirebox.getInstance( "TicketMessage@tickets" )
+            .where( "ticket_id", arguments.ticketId );
+        if ( !arguments.includeInternal ) {
+            q = q.where( "is_internal", false );
+        }
+        return q.orderBy( "created_at", "asc" ).get();
+    }
+
+    public array function listEventsForTicket( required string ticketId ){
+        return wirebox.getInstance( "TicketEvent@tickets" )
+            .where( "ticket_id", arguments.ticketId )
+            .orderBy( "occurred_at", "asc" )
+            .get();
+    }
+
+    public array function listAttachmentsForTicket( required string ticketId ){
+        return wirebox.getInstance( "Attachment@tickets" )
+            .where( "ticket_id", arguments.ticketId )
+            .orderBy( "created_at", "asc" )
+            .get();
+    }
+
+    // ---------- Writes ----------
+
+    /**
+     * Create a contact-backed ticket. Caller supplies a
+     * requesterContactId (which determines the organization) plus
+     * subject and source.
+     */
+    public any function createTicket( required struct data ){
+        var contact = contactsService.getContactById( arguments.data.requesterContactId );
+        if ( isNull( contact ) ) {
+            throw( type="TicketsService.UnknownContact", message="No contact with id [#arguments.data.requesterContactId#]." );
+        }
+
+        var t = newTicket();
+        t.setRequesterContactId( contact.getId() );
+        t.setOrganizationId( contact.getOrganizationId() );
+        t.setOriginatingEmail( arguments.data.originatingEmail ?: contact.getEmail() );
+        applyCommonTicketFields( t, arguments.data );
+        t.save();
+        t = getTicket( t.getId() );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : "ticket.created",
+            actorType : arguments.data.actorType ?: "",
+            actorId   : arguments.data.actorId ?: "",
+            metadata  : { "source" : t.getSource(), "subject" : t.getSubject() }
+        );
+        recordAudit(
+            eventType      : "ticket.created",
+            entityId       : t.getId(),
+            organizationId : t.getOrganizationId(),
+            actorType      : arguments.data.actorType ?: "",
+            actorId        : arguments.data.actorId ?: "",
+            metadata       : { "requesterContactId" : t.getRequesterContactId(), "subject" : t.getSubject() }
+        );
+        return t;
+    }
+
+    /**
+     * Create an accountless ticket from a raw sender email. No
+     * organization, no contact; only provider agents can see it.
+     * Phase 2's channel intake (inbound email) is the typical caller;
+     * agents can also create one manually.
+     */
+    public any function createAccountlessTicket( required struct data ){
+        if ( !len( arguments.data.originatingEmail ?: "" ) ) {
+            throw( type="TicketsService.MissingEmail", message="Accountless tickets require an originatingEmail." );
+        }
+        var t = newTicket();
+        t.setOriginatingEmail( arguments.data.originatingEmail );
+        applyCommonTicketFields( t, arguments.data );
+        t.save();
+        t = getTicket( t.getId() );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : "ticket.created_accountless",
+            actorType : arguments.data.actorType ?: "",
+            actorId   : arguments.data.actorId ?: "",
+            metadata  : { "originatingEmail" : t.getOriginatingEmail(), "source" : t.getSource() }
+        );
+        recordAudit(
+            eventType  : "ticket.created_accountless",
+            entityId   : t.getId(),
+            actorType  : arguments.data.actorType ?: "",
+            actorId    : arguments.data.actorId ?: "",
+            metadata   : { "originatingEmail" : t.getOriginatingEmail() }
+        );
+        return t;
+    }
+
+    /**
+     * Append a message to a ticket. Exactly one of authorAgentId or
+     * authorContactId is expected for a normal message; an inbound
+     * email that hasn't resolved to a contact passes neither, only
+     * authorEmail.
+     */
+    public any function addMessage( required struct data ){
+        var t = getTicket( arguments.data.ticketId );
+        if ( isNull( t ) ) {
+            throw( type="TicketsService.UnknownTicket", message="No ticket with id [#arguments.data.ticketId#]." );
+        }
+
+        var m = wirebox.getInstance( "TicketMessage@tickets" );
+        m.setId( newId() );
+        m.setTicketId( t.getId() );
+        m.setBody( arguments.data.body ?: "" );
+        m.setIsInternal( arguments.data.isInternal ?: false );
+        if ( len( arguments.data.authorAgentId ?: "" ) ) m.setAuthorAgentId( arguments.data.authorAgentId );
+        if ( len( arguments.data.authorContactId ?: "" ) ) m.setAuthorContactId( arguments.data.authorContactId );
+        if ( len( arguments.data.authorEmail ?: "" ) ) m.setAuthorEmail( arguments.data.authorEmail );
+        m.save();
+
+        touchTicket( t );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : m.getIsInternal() ? "ticket.internal_note_added" : "ticket.message_added",
+            actorType : len( arguments.data.authorAgentId ?: "" ) ? "agent" : ( len( arguments.data.authorContactId ?: "" ) ? "contact" : "system" ),
+            actorId   : arguments.data.authorAgentId ?: arguments.data.authorContactId ?: "",
+            metadata  : { "messageId" : m.getId(), "isInternal" : m.getIsInternal() }
+        );
+        return m;
+    }
+
+    /**
+     * Move a ticket to a new status. Throws on an invalid transition
+     * so callers can show a clear error rather than silently no-op.
+     */
+    public any function changeStatus( required struct data ){
+        var t = getTicket( arguments.data.ticketId );
+        if ( isNull( t ) ) {
+            throw( type="TicketsService.UnknownTicket", message="No ticket with id [#arguments.data.ticketId#]." );
+        }
+        var from = t.getStatus();
+        var to   = arguments.data.status;
+        if ( from == to ) return t;
+        if ( !isValidTransition( from, to ) ) {
+            throw(
+                type    = "TicketsService.InvalidTransition",
+                message = "Cannot move ticket from [#from#] to [#to#]."
+            );
+        }
+
+        t.setStatus( to );
+        if ( to == "resolved" ) t.setResolvedAt( now() );
+        if ( to == "closed" )   t.setClosedAt( now() );
+        if ( to == "open" && from == "closed" ) {
+            t.clearAttribute( name = "closedAt", setToNull = true );
+            t.clearAttribute( name = "resolvedAt", setToNull = true );
+        }
+        t.save();
+        touchTicket( t );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : "ticket.status_changed",
+            actorType : arguments.data.actorType ?: "agent",
+            actorId   : arguments.data.actorId ?: "",
+            metadata  : { "from" : from, "to" : to }
+        );
+        recordAudit(
+            eventType      : "ticket.status_changed",
+            entityId       : t.getId(),
+            organizationId : t.getOrganizationId() ?: "",
+            actorType      : arguments.data.actorType ?: "agent",
+            actorId        : arguments.data.actorId ?: "",
+            metadata       : { "from" : from, "to" : to }
+        );
+        return t;
+    }
+
+    /**
+     * Assign or reassign a ticket to an agent. Pass agentId="" to
+     * unassign.
+     */
+    public any function assignToAgent( required struct data ){
+        var t = getTicket( arguments.data.ticketId );
+        if ( isNull( t ) ) {
+            throw( type="TicketsService.UnknownTicket", message="No ticket with id [#arguments.data.ticketId#]." );
+        }
+        var previous = t.getAssignedToAgentId();
+        var next     = arguments.data.agentId ?: "";
+        if ( ( isNull( previous ) ? "" : previous ) == next ) return t;
+
+        if ( len( next ) ) {
+            t.setAssignedToAgentId( next );
+            touchTicket( t );
+        } else {
+            // Quick's clearAttribute + save doesn't reliably emit a
+            // SET column = NULL in the UPDATE; fall back to a direct
+            // statement for the unset case.
+            queryExecute(
+                "UPDATE tickets SET assigned_to_agent_id = NULL, updated_at = NOW() WHERE id = :id",
+                { id : t.getId() }
+            );
+            t = getTicket( t.getId() );
+        }
+        touchTicket( t );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : "ticket.assigned",
+            actorType : "agent",
+            actorId   : arguments.data.actorId ?: "",
+            metadata  : { "previousAgentId" : previous ?: "", "newAgentId" : next }
+        );
+        recordAudit(
+            eventType      : "ticket.assigned",
+            entityId       : t.getId(),
+            organizationId : t.getOrganizationId() ?: "",
+            actorType      : "agent",
+            actorId        : arguments.data.actorId ?: "",
+            metadata       : { "previousAgentId" : previous ?: "", "newAgentId" : next }
+        );
+        return t;
+    }
+
+    /**
+     * Promote the sender of an accountless ticket into a real Contact
+     * and bring the ticket under tenancy. Caller supplies the new
+     * Contact's organizationId (or creates the org first via
+     * ContactsService.createOrganization).
+     */
+    public any function promoteSenderToContact( required struct data ){
+        var t = getTicket( arguments.data.ticketId );
+        if ( isNull( t ) ) {
+            throw( type="TicketsService.UnknownTicket", message="No ticket with id [#arguments.data.ticketId#]." );
+        }
+        if ( !t.isAccountless() ) {
+            throw( type="TicketsService.AlreadyHasContact", message="Ticket already has a requester contact." );
+        }
+        if ( !len( t.getOriginatingEmail() ?: "" ) ) {
+            throw( type="TicketsService.NoOriginatingEmail", message="Ticket has no originating email to promote." );
+        }
+
+        var contact = contactsService.provisionContact( {
+            organizationId : arguments.data.organizationId,
+            email          : t.getOriginatingEmail(),
+            password       : arguments.data.password ?: createUUID(),
+            firstName      : arguments.data.firstName ?: "",
+            lastName       : arguments.data.lastName ?: ""
+        } );
+
+        t.setRequesterContactId( contact.getId() );
+        t.setOrganizationId( contact.getOrganizationId() );
+        t.save();
+        touchTicket( t );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : "ticket.promoted_to_contact",
+            actorType : "agent",
+            actorId   : arguments.data.actorId ?: "",
+            metadata  : {
+                "contactId"      : contact.getId(),
+                "organizationId" : contact.getOrganizationId(),
+                "promotedEmail"  : t.getOriginatingEmail()
+            }
+        );
+        recordAudit(
+            eventType      : "ticket.promoted_to_contact",
+            entityId       : t.getId(),
+            organizationId : contact.getOrganizationId(),
+            actorType      : "agent",
+            actorId        : arguments.data.actorId ?: "",
+            metadata       : { "contactId" : contact.getId(), "email" : t.getOriginatingEmail() }
+        );
+        return { "ticket" : t, "contact" : contact };
+    }
+
+    // ---------- Attachments ----------
+
+    /**
+     * Persist an uploaded file against a ticket (and optionally a
+     * specific message). Caller passes the temporary path on disk
+     * (where cffile uploaded it) plus its original filename, content
+     * type, and size. The service validates against the
+     * UPLOAD_MAX_BYTES / UPLOAD_ALLOWED_EXTENSIONS environment limits,
+     * copies the bytes into CBFS under tickets/<ticketId>/, and
+     * records the Attachment row.
+     */
+    public any function addAttachment( required struct data ){
+        var t = getTicket( arguments.data.ticketId );
+        if ( isNull( t ) ) {
+            throw( type="TicketsService.UnknownTicket", message="No ticket with id [#arguments.data.ticketId#]." );
+        }
+        var filename = arguments.data.originalFilename;
+        var size     = int( arguments.data.sizeBytes );
+        var ctype    = arguments.data.contentType ?: "application/octet-stream";
+
+        validateUpload( filename, size );
+
+        var ext   = listLast( filename, "." );
+        var path  = "tickets/" & t.getId() & "/" & newId() & "." & ext;
+        cbfs.get().create(
+            path     = path,
+            contents = fileRead( arguments.data.sourcePath, "binary" ),
+            overwrite = true
+        );
+
+        var a = wirebox.getInstance( "Attachment@tickets" );
+        a.setId( newId() );
+        a.setTicketId( t.getId() );
+        if ( len( arguments.data.messageId ?: "" ) ) a.setMessageId( arguments.data.messageId );
+        if ( len( arguments.data.uploaderAgentId ?: "" ) ) a.setUploaderAgentId( arguments.data.uploaderAgentId );
+        if ( len( arguments.data.uploaderContactId ?: "" ) ) a.setUploaderContactId( arguments.data.uploaderContactId );
+        a.setOriginalFilename( filename );
+        a.setContentType( ctype );
+        a.setSizeBytes( size );
+        a.setCbfsPath( path );
+        a.save();
+
+        touchTicket( t );
+
+        recordTicketEvent(
+            ticketId  : t.getId(),
+            eventType : "ticket.attachment_added",
+            actorType : len( arguments.data.uploaderAgentId ?: "" ) ? "agent" : "contact",
+            actorId   : arguments.data.uploaderAgentId ?: arguments.data.uploaderContactId ?: "",
+            metadata  : {
+                "attachmentId" : a.getId(),
+                "filename"     : filename,
+                "sizeBytes"    : size,
+                "contentType"  : ctype
+            }
+        );
+        return a;
+    }
+
+    /**
+     * Read the raw bytes for an attachment back from CBFS. Callers
+     * stream this to the client; the path itself never reaches a
+     * browser.
+     */
+    public any function readAttachmentBytes( required string attachmentId ){
+        var a = wirebox.getInstance( "Attachment@tickets" )
+            .where( "id", arguments.attachmentId )
+            .first();
+        if ( isNull( a ) ) {
+            throw( type="TicketsService.UnknownAttachment", message="No attachment with id [#arguments.attachmentId#]." );
+        }
+        return cbfs.get().get( a.getCbfsPath() );
+    }
+
+    private void function validateUpload( required string filename, required numeric sizeBytes ){
+        var maxBytes = int( getSystemSetting( "UPLOAD_MAX_BYTES", "26214400" ) );
+        if ( arguments.sizeBytes > maxBytes ) {
+            throw(
+                type    = "TicketsService.UploadTooLarge",
+                message = "Upload exceeds configured maximum (#maxBytes# bytes)."
+            );
+        }
+        var allowed = listToArray( getSystemSetting( "UPLOAD_ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,txt,csv,xls,xlsx,doc,docx,zip" ) );
+        var ext = lCase( listLast( arguments.filename, "." ) );
+        if ( !arrayFindNoCase( allowed, ext ) ) {
+            throw(
+                type    = "TicketsService.UploadTypeForbidden",
+                message = "File type [.#ext#] is not in the allowed list."
+            );
+        }
+    }
+
+    // ---------- helpers ----------
+
+    private any function newTicket(){
+        var t = wirebox.getInstance( "Ticket@tickets" );
+        t.setId( newId() );
+        return t;
+    }
+
+    private void function applyCommonTicketFields( required any ticket, required struct data ){
+        arguments.ticket.setSubject( arguments.data.subject ?: "(no subject)" );
+        arguments.ticket.setStatus( arguments.data.status ?: "new" );
+        arguments.ticket.setPriority( arguments.data.priority ?: "normal" );
+        arguments.ticket.setTicketType( arguments.data.ticketType ?: "request" );
+        arguments.ticket.setSource( arguments.data.source ?: "agent" );
+        if ( len( arguments.data.assignedToAgentId ?: "" ) ) {
+            arguments.ticket.setAssignedToAgentId( arguments.data.assignedToAgentId );
+        }
+    }
+
+    private void function touchTicket( required any ticket ){
+        arguments.ticket.setUpdatedAt( now() );
+        arguments.ticket.save();
+    }
+
+    private void function recordTicketEvent(
+        required string ticketId,
+        required string eventType,
+        string actorType = "",
+        string actorId   = "",
+        struct metadata
+    ){
+        var e = wirebox.getInstance( "TicketEvent@tickets" );
+        e.setId( newId() );
+        e.setTicketId( arguments.ticketId );
+        e.setEventType( arguments.eventType );
+        if ( len( arguments.actorType ) ) e.setActorType( arguments.actorType );
+        if ( len( arguments.actorId ) )   e.setActorId( arguments.actorId );
+        if ( structKeyExists( arguments, "metadata" ) && !isNull( arguments.metadata ) ) {
+            e.setMetadataJson( jsonSerialize( arguments.metadata ) );
+        }
+        e.save();
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        string entityId,
+        string organizationId,
+        string actorType,
+        string actorId,
+        struct metadata
+    ){
+        var args = { "eventType" : arguments.eventType, "entityType" : "Ticket" };
+        if ( structKeyExists( arguments, "entityId" ) && len( arguments.entityId ?: "" ) ) args.entityId = arguments.entityId;
+        if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) args.organizationId = arguments.organizationId;
+        if ( structKeyExists( arguments, "actorType" ) && len( arguments.actorType ?: "" ) ) args.actorType = arguments.actorType;
+        if ( structKeyExists( arguments, "actorId" ) && len( arguments.actorId ?: "" ) ) args.actorId = arguments.actorId;
+        if ( structKeyExists( arguments, "metadata" ) && !isNull( arguments.metadata ) ) args.metadata = arguments.metadata;
+        auditService.record( argumentCollection = args );
+    }
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}

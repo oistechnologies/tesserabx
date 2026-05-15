@@ -28,7 +28,20 @@ class {
         interceptors = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "Ticket@tickets" )
+              .to( "#moduleMapping#.models.Ticket" );
+        binder.map( "TicketMessage@tickets" )
+              .to( "#moduleMapping#.models.TicketMessage" );
+        binder.map( "TicketEvent@tickets" )
+              .to( "#moduleMapping#.models.TicketEvent" );
+        binder.map( "Attachment@tickets" )
+              .to( "#moduleMapping#.models.Attachment" );
+        binder.map( "TicketsService@tickets" )
+              .to( "#moduleMapping#.models.TicketsService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

@@ -1,0 +1,37 @@
+/**
+ * Attachment: one file stored against a Ticket and optionally a
+ * specific TicketMessage. The bytes live in the configured CBFS
+ * disk; this row records the relative path plus the original
+ * filename, content type, and byte count.
+ *
+ * Phase 1 enforces size and content-type limits in the service
+ * layer based on .env config (UPLOAD_MAX_BYTES,
+ * UPLOAD_ALLOWED_EXTENSIONS). Malware scanning is explicitly out
+ * of scope for Phase 1 per the build plan.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="attachments"
+    accessors="true"
+{
+
+    property name="id";
+    property name="ticketId"            column="ticket_id";
+    property name="messageId"           column="message_id";
+    property name="uploaderContactId"   column="uploader_contact_id";
+    property name="uploaderAgentId"     column="uploader_agent_id";
+    property name="originalFilename"    column="original_filename";
+    property name="contentType"         column="content_type";
+    property name="sizeBytes"           column="size_bytes";
+    property name="cbfsPath"            column="cbfs_path";
+    property name="createdAt"           column="created_at" sqltype="timestamp";
+
+    function ticket(){
+        return belongsTo( "Ticket@tickets", "ticket_id" );
+    }
+
+    function message(){
+        return belongsTo( "TicketMessage@tickets", "message_id" );
+    }
+
+}
