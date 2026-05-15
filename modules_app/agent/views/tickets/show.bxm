@@ -197,6 +197,44 @@
             </div>
         </bx:if>
 
+        <bx:if arrayLen( prc.relatedArticles ?: [] )>
+            <bx:set local.firstArticle = prc.relatedArticles[ 1 ] >
+            <bx:set local.relatedSource = local.firstArticle.source ?: "" >
+            <div class="card mb-3">
+                <div class="card-header p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                       data-bs-toggle="collapse"
+                       href="##related-articles-card"
+                       role="button"
+                       aria-expanded="false"
+                       aria-controls="related-articles-card">
+                        <span>
+                            Related articles
+                            <span class="badge text-bg-secondary ms-2">#arrayLen( prc.relatedArticles )#</span>
+                            <bx:if local.relatedSource eq "semantic">
+                                <span class="badge text-bg-info ms-1" title="Ranked by AI semantic similarity">AI</span>
+                            </bx:if>
+                        </span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="related-articles-card" class="collapse">
+                    <div class="card-body small">
+                        <bx:loop array="#prc.relatedArticles#" item="local.article">
+                            <div class="mb-2 pb-2 border-bottom">
+                                <a href="/kb/#encodeForHTMLAttribute( local.article.slug )#" target="_blank">
+                                    #encodeForHTML( local.article.title )#
+                                </a>
+                                <bx:if len( local.article.snippet ?: "" )>
+                                    <div class="text-body-secondary">#encodeForHTML( local.article.snippet )#</div>
+                                </bx:if>
+                            </div>
+                        </bx:loop>
+                    </div>
+                </div>
+            </div>
+        </bx:if>
+
         <div class="card mb-3">
             <div class="card-header p-0">
                 <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"

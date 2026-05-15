@@ -1,0 +1,156 @@
+/**
+ * KbSuggestionService: given a piece of context (a ticket, a draft
+ * support request), surface the most relevant KB articles.
+ *
+ * Two paths:
+ *   - AI on: embed the context, ask the kb service for the closest
+ *     vectors via pgvector cosine similarity, return the top N.
+ *   - AI off: fall back to Phase 2e's keyword search against the
+ *     same articles, ranked by relevance.
+ *
+ * The fallback is deliberate. CLAUDE.md and the build plan both
+ * require the app to be fully functional with AI disabled; the
+ * agent UI's "Related articles" card stays useful either way.
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="kbService"      inject="KnowledgebaseService@knowledgebase";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    variables.FEATURE_KEY = "kb-suggest";
+
+    /**
+     * Top-N articles related to a ticket, filtered by the viewer's
+     * visibility tier. Returns an array of structs:
+     *   [ { id, slug, title, snippet, source : "semantic" | "keyword" }, ... ]
+     */
+    public array function suggestForTicket(
+        required string ticketId,
+        required struct viewer,
+        numeric limit = 5
+    ){
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) return [];
+        var query = ( ticket.getSubject() ?: "" );
+        var msgs = ticketsService.listMessagesForTicket( ticket.getId(), true );
+        for ( var m in msgs ) {
+            if ( m.getIsInternal() ?: false ) continue;
+            query &= " " & ( m.getBody() ?: "" );
+            break; // first public message is enough for context
+        }
+        return suggestForText(
+            text   : query,
+            viewer : arguments.viewer,
+            limit  : arguments.limit
+        );
+    }
+
+    /**
+     * Top-N articles for an arbitrary text context. The portal's
+     * contact form will use this in Phase 4f to surface "is this
+     * already answered?" hints before the customer submits.
+     */
+    public array function suggestForText(
+        required string text,
+        required struct viewer,
+        numeric limit = 5
+    ){
+        if ( !len( trim( arguments.text ) ) ) return [];
+
+        if ( capability.isFeatureEnabled( variables.FEATURE_KEY ) ) {
+            var result = middleware.embed(
+                feature : variables.FEATURE_KEY,
+                text    : arguments.text,
+                options : { "model" : capability.getEmbeddingModel() }
+            );
+            if ( result.outcome == "ok" && result.vector.len() ) {
+                var hits = kbService.searchByEmbedding(
+                    viewer : arguments.viewer,
+                    vector : result.vector,
+                    limit  : arguments.limit
+                );
+                return formatSemanticHits( hits );
+            }
+            // Provider failure or empty vector: silently fall back so
+            // the agent always sees something useful.
+        }
+
+        return keywordFallback( arguments.text, arguments.viewer, arguments.limit );
+    }
+
+    private array function formatSemanticHits( required array hits ){
+        var out = [];
+        for ( var h in arguments.hits ) {
+            out.append( {
+                "id"      : h.id,
+                "slug"    : h.slug,
+                "title"   : h.title,
+                "snippet" : snippet( h.body ?: "" ),
+                "source"  : "semantic"
+            } );
+        }
+        return out;
+    }
+
+    private array function keywordFallback( required string text, required struct viewer, required numeric limit ){
+        // plainto_tsquery ANDs every token; for "is this already
+        // answered?" suggestions we want OR-based recall instead.
+        // Try each significant token as a separate search and merge
+        // the top results, preserving first-seen order so the most
+        // relevant query terms surface first.
+        var tokens = significantTokens( arguments.text );
+        var seen   = {};
+        var out    = [];
+        for ( var tk in tokens ) {
+            if ( out.len() >= arguments.limit ) break;
+            var hits = kbService.listVisibleArticles(
+                viewer : arguments.viewer,
+                search : tk
+            );
+            for ( var a in hits ) {
+                if ( out.len() >= arguments.limit ) break;
+                if ( structKeyExists( seen, a.getId() ) ) continue;
+                seen[ a.getId() ] = true;
+                out.append( {
+                    "id"      : a.getId(),
+                    "slug"    : a.getSlug(),
+                    "title"   : a.getTitle(),
+                    "snippet" : snippet( a.getBody() ?: "" ),
+                    "source"  : "keyword"
+                } );
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Pull words from the query that are worth searching on. Drops
+     * a small stopword list and anything under three characters so
+     * the loop above does not query for "is", "a", "to", etc.
+     */
+    private array function significantTokens( required string text ){
+        var stopwords = "a,an,and,as,at,be,but,for,from,have,i,if,in,is,it,my,not,of,on,or,that,the,this,to,was,we,what,when,why,will,with,you,your";
+        var stops = listToArray( stopwords );
+        var words = listToArray( reReplace( lCase( arguments.text ), "[^a-z0-9\s]+", " ", "all" ), " ", false );
+        var seen = {};
+        var out = [];
+        for ( var w in words ) {
+            w = trim( w );
+            if ( len( w ) < 3 ) continue;
+            if ( arrayFindNoCase( stops, w ) ) continue;
+            if ( structKeyExists( seen, w ) ) continue;
+            seen[ w ] = true;
+            out.append( w );
+            if ( out.len() >= 6 ) break;
+        }
+        return out;
+    }
+
+    private string function snippet( required string body ){
+        var t = trim( arguments.body );
+        return len( t ) > 180 ? left( t, 180 ) & "..." : t;
+    }
+
+}

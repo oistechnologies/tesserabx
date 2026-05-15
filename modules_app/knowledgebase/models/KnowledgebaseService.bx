@@ -13,8 +13,9 @@
  */
 class singleton=true {
 
-    property name="wirebox"      inject="wirebox";
-    property name="auditService" inject="AuditService@audit";
+    property name="wirebox"            inject="wirebox";
+    property name="auditService"       inject="AuditService@audit";
+    property name="interceptorService" inject="coldbox:interceptorService";
 
     // ------------------ Categories ------------------
 
@@ -124,6 +125,13 @@ class singleton=true {
             actorId        : arguments.agentId,
             metadata       : { "version" : nextVersion, "slug" : a.getSlug(), "visibility" : a.getVisibility() }
         );
+
+        // Cross-module hook: the ai module listens for this and
+        // computes a pgvector embedding so the article shows up in
+        // semantic search and KB-suggestion results. When AI is off,
+        // nothing listens and the publish completes the same way.
+        interceptorService.announce( "onKbArticlePublished", { "article" : a } );
+
         return a;
     }
 
@@ -342,6 +350,113 @@ class singleton=true {
     }
 
     // ---------------- helpers ----------------
+
+    // ------------------ Embeddings (Phase 4e) ------------------
+
+    /**
+     * Persist the pgvector embedding for an article. The vector is
+     * passed as a plain array of numbers; we serialize to pgvector's
+     * `[1,2,3]` text literal and let Postgres cast on the way in.
+     */
+    public void function saveEmbedding( required string articleId, required array vector ){
+        if ( !arguments.vector.len() ) return;
+        // Use cast(... as vector) instead of :v::vector. The JDBC
+        // named-parameter binder reads `::vector` as the start of a
+        // `:vector` parameter and throws "Named parameter not
+        // provided". `cast()` is the same semantic without the
+        // syntax collision.
+        var literal = "[" & arguments.vector.toList( "," ) & "]";
+        queryExecute(
+            "UPDATE kb_articles SET embedding = cast( :v as vector ) WHERE id = :id",
+            { id : arguments.articleId, v : literal }
+        );
+    }
+
+    /**
+     * Top-N visible published articles by cosine similarity to the
+     * supplied embedding. Applies the same visibility filter as
+     * listVisibleArticles. Returns an array of structs:
+     *   [ { id, slug, title, body, visibility, distance }, ... ]
+     * `distance` is 0 (identical) to 2 (opposite); lower is better.
+     */
+    public array function searchByEmbedding(
+        required struct viewer,
+        required array  vector,
+        numeric limit = 5
+    ){
+        if ( !arguments.vector.len() ) return [];
+
+        var literal = "[" & arguments.vector.toList( "," ) & "]";
+        var visClauses = visibilityClauseForViewer( arguments.viewer );
+
+        var sql = "
+            SELECT  a.id, a.slug, a.title, a.body, a.visibility,
+                    ( a.embedding <=> cast( :v as vector ) ) AS distance
+            FROM    kb_articles a
+            WHERE   a.status = 'published'
+            AND     a.embedding IS NOT NULL
+            " & visClauses.sqlFragment & "
+            ORDER BY a.embedding <=> cast( :v as vector )
+            LIMIT   " & int( arguments.limit );
+
+        var params = visClauses.params;
+        params.v = literal;
+
+        var rows = queryExecute( sql, params );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "id"         : rows.id[ i ],
+                "slug"       : rows.slug[ i ],
+                "title"      : rows.title[ i ],
+                "body"       : rows.body[ i ],
+                "visibility" : rows.visibility[ i ],
+                "distance"   : rows.distance[ i ]
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Articles that still need an embedding computed. The ai module's
+     * indexer iterates these to backfill.
+     */
+    public array function listArticlesNeedingEmbedding( numeric limit = 100 ){
+        return wirebox.getInstance( "Article@knowledgebase" )
+            .where( "status", "published" )
+            .whereNull( "embedding" )
+            .orderBy( "updated_at", "desc" )
+            .limit( int( arguments.limit ) )
+            .get();
+    }
+
+    /**
+     * Build the visibility WHERE-fragment used by both
+     * listVisibleArticles and searchByEmbedding so the two stay in
+     * lockstep. Returns { sqlFragment, params }. Agents get
+     * everything; contacts get public + their org's; anonymous
+     * gets public only.
+     */
+    private struct function visibilityClauseForViewer( required struct viewer ){
+        var kind = arguments.viewer.kind ?: "anonymous";
+        if ( kind == "agent" ) {
+            return { "sqlFragment" : "", "params" : {} };
+        }
+        if ( kind == "contact" ) {
+            var orgId = arguments.viewer.contactOrganizationId ?: "";
+            if ( !len( orgId ) ) {
+                return { "sqlFragment" : "AND a.visibility = 'public'", "params" : {} };
+            }
+            return {
+                "sqlFragment" :
+                    "AND ( a.visibility = 'public'"
+                    & "    OR ( a.visibility = 'organization'"
+                    & "         AND a.id IN ( SELECT article_id FROM kb_article_organizations WHERE organization_id = :orgId ) ) )",
+                "params" : { "orgId" : orgId }
+            };
+        }
+        return { "sqlFragment" : "AND a.visibility = 'public'", "params" : {} };
+    }
 
     private string function newId(){
         return createObject( "java", "java.util.UUID" ).randomUUID().toString();

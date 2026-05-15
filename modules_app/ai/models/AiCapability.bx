@@ -26,6 +26,8 @@ class singleton=true {
     property name="aiBaseUrlRaw"        inject="coldbox:setting:aiBaseUrl";
     property name="aiTimeoutSecondsRaw" inject="coldbox:setting:aiTimeoutSeconds";
     property name="aiPiiRedactionRaw"   inject="coldbox:setting:aiPiiRedaction";
+    property name="aiEmbeddingModelRaw" inject="coldbox:setting:aiEmbeddingModel";
+    property name="aiEmbeddingDimRaw"   inject="coldbox:setting:aiEmbeddingDim";
 
     public boolean function isEnabled(){
         // tests/Application.bx flags the test app's own application
@@ -60,6 +62,11 @@ class singleton=true {
     }
     public boolean function isPiiRedactionEnabled(){
         return asBool( variables.aiPiiRedactionRaw );
+    }
+    public string function getEmbeddingModel() { return toString( variables.aiEmbeddingModelRaw ?: "" ); }
+    public numeric function getEmbeddingDim(){
+        var raw = variables.aiEmbeddingDimRaw ?: 1536;
+        return isNumeric( raw ) ? int( raw ) : 1536;
     }
 
     /**

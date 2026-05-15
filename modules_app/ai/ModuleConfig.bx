@@ -22,7 +22,7 @@ class {
     this.modelNamespace     = "ai";
     this.cfmapping          = "tesserabx.modules.ai";
     this.autoMapModels      = false;
-    this.dependencies       = [ "contacts", "audit", "tickets" ];
+    this.dependencies       = [ "contacts", "audit", "tickets", "knowledgebase" ];
 
     function configure(){
         variables.settings = {};
@@ -32,6 +32,11 @@ class {
             {
                 class      : "#moduleMapping#.interceptors.TriageInterceptor",
                 name       : "TriageInterceptor",
+                properties : {}
+            },
+            {
+                class      : "#moduleMapping#.interceptors.KbIndexingInterceptor",
+                name       : "KbIndexingInterceptor",
                 properties : {}
             }
         ];
@@ -59,6 +64,12 @@ class {
               .asSingleton();
         binder.map( "SummarizationService@ai" )
               .to( "#moduleMapping#.models.SummarizationService" )
+              .asSingleton();
+        binder.map( "KbIndexingService@ai" )
+              .to( "#moduleMapping#.models.KbIndexingService" )
+              .asSingleton();
+        binder.map( "KbSuggestionService@ai" )
+              .to( "#moduleMapping#.models.KbSuggestionService" )
               .asSingleton();
     }
 

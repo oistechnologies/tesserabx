@@ -27,7 +27,9 @@ class {
     function configure(){
         variables.settings              = {};
         variables.routes                = [];
-        variables.interceptorSettings   = { customInterceptionPoints : [] };
+        variables.interceptorSettings   = { customInterceptionPoints : [
+            "onKbArticlePublished"
+        ] };
         variables.interceptors          = [];
     }
 

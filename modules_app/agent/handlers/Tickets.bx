@@ -19,6 +19,7 @@ class {
     property name="aiCapability"          inject="AiCapability@ai";
     property name="suggestedReplyService" inject="SuggestedReplyService@ai";
     property name="summarizationService"  inject="SummarizationService@ai";
+    property name="kbSuggestionService"   inject="KbSuggestionService@ai";
     property name="messagebox"            inject="messagebox@cbmessagebox";
     property name="auth"                  inject="AuthenticationService@cbauth";
 
@@ -444,6 +445,17 @@ class {
         arguments.prc.aiSummary = !isNull( persistedSummary ) ? persistedSummary : {};
 
         arguments.prc.tags = ticketsService.listTagsForTicket( arguments.ticket.getId() );
+
+        // Related KB articles. Always populated; the service routes
+        // through semantic search when AI is on and falls back to
+        // keyword search otherwise, so the card is useful in both
+        // modes (per the build plan's "fully functional with AI off"
+        // requirement).
+        arguments.prc.relatedArticles = kbSuggestionService.suggestForTicket(
+            ticketId : arguments.ticket.getId(),
+            viewer   : { "kind" : "agent" },
+            limit    : 5
+        );
     }
 
     private string function currentAgentId(){

@@ -1,0 +1,39 @@
+/**
+ * KbIndexingInterceptor: computes the pgvector embedding for a KB
+ * article right after it is published.
+ *
+ * Listens on the kb module's onKbArticlePublished announce. Wrapped
+ * in try/catch so a slow or failing embedding provider cannot break
+ * publishArticle; the worst case is an article that does not yet
+ * appear in semantic search results until the next reindex.
+ *
+ * Resolves KbIndexingService through wirebox at invocation time
+ * rather than property injection, matching the pattern used by the
+ * other interceptors in this module.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onKbArticlePublished( event, interceptData, rc, prc ){
+        try {
+            var capability = wirebox.getInstance( "AiCapability@ai" );
+            if ( !capability.isEnabled() ) return;
+
+            if ( !structKeyExists( arguments.interceptData, "article" ) || isNull( arguments.interceptData.article ) ) return;
+            var article = arguments.interceptData.article;
+
+            wirebox.getInstance( "KbIndexingService@ai" )
+                .indexArticle( article.getId() );
+        } catch ( any e ) {
+            writeLog(
+                text : "KbIndexingInterceptor onKbArticlePublished failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

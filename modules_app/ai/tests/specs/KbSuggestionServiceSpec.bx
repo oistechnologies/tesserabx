@@ -1,0 +1,78 @@
+/**
+ * KbSuggestionServiceSpec: verifies the keyword-fallback path that
+ * runs when AI is off. The semantic-search path is exercised by
+ * dev / staging with a real provider; the fallback is the contract
+ * we care about most because it must work for everyone regardless
+ * of AI configuration.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc       = getController().getWireBox().getInstance( "KbSuggestionService@ai" );
+        variables.kb        = getController().getWireBox().getInstance( "KnowledgebaseService@knowledgebase" );
+    }
+
+    function run(){
+        describe( "KbSuggestionService", function(){
+
+            it( "returns empty when text is blank", function(){
+                var hits = variables.svc.suggestForText(
+                    text   : "",
+                    viewer : { "kind" : "agent" }
+                );
+                expect( hits ).toBeArray();
+                expect( hits.len() ).toBe( 0 );
+            } );
+
+            it( "falls back to keyword search when AI is off and returns matching articles", function(){
+                // Hyphen-free, alphanumeric marker so Postgres FTS
+                // tokenizes it as a single distinct word. Hyphenated
+                // tokens get split by `to_tsvector('english', ...)`
+                // and the resulting prefix matches against stopwords
+                // were producing zero hits.
+                var marker = "kbsugg" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var article = variables.kb.createArticle( {
+                    "title"      : marker & " Password reset guide",
+                    "body"       : "How to reset your password through the portal.",
+                    "visibility" : "public"
+                } );
+                variables.kb.publishArticle( article.getId() );
+
+                // plainto_tsquery ANDs every token together, so the
+                // search text must use words that appear in the
+                // indexed title/body. The marker is the only word
+                // unique to this spec's article; we include it plus
+                // "password reset" so the query is realistic without
+                // dragging in stopwords that the article does not
+                // mention.
+                var hits = variables.svc.suggestForText(
+                    text   : marker & " password reset",
+                    viewer : { "kind" : "agent" },
+                    limit  : 5
+                );
+                var ids = [];
+                for ( var h in hits ) ids.append( h.id );
+                expect( ids ).toInclude( article.getId() );
+                // With AI off (the test-mode flag forces it off) we
+                // should be on the keyword path.
+                if ( hits.len() ) {
+                    expect( hits[ 1 ].source ).toBe( "keyword" );
+                }
+
+                cleanup( article.getId() );
+            } );
+
+        } );
+    }
+
+    private void function cleanup( required string id ){
+        queryExecute( "DELETE FROM kb_article_feedback   WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_article_versions   WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_article_organizations WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events          WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_articles           WHERE id         = :id", { id : arguments.id } );
+    }
+
+}

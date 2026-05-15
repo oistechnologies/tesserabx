@@ -199,6 +199,95 @@ class singleton=true {
     }
 
     /**
+     * Generate an embedding vector for `text`.
+     *
+     * Returns:
+     *   {
+     *     outcome   : "ok" | "disabled" | "redacted_only" | "error",
+     *     vector    : array<float>      // empty unless ok
+     *     dimension : numeric,
+     *     latencyMs : numeric,
+     *     error     : string
+     *   }
+     *
+     * Goes through the same observability surface as complete():
+     * one row in ai_interactions per call, PII redaction before the
+     * payload leaves the process, and a "disabled" short-circuit
+     * when the capability flag is off.
+     */
+    public struct function embed(
+        required string feature,
+        required string text,
+        struct options = {}
+    ){
+        var startMs = getTickCount();
+        var empty   = { "outcome" : "disabled", "vector" : [], "dimension" : 0, "latencyMs" : 0, "error" : "" };
+
+        if ( !capability.isEnabled() ) {
+            recordInteraction( feature : arguments.feature, outcome : "disabled", options : arguments.options, latency : 0 );
+            return empty;
+        }
+        var redacted = redactPrompt( arguments.text );
+        if ( !len( trim( redacted ) ) ) {
+            recordInteraction( feature : arguments.feature, outcome : "redacted_only", options : arguments.options, latency : getTickCount() - startMs );
+            empty.outcome = "redacted_only";
+            return empty;
+        }
+
+        var hash = hash( redacted, "SHA-256" );
+        var modelToUse = arguments.options.model ?: capability.getEmbeddingModel();
+        var providerOptions = {
+            "provider"     : capability.getProvider(),
+            "apiKey"       : capability.getApiKey(),
+            "timeout"      : capability.getTimeoutSeconds(),
+            "returnFormat" : "embeddings"
+        };
+        if ( len( capability.getBaseUrl() ) ) providerOptions[ "baseUrl" ] = capability.getBaseUrl();
+
+        try {
+            var raw = aiEmbed( redacted, { "model" : modelToUse }, providerOptions );
+            // returnFormat "embeddings" returns an array of vectors;
+            // for a single-input call there is exactly one entry.
+            var vector = ( isArray( raw ) && raw.len() ) ? raw[ 1 ] : raw;
+            if ( !isArray( vector ) ) vector = [];
+
+            var latency = getTickCount() - startMs;
+            recordInteraction(
+                feature    : arguments.feature,
+                outcome    : "ok",
+                options    : arguments.options,
+                latency    : latency,
+                promptHash : hash,
+                tokensIn   : len( redacted )
+            );
+            return {
+                "outcome"   : "ok",
+                "vector"    : vector,
+                "dimension" : vector.len(),
+                "latencyMs" : latency,
+                "error"     : ""
+            };
+        } catch ( any e ) {
+            var latency = getTickCount() - startMs;
+            recordInteraction(
+                feature      : arguments.feature,
+                outcome      : "error",
+                options      : arguments.options,
+                latency      : latency,
+                promptHash   : hash,
+                errorMessage : e.message
+            );
+            return {
+                "outcome"   : "error",
+                "vector"    : [],
+                "dimension" : 0,
+                "latencyMs" : latency,
+                "error"     : e.message
+            };
+        }
+    }
+
+    /**
      * Pull the first valid JSON object out of a model response.
      *
      * Real-world model output, especially from "thinking" providers,

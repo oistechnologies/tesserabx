@@ -1,0 +1,71 @@
+/**
+ * KbIndexingService: embeds KB articles and stores the resulting
+ * vectors on the article row.
+ *
+ * Two entry points:
+ *   - indexArticle(articleId): embed and store one article (called
+ *     by KbIndexingInterceptor on publish)
+ *   - backfillMissing(limit): walk articles with NULL embeddings and
+ *     index them. Useful for one-shot migrations and Phase 5's admin
+ *     "Reindex KB" button.
+ *
+ * No-ops when the AI capability is off.
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="kbService"      inject="KnowledgebaseService@knowledgebase";
+    property name="wirebox"        inject="wirebox";
+
+    variables.FEATURE_KEY = "kb-index";
+
+    public boolean function indexArticle( required string articleId ){
+        if ( !capability.isEnabled() ) return false;
+        var article = kbService.getArticleById( arguments.articleId );
+        if ( isNull( article ) ) return false;
+        var text = buildEmbeddingText( article );
+        if ( !len( trim( text ) ) ) return false;
+
+        var result = middleware.embed(
+            feature : variables.FEATURE_KEY,
+            text    : text,
+            options : { "model" : capability.getEmbeddingModel() }
+        );
+        if ( result.outcome != "ok" || !result.vector.len() ) return false;
+        kbService.saveEmbedding( arguments.articleId, result.vector );
+        return true;
+    }
+
+    /**
+     * Backfill embeddings for published articles missing one. Returns
+     * a struct describing what happened so a caller (CLI, admin UI)
+     * can report progress.
+     */
+    public struct function backfillMissing( numeric limit = 100 ){
+        var indexed = 0;
+        var failed  = 0;
+        if ( !capability.isEnabled() ) {
+            return { "indexed" : 0, "failed" : 0, "skipped" : "disabled" };
+        }
+        var pending = kbService.listArticlesNeedingEmbedding( arguments.limit );
+        for ( var a in pending ) {
+            if ( indexArticle( a.getId() ) ) indexed++;
+            else                              failed++;
+        }
+        return { "indexed" : indexed, "failed" : failed, "skipped" : "" };
+    }
+
+    /**
+     * Combine the article's title and body into the text we embed.
+     * Title is repeated up front so it carries extra weight in the
+     * resulting vector; pgvector cosine similarity is sensitive to
+     * how the embedded text is shaped.
+     */
+    private string function buildEmbeddingText( required any article ){
+        var title = arguments.article.getTitle() ?: "";
+        var body  = arguments.article.getBody() ?: "";
+        return trim( title & char( 10 ) & title & char( 10 ) & body );
+    }
+
+}
