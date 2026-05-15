@@ -50,6 +50,9 @@ class {
         binder.map( "RateLimiter@core" )
               .to( "#moduleMapping#.models.RateLimiter" )
               .asSingleton();
+        binder.map( "BackupService@core" )
+              .to( "#moduleMapping#.models.BackupService" )
+              .asSingleton();
     }
 
     function onUnload(){}

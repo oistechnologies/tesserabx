@@ -1,0 +1,131 @@
+/**
+ * AutomationDedupSpec: Phase 3e dedup behavior for the recurring
+ * ticket.escalation trigger.
+ *
+ * Verifies that the same rule fires at most once per (rule, ticket)
+ * for the escalation trigger, and that one-shot triggers
+ * (ticket.created / ticket.status_changed) are not affected.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.automation = getController().getWireBox().getInstance( "AutomationService@automation" );
+        variables.tickets    = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts   = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "AutomationService - escalation dedup", function(){
+
+            it( "fires a ticket.escalation rule only once per (rule, ticket)", function(){
+                var rule = variables.automation.createRule( {
+                    name       : "dedup-spec-once-" & createUUID(),
+                    trigger    : "ticket.escalation",
+                    conditions : [],
+                    actions    : [ { type : "setPriority", value : "urgent" } ]
+                } );
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "dedup once",
+                    priority           : "normal"
+                } );
+                variables.automation.evaluateForTicket( "ticket.escalation", t );
+                var afterFirst = variables.tickets.getTicket( t.getId() );
+                expect( afterFirst.getPriority() ).toBe( "urgent" );
+
+                // Reset the priority, fire again. The dedup table now
+                // has a row for (rule, ticket); the action should NOT
+                // re-apply.
+                queryExecute( "UPDATE tickets SET priority = 'normal' WHERE id = :id", { id : t.getId() } );
+                variables.automation.evaluateForTicket( "ticket.escalation", variables.tickets.getTicket( t.getId() ) );
+                var afterSecond = variables.tickets.getTicket( t.getId() );
+                expect( afterSecond.getPriority() ).toBe( "normal" );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                variables.automation.deleteRule( rule.getId() );
+            } );
+
+            it( "clearRuleFires lets a rule re-fire against the same ticket", function(){
+                var rule = variables.automation.createRule( {
+                    name       : "dedup-spec-clear-" & createUUID(),
+                    trigger    : "ticket.escalation",
+                    conditions : [],
+                    actions    : [ { type : "setPriority", value : "urgent" } ]
+                } );
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "dedup clear",
+                    priority           : "normal"
+                } );
+                variables.automation.evaluateForTicket( "ticket.escalation", t );
+                queryExecute( "UPDATE tickets SET priority = 'normal' WHERE id = :id", { id : t.getId() } );
+                variables.automation.clearRuleFires( rule.getId() );
+                variables.automation.evaluateForTicket( "ticket.escalation", variables.tickets.getTicket( t.getId() ) );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "urgent" );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                variables.automation.deleteRule( rule.getId() );
+            } );
+
+            it( "deleting a rule purges its fire history", function(){
+                var rule = variables.automation.createRule( {
+                    name       : "dedup-spec-delete-" & createUUID(),
+                    trigger    : "ticket.escalation",
+                    conditions : [],
+                    actions    : [ { type : "setPriority", value : "urgent" } ]
+                } );
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( { requesterContactId : f.contact.getId(), subject : "del" } );
+                variables.automation.evaluateForTicket( "ticket.escalation", t );
+
+                variables.automation.deleteRule( rule.getId() );
+                var rows = queryExecute(
+                    "SELECT COUNT(*) AS c FROM automation_rule_fires WHERE rule_id = :rid",
+                    { rid : rule.getId() }
+                );
+                expect( rows.c[ 1 ] ).toBe( 0 );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+            } );
+
+        } );
+    }
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Dedup Spec Org " & createUUID(),
+            slug : "dedup-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "dedup-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        return { org : org, contact : contact };
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM automation_rule_fires WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+    }
+
+}

@@ -44,6 +44,78 @@ class extends="coldbox.system.web.tasks.ColdBoxScheduler" {
                     type : "error"
                 );
             } );
+
+        // Materialize recurring tickets that are due. Cheap query (one
+        // round-trip) and the per-template runner is idempotent: the
+        // template's next_run_at advances by intervalMinutes on every
+        // successful materialization so the same template never fires
+        // twice in the same window.
+        task( "automation:recurring-tickets" )
+            .call( () => {
+                var recurring = getWireBox().getInstance( "RecurringTicketService@automation" );
+                for ( var tmpl in recurring.listDueTemplates() ) {
+                    try {
+                        recurring.runTemplate( tmpl.getId() );
+                    } catch ( any e ) {
+                        writeLog(
+                            text : "automation:recurring-tickets template [#tmpl.getId()#] failed: " & e.message,
+                            log  : "tesserabx-scheduler",
+                            type : "error"
+                        );
+                    }
+                }
+            } )
+            .every( 60, "seconds" );
+
+        // SLA breach + escalation rule scan. Fires the
+        // ticket.escalation trigger on every active (not resolved /
+        // closed / paused) ticket so any matching time-based rules
+        // run. The rules engine dedups by (rule, ticket) so a rule
+        // does not re-fire on every scan.
+        task( "sla:escalation-scan" )
+            .call( () => {
+                var tickets = getWireBox().getInstance( "TicketsService@tickets" );
+                var automation = getWireBox().getInstance( "AutomationService@automation" );
+                var active = tickets.findActiveTicketsForScan();
+                for ( var t in active ) {
+                    try {
+                        automation.evaluateForTicket( "ticket.escalation", t );
+                    } catch ( any e ) {
+                        writeLog(
+                            text : "sla:escalation-scan ticket [#t.getId()#] failed: " & e.message,
+                            log  : "tesserabx-scheduler",
+                            type : "error"
+                        );
+                    }
+                }
+            } )
+            .every( 5, "minutes" );
+
+        // Nightly database backup. The BackupService catches its own
+        // exceptions and reports through the result struct so we log
+        // either way; this onFailure is a last-resort safety net.
+        task( "core:db-backup" )
+            .call( () => {
+                var backup = getWireBox().getInstance( "BackupService@core" );
+                var result = backup.runBackup();
+                if ( result.success ) {
+                    writeLog(
+                        text : "core:db-backup wrote " & result.bytes & " bytes to " & result.path,
+                        log  : "tesserabx-scheduler"
+                    );
+                    var pruned = backup.pruneOldBackups();
+                    if ( pruned > 0 ) {
+                        writeLog( text : "core:db-backup pruned " & pruned & " old dumps", log : "tesserabx-scheduler" );
+                    }
+                } else {
+                    writeLog(
+                        text : "core:db-backup failed: " & result.error,
+                        log  : "tesserabx-scheduler",
+                        type : "error"
+                    );
+                }
+            } )
+            .dailyAt( "02:00" );
     }
 
     function onStartup(){

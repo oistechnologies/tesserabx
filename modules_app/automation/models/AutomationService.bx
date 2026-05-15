@@ -103,6 +103,7 @@ class singleton=true {
     }
 
     public void function deleteRule( required string id ){
+        queryExecute( "DELETE FROM automation_rule_fires WHERE rule_id = :id", { id : arguments.id } );
         queryExecute( "DELETE FROM automation_rules WHERE id = :id", { id : arguments.id } );
     }
 
@@ -122,14 +123,50 @@ class singleton=true {
         if ( !isNull( variables.reentryGuard.get() ) && variables.reentryGuard.get() == true ) {
             return [ { "skipped" : "reentry" } ];
         }
+        var dedup = isRecurringTrigger( arguments.trigger );
         var fired = [];
         var rules = listRulesForTrigger( arguments.trigger );
         for ( var rule in rules ) {
             if ( !matches( rule, arguments.ticket, arguments.eventData ) ) continue;
+            if ( dedup && hasFiredAgainstTicket( rule.getId(), arguments.ticket.getId() ) ) {
+                fired.append( { "ruleId" : rule.getId(), "ruleName" : rule.getName(), "applied" : [], "skipped" : "already-fired" } );
+                continue;
+            }
             var applied = executeActions( rule, arguments.ticket );
+            if ( dedup ) recordFire( rule.getId(), arguments.ticket.getId() );
             fired.append( { "ruleId" : rule.getId(), "ruleName" : rule.getName(), "applied" : applied } );
         }
         return fired;
+    }
+
+    private boolean function isRecurringTrigger( required string trigger ){
+        return arguments.trigger == "ticket.escalation";
+    }
+
+    private boolean function hasFiredAgainstTicket( required string ruleId, required string ticketId ){
+        var row = queryExecute(
+            "SELECT 1 AS hit FROM automation_rule_fires WHERE rule_id = :rid AND ticket_id = :tid LIMIT 1",
+            { rid : arguments.ruleId, tid : arguments.ticketId }
+        );
+        return row.recordCount > 0;
+    }
+
+    private void function recordFire( required string ruleId, required string ticketId ){
+        queryExecute(
+            "INSERT INTO automation_rule_fires ( rule_id, ticket_id, fired_at )
+             VALUES ( :rid, :tid, NOW() )
+             ON CONFLICT ( rule_id, ticket_id ) DO NOTHING",
+            { rid : arguments.ruleId, tid : arguments.ticketId }
+        );
+    }
+
+    /**
+     * Reset a rule's fire history. Useful when an admin tweaks the
+     * rule and wants it to evaluate against tickets it had already
+     * acted on.
+     */
+    public void function clearRuleFires( required string ruleId ){
+        queryExecute( "DELETE FROM automation_rule_fires WHERE rule_id = :rid", { rid : arguments.ruleId } );
     }
 
     /**

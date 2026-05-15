@@ -463,7 +463,7 @@ class singleton=true {
 
         var ext   = listLast( filename, "." );
         var path  = "tickets/" & t.getId() & "/" & newId() & "." & ext;
-        cbfs.get().create(
+        cbfs.defaultDisk().create(
             path     = path,
             contents = fileRead( arguments.data.sourcePath, "binary" ),
             overwrite = true
@@ -510,7 +510,7 @@ class singleton=true {
         if ( isNull( a ) ) {
             throw( type="TicketsService.UnknownAttachment", message="No attachment with id [#arguments.attachmentId#]." );
         }
-        return cbfs.get().get( a.getCbfsPath() );
+        return cbfs.defaultDisk().get( a.getCbfsPath() );
     }
 
     private void function validateUpload( required string filename, required numeric sizeBytes ){
@@ -713,6 +713,21 @@ class singleton=true {
      * within `windowMinutes` from now but has not yet passed. Used by
      * the Phase 3e scheduler to emit warnings.
      */
+    /**
+     * Tickets the scheduler should evaluate for time-based escalation
+     * rules: active (not resolved / closed) and not currently paused.
+     * Bypasses the tenant scope; the scheduler runs as a provider-
+     * side process across all organizations.
+     */
+    public array function findActiveTicketsForScan(){
+        return wirebox.getInstance( "Ticket@tickets" )
+            .withoutGlobalScope()
+            .whereNotIn( "status", [ "resolved", "closed" ] )
+            .whereNull( "sla_paused_at" )
+            .orderBy( "created_at" )
+            .get();
+    }
+
     public array function findApproachingBreachTickets( required numeric windowMinutes ){
         // Bake the interval into a local SQL fragment up front. qb's
         // nested closures don't inherit the outer `arguments` scope, so

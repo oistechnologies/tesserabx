@@ -104,7 +104,7 @@ class {
                 defaultDisk : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" ),
                 disks : {
                     "local" : {
-                        provider   : "Local@cbfs",
+                        provider   : "LocalProvider@cbfs",
                         properties : {
                             path       : expandPath( "/storage" ),
                             autoExpand : true,
@@ -112,7 +112,7 @@ class {
                         }
                     },
                     "s3" : {
-                        provider   : "S3@cbfs",
+                        provider   : "S3Provider@cbfs",
                         properties : {
                             accessKey  : getSystemSetting( "CBFS_S3_ACCESS_KEY", "" ),
                             secretKey  : getSystemSetting( "CBFS_S3_SECRET_KEY", "" ),

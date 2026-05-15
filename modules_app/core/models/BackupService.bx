@@ -1,0 +1,140 @@
+/**
+ * BackupService: nightly database dump task.
+ *
+ * Runs `pg_dump` against the configured Postgres database, gzips the
+ * result, writes it to the configured CBFS provider under a dated
+ * path (`backups/YYYY-MM-DD-HHmmss.dump.gz`), and prunes dumps older
+ * than the configured retention.
+ *
+ * The PostgreSQL client tools must be present in the container image
+ * (Phase 0 deliverable). The connection target comes from the same
+ * env vars Application.bx pins for the JDBC datasource so the dev
+ * stack and production use the same configuration.
+ *
+ * Failures during pg_dump or upload do not throw to the scheduler;
+ * we log and continue so an unhealthy backup attempt does not knock
+ * the scheduler container into a crash loop. The scheduler task
+ * itself catches as a backstop.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="cbfs"    inject="DiskService@cbfs";
+
+    /**
+     * Run one backup. Returns a struct describing what happened:
+     *   { success: bool, path: string, bytes: number, error: string }
+     */
+    public struct function runBackup(){
+        var stamp     = dateTimeFormat( now(), "yyyy-mm-dd-HHmmss" );
+        var localTmp  = "/tmp/tesserabx-backup-" & stamp & ".dump.gz";
+        var cbfsPath  = "backups/" & stamp & ".dump.gz";
+        var result    = { success : false, path : "", bytes : 0, error : "" };
+
+        try {
+            var dumpResult = runPgDump( localTmp );
+            if ( !dumpResult.success ) {
+                result.error = "pg_dump failed: " & dumpResult.error;
+                cleanupLocal( localTmp );
+                return result;
+            }
+
+            var fileInfo = getFileInfo( localTmp );
+            var bytes    = fileInfo.size ?: 0;
+            // Read the gzip into a byte[] and hand off to CBFS. A
+            // streaming upload would be friendlier for huge dumps; the
+            // current size cap on a TesseraBX dev / single-tenant prod
+            // is well within heap budget. Revisit if dumps grow into
+            // multi-gigabyte territory.
+            cbfs.defaultDisk().create(
+                path      = cbfsPath,
+                contents  = fileReadBinary( localTmp ),
+                overwrite = true
+            );
+
+            cleanupLocal( localTmp );
+            result.success = true;
+            result.path    = cbfsPath;
+            result.bytes   = bytes;
+            return result;
+        } catch ( any e ) {
+            result.error = e.message;
+            cleanupLocal( localTmp );
+            return result;
+        }
+    }
+
+    /**
+     * Delete CBFS backup files older than `retentionDays` (BACKUP_RETENTION_DAYS
+     * by default 7). Returns the count of files removed.
+     */
+    public numeric function pruneOldBackups(){
+        var retentionDays = int( getSystemSetting( "BACKUP_RETENTION_DAYS", 7 ) );
+        var cutoff        = dateAdd( "d", -retentionDays, now() );
+        var disk          = cbfs.defaultDisk();
+        if ( !disk.directoryExists( "backups" ) ) return 0;
+
+        var removed = 0;
+        var files   = disk.allContents( directory = "backups", filter = "*.dump.gz" );
+        for ( var f in files ) {
+            try {
+                var info = disk.info( f );
+                var modified = info.lastModified ?: info.dateLastModified ?: now();
+                if ( dateCompare( modified, cutoff ) < 0 ) {
+                    disk.delete( f );
+                    removed++;
+                }
+            } catch ( any e ) {
+                writeLog(
+                    text : "BackupService.pruneOldBackups could not inspect [#f#]: " & e.message,
+                    log  : "tesserabx-scheduler",
+                    type : "warning"
+                );
+            }
+        }
+        return removed;
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function runPgDump( required string outputPath ){
+        var host = getSystemSetting( "DB_HOST", "db" );
+        var port = getSystemSetting( "DB_PORT", "5432" );
+        var name = getSystemSetting( "DB_NAME", "tesserabx" );
+        var user = getSystemSetting( "DB_USER", "tesserabx" );
+        var pass = getSystemSetting( "DB_PASSWORD", "tesserabx" );
+
+        var cmd = [
+            "/bin/sh", "-c",
+            "PGPASSWORD='" & replace( pass, "'", "'\\''", "all" ) & "' "
+            & "pg_dump --no-owner --no-acl"
+            & " -h " & host
+            & " -p " & port
+            & " -U " & user
+            & " -d " & name
+            & " | gzip -9 > " & arguments.outputPath
+        ];
+
+        try {
+            var rt = createObject( "java", "java.lang.Runtime" ).getRuntime();
+            var proc = rt.exec( cmd );
+            var ok = proc.waitFor();
+            if ( ok != 0 ) {
+                var errStream = proc.getErrorStream();
+                var scanner   = createObject( "java", "java.util.Scanner" ).init( errStream ).useDelimiter( "\\A" );
+                var stderr    = scanner.hasNext() ? scanner.next() : "(no stderr)";
+                return { success : false, error : "pg_dump exit code " & ok & ": " & stderr };
+            }
+            return { success : true };
+        } catch ( any e ) {
+            return { success : false, error : e.message };
+        }
+    }
+
+    private void function cleanupLocal( required string path ){
+        try {
+            if ( fileExists( arguments.path ) ) fileDelete( arguments.path );
+        } catch ( any e ) { /* best-effort */ }
+    }
+
+}

@@ -1,0 +1,69 @@
+/**
+ * BackupServiceSpec: end-to-end backup against the local-disk CBFS
+ * provider in dev / CI. Verifies that runBackup produces a non-empty
+ * gzipped dump under backups/ and that pruneOldBackups removes
+ * entries older than the configured retention.
+ *
+ * The spec relies on `pg_dump` being available in PATH (the Phase 0
+ * deliverable). On a fresh dev image without the client tools, the
+ * `produces a dump` spec will fail with a clear "pg_dump exit code"
+ * message; that is the diagnostic, not a flake.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.backup = getController().getWireBox().getInstance( "BackupService@core" );
+        variables.cbfs   = getController().getWireBox().getInstance( "DiskService@cbfs" );
+    }
+
+    function run(){
+        describe( "BackupService", function(){
+
+            it( "produces a gzipped dump under backups/", function(){
+                var result = variables.backup.runBackup();
+                if ( !result.success ) fail( "Backup failed: " & ( result.error ?: "(no error message)" ) );
+                expect( result.path ).toMatch( "^backups/\d{4}-\d{2}-\d{2}-\d{6}\.dump\.gz$" );
+                expect( result.bytes ).toBeGT( 0 );
+                expect( variables.cbfs.defaultDisk().exists( result.path ) ).toBeTrue();
+                variables.cbfs.defaultDisk().delete( result.path );
+            } );
+
+            it( "pruneOldBackups removes dumps older than the configured retention", function(){
+                // Drop a synthetic "ancient" file into the backups dir
+                // via raw filesystem write so the pruner has something
+                // to find. CBFS local-disk roots at /app/storage.
+                var storageRoot = "/app/storage";
+                var dir         = storageRoot & "/backups";
+                if ( !directoryExists( dir ) ) directoryCreate( dir, true );
+                var oldName  = "2020-01-01-000000.dump.gz";
+                var oldPath  = dir & "/" & oldName;
+                fileWrite( oldPath, "old" );
+                // Backdate by 30 days. Java's Instant lets us subtract
+                // without BoxLang coercing the long-arithmetic result
+                // into a DateTime mid-expression.
+                // Use a tiny Java helper to subtract days at the JVM
+                // level. BoxLang's arithmetic on a long coming back from
+                // Instant.toEpochMilli() gets coerced into a DateTime
+                // mid-expression, which fails File.setLastModified(long).
+                // Calendar handles the subtraction with a clean primitive.
+                // Backdate via the shell. BoxLang fights every Java
+                // arithmetic path here: Long return values get coerced
+                // to DateTime, Calendar constant lookups are read as
+                // date-part strings. `touch -d` is reliable and reads
+                // straightforwardly.
+                createObject( "java", "java.lang.Runtime" )
+                    .getRuntime()
+                    .exec( [ "/bin/sh", "-c", "touch -d '30 days ago' '" & oldPath & "'" ] )
+                    .waitFor();
+
+                var pruned = variables.backup.pruneOldBackups();
+                expect( pruned ).toBeGTE( 1 );
+                expect( fileExists( oldPath ) ).toBeFalse();
+            } );
+
+        } );
+    }
+
+}
