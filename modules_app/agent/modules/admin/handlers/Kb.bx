@@ -11,6 +11,8 @@ class {
 
     property name="kb"              inject="KnowledgebaseService@knowledgebase";
     property name="contactsService" inject="ContactsService@contacts";
+    property name="aiCapability"    inject="AiCapability@ai";
+    property name="kbIndexer"       inject="KbIndexingService@ai";
     property name="messagebox"      inject="messagebox@cbmessagebox";
     property name="auth"            inject="AuthenticationService@cbauth";
 
@@ -24,7 +26,32 @@ class {
             viewer = { kind : "agent" }
         );
         prc.organizations = contactsService.listOrganizations();
+        prc.aiEnabled     = aiCapability.isEnabled();
+        prc.missingEmbeddingCount = prc.aiEnabled
+            ? kb.listArticlesNeedingEmbedding( 1000 ).len()
+            : 0;
         event.setView( "kb/index" );
+    }
+
+    /**
+     * Backfill embeddings for every published article missing one.
+     * Synchronous (each article is a single short embedding call),
+     * and admin-gated like every other action under /agent/admin.
+     * No-op when AI is off; the button on the index view hides
+     * itself in that case.
+     */
+    function reindexEmbeddings( event, rc, prc ){
+        if ( !aiCapability.isEnabled() ) {
+            messagebox.warn( "AI is not enabled; nothing to reindex." );
+            relocate( uri = "/agent/admin/kb" );
+            return;
+        }
+        var result = kbIndexer.backfillMissing( 500 );
+        var msg = "Reindex: " & result.indexed & " indexed";
+        if ( result.failed > 0 )  msg &= ", " & result.failed & " failed";
+        if ( len( result.skipped ) ) msg &= " (" & result.skipped & ")";
+        messagebox.info( msg & "." );
+        relocate( uri = "/agent/admin/kb" );
     }
 
     function new( event, rc, prc ){

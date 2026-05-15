@@ -23,6 +23,10 @@ class {
         } );
 
         // Knowledge base authoring (CRUD over Article).
+        // Most-specific routes first so /kb/reindex-embeddings does
+        // not get swallowed by /kb/:id when the handler dispatcher
+        // matches.
+        route( "kb/reindex-embeddings" ).withVerbs( "POST" ).to( "Kb.reindexEmbeddings" );
         route( "kb/new" ).withHandler( "Kb" ).toAction( {
             "GET"  : "new",
             "POST" : "create"

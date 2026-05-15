@@ -1,7 +1,19 @@
 <bx:output>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <p class="mb-0 text-body-secondary">All articles across every visibility tier. Drafts never reach the public surfaces.</p>
-    <a class="btn btn-primary" href="/agent/admin/kb/new"><i class="bi bi-plus-lg"></i> New article</a>
+    <div class="d-flex gap-2">
+        <bx:if ( prc.aiEnabled ?: false )>
+            <form method="post" action="/agent/admin/kb/reindex-embeddings" class="m-0">
+                <button class="btn btn-outline-info" type="submit" title="Generate vector embeddings for any published article that is missing one.">
+                    <i class="bi bi-stars"></i> Reindex embeddings
+                    <bx:if ( prc.missingEmbeddingCount ?: 0 ) gt 0>
+                        <span class="badge text-bg-warning ms-1">#prc.missingEmbeddingCount#</span>
+                    </bx:if>
+                </button>
+            </form>
+        </bx:if>
+        <a class="btn btn-primary" href="/agent/admin/kb/new"><i class="bi bi-plus-lg"></i> New article</a>
+    </div>
 </div>
 
 <div class="card">
