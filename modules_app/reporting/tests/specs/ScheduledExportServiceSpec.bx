@@ -1,0 +1,77 @@
+/**
+ * ScheduledExportServiceSpec: CRUD + end-to-end run.
+ *
+ * The run path writes through CBFS (local disk in dev / CI) and
+ * advances the schedule, so we exercise both the persistence side
+ * and the materialization in a single spec.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc  = getController().getWireBox().getInstance( "ScheduledExportService@reporting" );
+        variables.cbfs = getController().getWireBox().getInstance( "DiskService@cbfs" );
+    }
+
+    function run(){
+        describe( "ScheduledExportService", function(){
+
+            it( "creates and lists exports", function(){
+                var e = variables.svc.createExport( {
+                    name            : "spec-export-" & createUUID(),
+                    filters         : { "status" : "open" },
+                    recipients      : [ "ops@example.com" ],
+                    intervalMinutes : 60
+                } );
+                expect( e.getId() ).notToBeEmpty();
+                expect( e.getName() ).toMatch( "^spec-export-" );
+                var ids = [];
+                for ( var x in variables.svc.listExports() ) ids.append( x.getId() );
+                expect( ids ).toInclude( e.getId() );
+                queryExecute( "DELETE FROM scheduled_exports WHERE id = :id", { id : e.getId() } );
+            } );
+
+            it( "listDueExports returns rows whose next_run_at is in the past", function(){
+                var due = variables.svc.createExport( { name : "spec-due-" & createUUID(), filters : {}, recipients : [] } );
+                queryExecute(
+                    "UPDATE scheduled_exports SET next_run_at = NOW() - INTERVAL '5 minutes' WHERE id = :id",
+                    { id : due.getId() }
+                );
+                var notYet = variables.svc.createExport( { name : "spec-notyet-" & createUUID(), filters : {}, recipients : [] } );
+                queryExecute(
+                    "UPDATE scheduled_exports SET next_run_at = NOW() + INTERVAL '6 hours' WHERE id = :id",
+                    { id : notYet.getId() }
+                );
+                var ids = [];
+                for ( var x in variables.svc.listDueExports() ) ids.append( x.getId() );
+                expect( ids ).toInclude( due.getId() );
+                expect( ids ).notToInclude( notYet.getId() );
+                queryExecute( "DELETE FROM scheduled_exports WHERE id IN ( :a, :b )", { a : due.getId(), b : notYet.getId() } );
+            } );
+
+            it( "runExport writes a CSV to CBFS and advances next_run_at", function(){
+                var e = variables.svc.createExport( {
+                    name            : "spec-run-" & createUUID(),
+                    filters         : {},
+                    recipients      : [],
+                    intervalMinutes : 60
+                } );
+                var result = variables.svc.runExport( e.getId() );
+                expect( result.success ).toBeTrue();
+                expect( result.path ).toMatch( "^exports/" );
+                expect( variables.cbfs.defaultDisk().exists( result.path ) ).toBeTrue();
+
+                var reloaded = variables.svc.getExport( e.getId() );
+                expect( isNull( reloaded.getLastRunAt() ) ).toBeFalse();
+                expect( reloaded.getLastFilePath() ).toBe( result.path );
+                expect( isNull( reloaded.getNextRunAt() ) ).toBeFalse();
+
+                variables.cbfs.defaultDisk().delete( result.path );
+                queryExecute( "DELETE FROM scheduled_exports WHERE id = :id", { id : e.getId() } );
+            } );
+
+        } );
+    }
+
+}

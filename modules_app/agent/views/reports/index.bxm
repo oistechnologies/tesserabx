@@ -1,6 +1,12 @@
 <bx:output>
 <bx:set local.tiles = prc.tiles >
 
+<div class="d-flex justify-content-end mb-3">
+    <a class="btn btn-outline-secondary btn-sm" href="/agent/reports/export/tickets.csv">
+        <i class="bi bi-download"></i> Export tickets (CSV)
+    </a>
+</div>
+
 <bx:set local.slaPct = local.tiles.slaCompliancePct ?: 0 >
 <bx:set local.slaColor = local.tiles.slaTotal gt 0
                        ? ( local.slaPct gte 90 ? "success"

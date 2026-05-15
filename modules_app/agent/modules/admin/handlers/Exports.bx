@@ -1,0 +1,186 @@
+/**
+ * /agent/admin/exports handler.
+ *
+ * CRUD for ScheduledExport rows + "Run now" + "Download last file"
+ * actions. Admin-only via the cbSecurity rule on /agent/admin/*.
+ */
+class {
+
+    property name="exports"    inject="ScheduledExportService@reporting";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Scheduled exports";
+        prc.exports   = exports.listExports();
+        event.setView( "exports/index" );
+    }
+
+    function new( event, rc, prc ){
+        prc.pageTitle = "New scheduled export";
+        prc.formData  = defaultForm();
+        prc.editing   = false;
+        event.setView( "exports/edit" );
+    }
+
+    function edit( event, rc, prc ){
+        var e = exports.getExport( rc.id ?: "" );
+        if ( isNull( e ) ) {
+            messagebox.warn( "That export does not exist." );
+            relocate( uri = "/agent/admin/exports" );
+            return;
+        }
+        prc.pageTitle = "Edit scheduled export";
+        prc.editing   = true;
+        prc.export    = e;
+        var filters    = safeStruct( e.getFiltersJson() ?: "" );
+        var recipients = safeArray(  e.getRecipientsJson() ?: "" );
+        prc.formData = {
+            id              : e.getId(),
+            name            : e.getName() ?: "",
+            intervalMinutes : e.getIntervalMinutes() ?: 1440,
+            isActive        : !!( e.getIsActive() ?: true ),
+            attachFile      : !!( e.getAttachFile() ?: false ),
+            status          : filters.status ?: "",
+            priority        : filters.priority ?: "",
+            organizationId  : filters.organizationId ?: "",
+            since           : filters.since ?: "",
+            recipients      : recipients.toList( char( 10 ) )
+        };
+        event.setView( "exports/edit" );
+    }
+
+    function save( event, rc, prc ){
+        var fields = readForm( rc );
+        if ( !len( trim( fields.name ) ) ) {
+            messagebox.error( "Name is required." );
+            return rc.id.len() ? edit( event, rc, prc ) : new( event, rc, prc );
+        }
+        var data = {
+            name            : fields.name,
+            format          : "csv",
+            filters         : fields.filters,
+            recipients      : fields.recipients,
+            intervalMinutes : fields.intervalMinutes,
+            isActive        : fields.isActive,
+            attachFile      : fields.attachFile
+        };
+        if ( len( rc.id ?: "" ) ) {
+            exports.updateExport( rc.id, data );
+            messagebox.info( "Export updated." );
+        } else {
+            exports.createExport( data );
+            messagebox.info( "Export saved." );
+        }
+        relocate( uri = "/agent/admin/exports" );
+    }
+
+    function runNow( event, rc, prc ){
+        var result = exports.runExport( rc.id ?: "" );
+        if ( result.success ) {
+            messagebox.info( "Export ran: " & result.bytes & " bytes -> " & result.path );
+        } else {
+            messagebox.error( "Export failed: " & ( result.error ?: "unknown" ) );
+        }
+        relocate( uri = "/agent/admin/exports" );
+    }
+
+    function remove( event, rc, prc ){
+        exports.deleteExport( rc.id ?: "" );
+        messagebox.info( "Export deleted." );
+        relocate( uri = "/agent/admin/exports" );
+    }
+
+    /**
+     * Stream the last-generated CSV back to the admin's browser.
+     * Reads through CBFS so the same code path works against the
+     * local disk in dev and Backblaze in production.
+     */
+    function download( event, rc, prc ){
+        var e = exports.getExport( rc.id ?: "" );
+        if ( isNull( e ) || !len( e.getLastFilePath() ?: "" ) ) {
+            messagebox.warn( "No file available for that export yet." );
+            relocate( uri = "/agent/admin/exports" );
+            return;
+        }
+        var bytes = exports.readExportFile( e.getLastFilePath() );
+        event.renderData(
+            type        = "plain",
+            data        = bytes,
+            contentType = "text/csv"
+        );
+        event.setHTTPHeader(
+            name  = "Content-Disposition",
+            value = "attachment; filename=""" & listLast( e.getLastFilePath(), "/" ) & """"
+        );
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function defaultForm(){
+        return {
+            id              : "",
+            name            : "",
+            intervalMinutes : 1440,
+            isActive        : true,
+            attachFile      : false,
+            status          : "",
+            priority        : "",
+            organizationId  : "",
+            since           : "",
+            recipients      : ""
+        };
+    }
+
+    private struct function readForm( required struct rc ){
+        param arguments.rc.name            = "";
+        param arguments.rc.intervalMinutes = 1440;
+        param arguments.rc.isActive        = "";
+        param arguments.rc.attachFile      = "";
+        param arguments.rc.status          = "";
+        param arguments.rc.priority        = "";
+        param arguments.rc.organizationId  = "";
+        param arguments.rc.since           = "";
+        param arguments.rc.recipients      = "";
+
+        var filters = {};
+        if ( len( arguments.rc.status ) )         filters.status         = arguments.rc.status;
+        if ( len( arguments.rc.priority ) )       filters.priority       = arguments.rc.priority;
+        if ( len( arguments.rc.organizationId ) ) filters.organizationId = arguments.rc.organizationId;
+        if ( len( arguments.rc.since ) )          filters.since          = arguments.rc.since;
+
+        var recipients = [];
+        for ( var line in listToArray( arguments.rc.recipients, char( 10 ) & char( 13 ) ) ) {
+            var clean = trim( line );
+            if ( len( clean ) ) recipients.append( clean );
+        }
+        return {
+            name            : trim( arguments.rc.name ),
+            filters         : filters,
+            recipients      : recipients,
+            intervalMinutes : int( arguments.rc.intervalMinutes ),
+            isActive        : isTruthy( arguments.rc.isActive ),
+            attachFile      : isTruthy( arguments.rc.attachFile )
+        };
+    }
+
+    private boolean function isTruthy( required any value ){
+        return ( arguments.value == "true" || arguments.value == "1" || arguments.value == true );
+    }
+
+    private struct function safeStruct( required string raw ){
+        if ( !len( arguments.raw ) ) return {};
+        try { var v = jsonDeserialize( arguments.raw ); return isStruct( v ) ? v : {}; }
+        catch ( any e ) { return {}; }
+    }
+
+    private array function safeArray( required string raw ){
+        if ( !len( arguments.raw ) ) return [];
+        try { var v = jsonDeserialize( arguments.raw ); return isArray( v ) ? v : []; }
+        catch ( any e ) { return []; }
+    }
+
+}

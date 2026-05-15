@@ -27,4 +27,32 @@ class {
         event.setView( "reports/index" );
     }
 
+    /**
+     * Stream a CSV export of tickets matching the same filters the
+     * list page exposes. Synchronous; a cbq job wrapper for large
+     * exports is the documented follow-up in the build plan.
+     */
+    function exportTickets( event, rc, prc ){
+        param rc.status         = "";
+        param rc.priority       = "";
+        param rc.organizationId = "";
+        param rc.since          = "";
+
+        var csv = reportingService.exportTicketsCsv( {
+            status         : rc.status,
+            priority       : rc.priority,
+            organizationId : rc.organizationId,
+            since          : rc.since,
+            limit          : 10000
+        } );
+
+        var stamp = dateTimeFormat( now(), "yyyymmdd-HHnnss" );
+        event.renderData(
+            type        = "plain",
+            data        = csv,
+            contentType = "text/csv"
+        );
+        event.setHTTPHeader( name = "Content-Disposition", value = "attachment; filename=""tickets-" & stamp & ".csv""" );
+    }
+
 }

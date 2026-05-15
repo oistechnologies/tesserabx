@@ -95,6 +95,32 @@ class singleton=true {
             .get();
     }
 
+    /**
+     * Materialize every due template. The scheduler task calls this
+     * directly because BoxLang's arrow-function scope lookup overflows
+     * on `for ( var x in svc.list() )` patterns inlined in a scheduled
+     * task closure; keeping the loop inside the service body sidesteps
+     * the recursion.
+     */
+    public struct function runDueTemplates(){
+        var ran    = 0;
+        var failed = 0;
+        for ( var tmpl in listDueTemplates() ) {
+            try {
+                runTemplate( tmpl.getId() );
+                ran++;
+            } catch ( any e ) {
+                failed++;
+                writeLog(
+                    text : "RecurringTicketService.runDueTemplates [#tmpl.getId()#] failed: " & e.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            }
+        }
+        return { "ran" : ran, "failed" : failed };
+    }
+
     // ---------------- Materialization ----------------
 
     /**

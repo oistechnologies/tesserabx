@@ -1,0 +1,261 @@
+/**
+ * ScheduledExportService: CRUD + runner for admin-defined recurring
+ * data exports.
+ *
+ * The scheduler task in config/Scheduler.bx polls listDueExports()
+ * every minute; admins kick a single export with runExport() from
+ * the Phase 5 admin UI. Either path writes a CSV to the default
+ * CBFS provider under exports/, stamps the row, advances next_run_at,
+ * and mails the recipients a notification with the download path.
+ *
+ * Email body intentionally carries the cbfs path rather than a
+ * signed URL: in development the local disk provider has no signed-
+ * URL story and emails always trap at Mailpit; in production the
+ * Backblaze B2 provider supports time-limited URLs and that swap
+ * lives behind cbfs's .url() helper.
+ */
+class singleton=true {
+
+    property name="wirebox"          inject="wirebox";
+    property name="cbfs"             inject="DiskService@cbfs";
+    property name="reportingService" inject="ReportingService@reporting";
+    property name="mailService"      inject="mailService@cbmailservices";
+
+    // ---------------- CRUD ----------------
+
+    public array function listExports(){
+        return wirebox.getInstance( "ScheduledExport@reporting" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function getExport( required string id ){
+        var row = wirebox.getInstance( "ScheduledExport@reporting" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( row ) ? javaCast( "null", "" ) : row;
+    }
+
+    public any function createExport( required struct data ){
+        var e = wirebox.getInstance( "ScheduledExport@reporting" );
+        e.setId( newId() );
+        e.setName( arguments.data.name );
+        e.setFormat( arguments.data.format ?: "csv" );
+        e.setFiltersJson(    jsonSerialize( arguments.data.filters    ?: {} ) );
+        e.setRecipientsJson( jsonSerialize( arguments.data.recipients ?: [] ) );
+        e.setIntervalMinutes( arguments.data.intervalMinutes ?: 1440 );
+        if ( structKeyExists( arguments.data, "nextRunAt" ) && len( arguments.data.nextRunAt ?: "" ) ) {
+            e.setNextRunAt( arguments.data.nextRunAt );
+        } else {
+            // Default to "due immediately" so the admin can validate
+            // the configuration on the next scheduler tick rather
+            // than waiting for the full interval.
+            e.setNextRunAt( now() );
+        }
+        e.setIsActive( structKeyExists( arguments.data, "isActive" ) ? !!arguments.data.isActive : true );
+        e.setAttachFile( structKeyExists( arguments.data, "attachFile" ) ? !!arguments.data.attachFile : false );
+        e.save();
+        return e;
+    }
+
+    public any function updateExport( required string id, required struct data ){
+        var e = getExport( arguments.id );
+        if ( isNull( e ) ) {
+            throw( type = "ScheduledExportService.NotFound", message = "No export [#arguments.id#]" );
+        }
+        if ( structKeyExists( arguments.data, "name" ) )            e.setName( arguments.data.name );
+        if ( structKeyExists( arguments.data, "format" ) )          e.setFormat( arguments.data.format );
+        if ( structKeyExists( arguments.data, "filters" ) )         e.setFiltersJson( jsonSerialize( arguments.data.filters ) );
+        if ( structKeyExists( arguments.data, "recipients" ) )      e.setRecipientsJson( jsonSerialize( arguments.data.recipients ) );
+        if ( structKeyExists( arguments.data, "intervalMinutes" ) ) e.setIntervalMinutes( arguments.data.intervalMinutes );
+        if ( structKeyExists( arguments.data, "nextRunAt" ) )       e.setNextRunAt( arguments.data.nextRunAt );
+        if ( structKeyExists( arguments.data, "isActive" ) )        e.setIsActive( !!arguments.data.isActive );
+        if ( structKeyExists( arguments.data, "attachFile" ) )      e.setAttachFile( !!arguments.data.attachFile );
+        e.save();
+        return e;
+    }
+
+    public void function deleteExport( required string id ){
+        queryExecute( "DELETE FROM scheduled_exports WHERE id = :id", { id : arguments.id } );
+    }
+
+    public array function listDueExports(){
+        return wirebox.getInstance( "ScheduledExport@reporting" )
+            .where( "is_active", true )
+            .where( function( w ){
+                w.whereNull( "next_run_at" )
+                 .orWhereRaw( "next_run_at <= NOW()" );
+            } )
+            .orderBy( "next_run_at" )
+            .get();
+    }
+
+    /**
+     * Run every due export in sequence. Errors are caught and logged
+     * per export so one bad row never blocks the rest of the batch.
+     * The scheduler task calls this directly because BoxLang's
+     * arrow-function scope lookup overflows on `for ( var x in
+     * svc.listSomething() )` patterns embedded in a scheduled-task
+     * closure; keeping the loop inside the service body sidesteps
+     * the recursion.
+     */
+    public struct function runDueExports(){
+        var ran    = 0;
+        var failed = 0;
+        for ( var ex in listDueExports() ) {
+            try {
+                var r = runExport( ex.getId() );
+                if ( r.success ) ran++;
+                else            failed++;
+            } catch ( any e ) {
+                failed++;
+                writeLog(
+                    text : "ScheduledExportService.runDueExports [#ex.getId()#] failed: " & e.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            }
+        }
+        return { "ran" : ran, "failed" : failed };
+    }
+
+    // ---------------- Runner ----------------
+
+    /**
+     * Materialize one export. Writes the CSV through CBFS, stamps
+     * last_run_at + last_file_path, advances next_run_at, and mails
+     * the recipients. Returns a struct so the admin UI can render
+     * "ran X, wrote Y bytes" feedback.
+     */
+    public struct function runExport( required string id ){
+        var e = getExport( arguments.id );
+        if ( isNull( e ) ) {
+            return { "success" : false, "error" : "Not found" };
+        }
+        var filters    = safeParseStruct( e.getFiltersJson() ?: "" );
+        var recipients = safeParseArray(  e.getRecipientsJson() ?: "" );
+
+        try {
+            var csv = reportingService.exportTicketsCsv( filters );
+            var stamp = dateTimeFormat( now(), "yyyymmdd-HHmmss" );
+            var cbfsPath = "exports/" & stamp & "-" & e.getId() & ".csv";
+            cbfs.defaultDisk().create(
+                path      = cbfsPath,
+                contents  = csv,
+                overwrite = true
+            );
+
+            e.setLastRunAt( now() );
+            e.setLastFilePath( cbfsPath );
+            var interval = int( e.getIntervalMinutes() ?: 1440 );
+            e.setNextRunAt( dateAdd( "n", interval, now() ) );
+            e.save();
+
+            if ( recipients.len() ) sendReadyEmail( e, cbfsPath, recipients, len( csv ) );
+
+            return {
+                "success"  : true,
+                "path"     : cbfsPath,
+                "bytes"    : len( csv ),
+                "recipients" : recipients.len()
+            };
+        } catch ( any ex ) {
+            writeLog(
+                text : "ScheduledExportService.runExport [#e.getId()#] failed: " & ex.message,
+                log  : "tesserabx-scheduler",
+                type : "error"
+            );
+            return { "success" : false, "error" : ex.message };
+        }
+    }
+
+    /**
+     * Inline file bytes for an admin "download last run" action.
+     */
+    public any function readExportFile( required string cbfsPath ){
+        return cbfs.defaultDisk().get( arguments.cbfsPath );
+    }
+
+    // ---------------- internals ----------------
+
+    private void function sendReadyEmail(
+        required any ex,
+        required string cbfsPath,
+        required array recipients,
+        required numeric bytes
+    ){
+        var attach  = !!( arguments.ex.getAttachFile() ?: false );
+        var subject = "[TesseraBX] Export ready: " & arguments.ex.getName();
+        var body    = "The scheduled export ""#arguments.ex.getName()#"" finished." & char( 10 )
+                    & char( 10 )
+                    & "Path: " & arguments.cbfsPath & char( 10 )
+                    & "Size: " & numberFormat( arguments.bytes ) & " bytes" & char( 10 )
+                    & char( 10 );
+        body &= attach
+              ? "The CSV is attached." & char( 10 )
+              : "An admin can download the file from /agent/admin/exports." & char( 10 );
+
+        try {
+            var mail = mailService.newMail(
+                to       = arguments.recipients.toList( "," ),
+                from     = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                subject  = subject,
+                type     = "text/plain",
+                body     = body
+            );
+            if ( attach ) {
+                // cfmail attachments need a real filesystem path, not
+                // a CBFS logical path. The local-disk provider
+                // exposes the physical path through disk.info(); the
+                // S3 provider used in production would need a temp
+                // download first, but that path is small and out of
+                // scope for the dev flow.
+                try {
+                    var fsPath = cbfs.defaultDisk().info( arguments.cbfsPath ).path;
+                    mail.addMailParam(
+                        file        = fsPath,
+                        disposition = "attachment"
+                    );
+                } catch ( any inner ) {
+                    writeLog(
+                        text : "ScheduledExportService attachment lookup failed for [#arguments.ex.getId()#]: " & inner.message,
+                        log  : "tesserabx",
+                        type : "warning"
+                    );
+                }
+            }
+            mailService.send( mail );
+        } catch ( any e ) {
+            writeLog(
+                text : "ScheduledExportService.sendReadyEmail [#arguments.ex.getId()#] failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private struct function safeParseStruct( required string raw ){
+        if ( !len( arguments.raw ) ) return {};
+        try {
+            var v = jsonDeserialize( arguments.raw );
+            return isStruct( v ) ? v : {};
+        } catch ( any e ) {
+            return {};
+        }
+    }
+
+    private array function safeParseArray( required string raw ){
+        if ( !len( arguments.raw ) ) return [];
+        try {
+            var v = jsonDeserialize( arguments.raw );
+            return isArray( v ) ? v : [];
+        } catch ( any e ) {
+            return [];
+        }
+    }
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}

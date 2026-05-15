@@ -1,0 +1,70 @@
+<bx:output>
+<bx:set local.f = prc.formData >
+<bx:set local.action = local.f.id.len() ? ( "/agent/admin/exports/" & encodeForHTMLAttribute( local.f.id ) ) : "/agent/admin/exports/new" >
+
+<form method="post" action="#local.action#" class="card">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-8">
+                <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="name" name="name" required value="#encodeForHTMLAttribute( local.f.name )#" placeholder="e.g. Weekly billing tickets">
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label" for="intervalMinutes">Interval (minutes)</label>
+                <input type="number" class="form-control" id="intervalMinutes" name="intervalMinutes" value="#encodeForHTMLAttribute( local.f.intervalMinutes )#" min="1">
+                <small class="text-body-secondary">1440 = daily, 60 = hourly, 10080 = weekly</small>
+            </div>
+
+            <div class="col-12">
+                <hr class="my-0">
+                <h6 class="mt-3 mb-2">Filters</h6>
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label" for="status">Status</label>
+                <input type="text" class="form-control" id="status" name="status" value="#encodeForHTMLAttribute( local.f.status )#" placeholder="open / pending / etc">
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label" for="priority">Priority</label>
+                <input type="text" class="form-control" id="priority" name="priority" value="#encodeForHTMLAttribute( local.f.priority )#" placeholder="low / normal / high / urgent">
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label" for="organizationId">Organization id</label>
+                <input type="text" class="form-control" id="organizationId" name="organizationId" value="#encodeForHTMLAttribute( local.f.organizationId )#" placeholder="UUID">
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="since">Created on or after</label>
+                <input type="datetime-local" class="form-control" id="since" name="since" value="#encodeForHTMLAttribute( local.f.since )#">
+            </div>
+
+            <div class="col-12">
+                <hr class="my-0">
+                <h6 class="mt-3 mb-2">Delivery</h6>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="recipients">Recipients</label>
+                <textarea class="form-control" id="recipients" name="recipients" rows="3" placeholder="one email address per line">#encodeForHTML( local.f.recipients )#</textarea>
+                <small class="text-body-secondary">A short "export ready" email lands here when the scheduler materializes the file.</small>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="attachFile" id="attachFile" value="true"<bx:if local.f.attachFile> checked</bx:if>>
+                    <label class="form-check-label" for="attachFile">Attach the CSV to the email</label>
+                </div>
+                <small class="text-body-secondary">Off by default. Large exports may exceed mailbox limits; leave off if the recipients can use the admin download link instead.</small>
+            </div>
+
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="isActive" id="isActive" value="true"<bx:if local.f.isActive> checked</bx:if>>
+                    <label class="form-check-label" for="isActive">Active</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between mt-4">
+            <a class="btn btn-outline-secondary" href="/agent/admin/exports">Cancel</a>
+            <button class="btn btn-primary" type="submit">Save</button>
+        </div>
+    </div>
+</form>
+</bx:output>

@@ -7,9 +7,10 @@
                 <p class="card-text text-body-secondary">
                     RBAC, branding, custom fields, email server settings, the inbound blacklist, and the audit log live here. Phase 5 builds out the full administration UI; Phase 1 ships the audit log.
                 </p>
-                <a class="btn btn-outline-primary me-2" href="/agent/admin/audit"><i class="bi bi-journal-text"></i> Audit log</a>
-                <a class="btn btn-outline-primary me-2" href="/agent/admin/blacklist"><i class="bi bi-shield-x"></i> Inbound blacklist</a>
-                <a class="btn btn-outline-primary" href="/agent/admin/kb"><i class="bi bi-book"></i> Knowledge base</a>
+                <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/audit"><i class="bi bi-journal-text"></i> Audit log</a>
+                <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/blacklist"><i class="bi bi-shield-x"></i> Inbound blacklist</a>
+                <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/kb"><i class="bi bi-book"></i> Knowledge base</a>
+                <a class="btn btn-outline-primary mb-1" href="/agent/admin/exports"><i class="bi bi-download"></i> Scheduled exports</a>
             </div>
         </div>
     </div>

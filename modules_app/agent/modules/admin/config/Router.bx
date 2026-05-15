@@ -39,6 +39,21 @@ class {
             "POST" : "update"
         } );
         route( "kb" ).to( "Kb.index" );
+
+        // Scheduled report exports. Most-specific routes first so
+        // /exports/new and /exports/:id/* do not collide with /:id.
+        route( "exports/new" ).withHandler( "Exports" ).toAction( {
+            "GET"  : "new",
+            "POST" : "save"
+        } );
+        route( "exports/:id/run" ).withVerbs( "POST" ).to( "Exports.runNow" );
+        route( "exports/:id/delete" ).withVerbs( "POST" ).to( "Exports.remove" );
+        route( "exports/:id/download" ).to( "Exports.download" );
+        route( "exports/:id" ).withHandler( "Exports" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "save"
+        } );
+        route( "exports" ).to( "Exports.index" );
     }
 
 }

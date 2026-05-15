@@ -1,0 +1,28 @@
+/**
+ * ScheduledExport: one admin-defined recurring export.
+ *
+ * filters_json and recipients_json are raw JSON text; the service
+ * deserializes them on read. Provider-side configuration, not
+ * tenant-scoped.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="scheduled_exports"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="format";
+    property name="filtersJson"     column="filters_json";
+    property name="recipientsJson"  column="recipients_json";
+    property name="intervalMinutes" column="interval_minutes";
+    property name="nextRunAt"       column="next_run_at"  sqltype="timestamp";
+    property name="lastRunAt"       column="last_run_at"  sqltype="timestamp";
+    property name="lastFilePath"    column="last_file_path";
+    property name="isActive"        column="is_active";
+    property name="attachFile"      column="attach_file";
+    property name="createdAt"       column="created_at"   sqltype="timestamp";
+    property name="updatedAt"       column="updated_at"   sqltype="timestamp";
+
+}

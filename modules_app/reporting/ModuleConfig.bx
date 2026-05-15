@@ -36,6 +36,11 @@ class {
         binder.map( "ReportingService@reporting" )
               .to( "#moduleMapping#.models.ReportingService" )
               .asSingleton();
+        binder.map( "ScheduledExport@reporting" )
+              .to( "#moduleMapping#.models.ScheduledExport" );
+        binder.map( "ScheduledExportService@reporting" )
+              .to( "#moduleMapping#.models.ScheduledExportService" )
+              .asSingleton();
     }
 
     function onUnload(){}

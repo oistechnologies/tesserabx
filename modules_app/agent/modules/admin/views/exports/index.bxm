@@ -1,0 +1,67 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <p class="mb-0 text-body-secondary">Recurring CSV exports the scheduler materializes onto CBFS storage and emails to a recipients list.</p>
+    <a class="btn btn-primary" href="/agent/admin/exports/new"><i class="bi bi-plus-lg"></i> New scheduled export</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Interval</th>
+                    <th>Last run</th>
+                    <th>Next run</th>
+                    <th>Active</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.exports )>
+                    <tr><td colspan="6" class="text-center text-body-secondary py-4">No scheduled exports yet. <a href="/agent/admin/exports/new">Create one.</a></td></tr>
+                </bx:if>
+                <bx:loop array="#prc.exports#" item="ex">
+                    <tr>
+                        <td><a href="/agent/admin/exports/#encodeForURL( ex.getId() )#">#encodeForHTML( ex.getName() )#</a></td>
+                        <td><small>every #encodeForHTML( ex.getIntervalMinutes() )# min</small></td>
+                        <td><small>
+                            <bx:if !isNull( ex.getLastRunAt() )>#encodeForHTML( dateTimeFormat( ex.getLastRunAt(), "yyyy-mm-dd HH:nn" ) )#<bx:else>-</bx:if>
+                        </small></td>
+                        <td><small>
+                            <bx:if !isNull( ex.getNextRunAt() )>#encodeForHTML( dateTimeFormat( ex.getNextRunAt(), "yyyy-mm-dd HH:nn" ) )#<bx:else>-</bx:if>
+                        </small></td>
+                        <td>
+                            <bx:if ex.getIsActive()>
+                                <span class="badge text-bg-success">active</span>
+                            <bx:else>
+                                <span class="badge text-bg-secondary">paused</span>
+                            </bx:if>
+                        </td>
+                        <td class="text-end">
+                            <form method="post" action="/agent/admin/exports/#encodeForHTMLAttribute( ex.getId() )#/run" class="d-inline">
+                                <button class="btn btn-outline-info btn-sm" type="submit" title="Run this export now">
+                                    <i class="bi bi-play-fill"></i> Run now
+                                </button>
+                            </form>
+                            <bx:if len( ex.getLastFilePath() ?: "" )>
+                                <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/exports/#encodeForHTMLAttribute( ex.getId() )#/download">
+                                    <i class="bi bi-download"></i> Last file
+                                </a>
+                            </bx:if>
+                            <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/exports/#encodeForHTMLAttribute( ex.getId() )#">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <form method="post" action="/agent/admin/exports/#encodeForHTMLAttribute( ex.getId() )#/delete" class="d-inline" onsubmit="return confirm('Delete this scheduled export?');">
+                                <button class="btn btn-outline-danger btn-sm" type="submit">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

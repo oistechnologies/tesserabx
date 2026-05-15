@@ -167,6 +167,109 @@ class singleton=true {
         return out;
     }
 
+    /**
+     * Return a CSV string of ticket rows the agent UI can offer as a
+     * download. Synchronous for now; large exports get a cbq job
+     * wrapper in a later polish pass. The columns are fixed to keep
+     * downstream BI scripts stable across releases; adding new ones
+     * should bump the file name version rather than mutating the
+     * default schema.
+     */
+    public string function exportTicketsCsv( struct filters = {} ){
+        var sql = "
+            SELECT  t.ticket_number,
+                    t.id,
+                    t.subject,
+                    t.status,
+                    t.priority,
+                    t.ticket_type,
+                    t.source,
+                    t.organization_id,
+                    o.name AS organization_name,
+                    t.requester_contact_id,
+                    c.email AS requester_email,
+                    t.assigned_to_agent_id,
+                    a.email AS assigned_agent_email,
+                    t.originating_email,
+                    t.created_at,
+                    t.updated_at,
+                    t.resolved_at,
+                    t.closed_at,
+                    t.first_response_at,
+                    t.first_response_due_at,
+                    t.resolution_due_at
+            FROM    tickets t
+            LEFT JOIN organizations o ON o.id = t.organization_id
+            LEFT JOIN contacts      c ON c.id = t.requester_contact_id
+            LEFT JOIN agents        a ON a.id = t.assigned_to_agent_id
+        ";
+        var where  = [];
+        var params = {};
+        if ( len( arguments.filters.status ?: "" ) ) {
+            where.append( "t.status = :status" );
+            params.status = arguments.filters.status;
+        }
+        if ( len( arguments.filters.priority ?: "" ) ) {
+            where.append( "t.priority = :priority" );
+            params.priority = arguments.filters.priority;
+        }
+        if ( len( arguments.filters.organizationId ?: "" ) ) {
+            where.append( "t.organization_id = :orgId" );
+            params.orgId = arguments.filters.organizationId;
+        }
+        if ( len( arguments.filters.since ?: "" ) ) {
+            // cast( :since as timestamp ) because the JDBC binder
+            // sends string params as varchar and Postgres will not
+            // compare timestamp to varchar without an explicit cast.
+            // Accepts ISO-8601 ("2026-05-14T18:10") and the looser
+            // "YYYY-MM-DD HH:MM:SS" form the admin UI emits.
+            where.append( "t.created_at >= cast( :since as timestamp )" );
+            params.since = arguments.filters.since;
+        }
+        if ( where.len() ) sql &= " WHERE " & where.toList( " AND " );
+        sql &= " ORDER BY t.created_at DESC LIMIT " & int( arguments.filters.limit ?: 10000 );
+
+        var rows = queryExecute( sql, params );
+
+        var columns = [
+            "ticket_number","id","subject","status","priority","ticket_type","source",
+            "organization_id","organization_name",
+            "requester_contact_id","requester_email",
+            "assigned_to_agent_id","assigned_agent_email",
+            "originating_email",
+            "created_at","updated_at","resolved_at","closed_at",
+            "first_response_at","first_response_due_at","resolution_due_at"
+        ];
+        var sb = createObject( "java", "java.lang.StringBuilder" ).init();
+        sb.append( columns.map( ( c ) => csvCell( c ) ).toList( "," ) );
+        sb.append( char( 10 ) );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var line = [];
+            for ( var col in columns ) line.append( csvCell( rows[ col ][ i ] ?: "" ) );
+            sb.append( line.toList( "," ) );
+            sb.append( char( 10 ) );
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Escape one CSV cell. Quotes the value when it contains a comma,
+     * a quote, or a newline; doubles any internal quotes per RFC 4180.
+     * Renders timestamps as ISO 8601 so downstream tools parse them
+     * unambiguously regardless of locale.
+     */
+    private string function csvCell( required any value ){
+        var v = arguments.value;
+        if ( isNull( v ) ) return "";
+        if ( isDate( v ) ) v = dateTimeFormat( v, "yyyy-mm-dd'T'HH:nn:ss" );
+        var s = toString( v );
+        if ( find( ",", s ) || find( char( 34 ), s ) || find( char( 10 ), s ) || find( char( 13 ), s ) ) {
+            s = replace( s, char( 34 ), char( 34 ) & char( 34 ), "all" );
+            return char( 34 ) & s & char( 34 );
+        }
+        return s;
+    }
+
     private boolean function arrayContainsNoCase( required array list, required string value ){
         for ( var v in arguments.list ) {
             if ( lCase( toString( v ) ) == lCase( arguments.value ) ) return true;

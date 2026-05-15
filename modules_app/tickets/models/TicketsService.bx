@@ -886,6 +886,34 @@ class singleton=true {
             .get();
     }
 
+    /**
+     * Fire ticket.escalation on every active ticket so any time-based
+     * AutomationRule has a chance to run. The scheduler task calls
+     * this directly because BoxLang's arrow-function scope lookup
+     * overflows on `for ( var x in svc.list() )` patterns inlined in
+     * a scheduled task closure; keeping the loop inside the service
+     * body sidesteps the recursion.
+     */
+    public struct function runEscalationScan(){
+        var automation = wirebox.getInstance( "AutomationService@automation" );
+        var scanned = 0;
+        var failed  = 0;
+        for ( var t in findActiveTicketsForScan() ) {
+            try {
+                automation.evaluateForTicket( "ticket.escalation", t );
+                scanned++;
+            } catch ( any e ) {
+                failed++;
+                writeLog(
+                    text : "TicketsService.runEscalationScan [#t.getId()#] failed: " & e.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            }
+        }
+        return { "scanned" : scanned, "failed" : failed };
+    }
+
     public array function findApproachingBreachTickets( required numeric windowMinutes ){
         // Bake the interval into a local SQL fragment up front. qb's
         // nested closures don't inherit the outer `arguments` scope, so

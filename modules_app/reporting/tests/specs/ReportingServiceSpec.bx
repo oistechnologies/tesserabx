@@ -67,6 +67,38 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 }
             } );
 
+            it( "exportTicketsCsv produces a header row with the documented column set", function(){
+                var csv  = variables.svc.exportTicketsCsv( {} );
+                var head = listFirst( csv, char( 10 ) );
+                expect( head ).toInclude( "ticket_number" );
+                expect( head ).toInclude( "subject" );
+                expect( head ).toInclude( "status" );
+                expect( head ).toInclude( "first_response_due_at" );
+            } );
+
+            it( "exportTicketsCsv quotes cells with commas / newlines / quotes", function(){
+                // Insert a ticket with characters that force quoting.
+                var tid = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+                queryExecute(
+                    "INSERT INTO tickets ( id, subject, status, priority, ticket_type, source, originating_email )
+                     VALUES ( :id, :subj, 'open', 'normal', 'request', 'agent', :em )",
+                    {
+                        id   : tid,
+                        subj : "Comma, ""quote"" and #char( 10 )#newline",
+                        em   : "csvspec-" & createUUID() & "@example.com"
+                    }
+                );
+
+                var csv = variables.svc.exportTicketsCsv( {} );
+                // The CSV must contain the doubled-quote form and the
+                // whole cell must be wrapped in quotes; we just check
+                // the doubled quote is present, which only happens
+                // through the escape path.
+                expect( csv ).toInclude( """""quote""""" );
+
+                queryExecute( "DELETE FROM tickets WHERE id = :id", { id : tid } );
+            } );
+
         } );
     }
 
