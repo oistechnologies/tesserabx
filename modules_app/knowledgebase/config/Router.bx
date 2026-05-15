@@ -1,0 +1,20 @@
+/**
+ * knowledgebase module router.
+ *
+ * Routes prefixed /kb (per entryPoint). Public read surface only;
+ * authoring lives in agent/admin and calls KnowledgebaseService.
+ */
+class {
+
+    function configure(){
+        // /kb/<slug>/feedback POST (helpful / not helpful).
+        route( ":slug/feedback" ).withVerbs( "POST" ).to( "Articles.feedback" );
+
+        // /kb/<slug>
+        route( ":slug" ).to( "Articles.show" );
+
+        // /kb
+        route( "/" ).to( "Articles.index" );
+    }
+
+}

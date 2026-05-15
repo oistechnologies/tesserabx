@@ -1,0 +1,336 @@
+/**
+ * KnowledgebaseService: the public surface other modules and the
+ * UI handlers call to read or write knowledge-base content.
+ *
+ * Visibility rules:
+ *   - public:       anyone, including unauthenticated visitors
+ *   - organization: contacts in an org with a kb_article_organizations
+ *                   row for the article; agents see all
+ *   - internal:     provider agents only
+ *
+ * canRead( viewer, article ) is the single decision point; portal
+ * and agent handlers both go through it.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    // ------------------ Categories ------------------
+
+    public array function listCategories( string parentId ){
+        var q = wirebox.getInstance( "Category@knowledgebase" );
+        if ( structKeyExists( arguments, "parentId" ) && len( arguments.parentId ?: "" ) ) {
+            q = q.where( "parent_id", arguments.parentId );
+        }
+        return q.orderBy( "sort_order" ).orderBy( "name" ).get();
+    }
+
+    public any function getCategoryBySlug( required string slug ){
+        var c = wirebox.getInstance( "Category@knowledgebase" )
+            .where( "slug", arguments.slug ).first();
+        return isNull( c ) ? javaCast( "null", "" ) : c;
+    }
+
+    public any function createCategory( required struct data ){
+        var c = wirebox.getInstance( "Category@knowledgebase" );
+        c.setId( newId() );
+        c.setName( arguments.data.name );
+        c.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : slugify( arguments.data.name ) );
+        if ( len( arguments.data.parentId ?: "" ) ) c.setParentId( arguments.data.parentId );
+        c.setSortOrder( arguments.data.sortOrder ?: 0 );
+        c.save();
+        return c;
+    }
+
+    // ------------------ Articles (writes) ------------------
+
+    public any function createArticle( required struct data, string authorAgentId = "" ){
+        var a = wirebox.getInstance( "Article@knowledgebase" );
+        a.setId( newId() );
+        a.setTitle( arguments.data.title );
+        a.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : slugify( arguments.data.title ) );
+        a.setBody( arguments.data.body ?: "" );
+        a.setVisibility( arguments.data.visibility ?: "internal" );
+        a.setStatus( "draft" );
+        a.setViewCount( 0 );
+        if ( len( arguments.data.categoryId ?: "" ) ) a.setCategoryId( arguments.data.categoryId );
+        if ( len( arguments.authorAgentId ) ) a.setAuthorAgentId( arguments.authorAgentId );
+        a.save();
+        return a;
+    }
+
+    public any function updateArticle( required string articleId, required struct data ){
+        var a = getArticleById( arguments.articleId );
+        if ( isNull( a ) ) {
+            throw( type="KnowledgebaseService.UnknownArticle", message="No article [#arguments.articleId#]." );
+        }
+        if ( structKeyExists( arguments.data, "title" ) )      a.setTitle( arguments.data.title );
+        if ( structKeyExists( arguments.data, "slug" ) )       a.setSlug( arguments.data.slug );
+        if ( structKeyExists( arguments.data, "body" ) )       a.setBody( arguments.data.body );
+        if ( structKeyExists( arguments.data, "visibility" ) ) a.setVisibility( arguments.data.visibility );
+        if ( structKeyExists( arguments.data, "categoryId" ) ) {
+            if ( len( arguments.data.categoryId ) ) {
+                a.setCategoryId( arguments.data.categoryId );
+            } else {
+                queryExecute(
+                    "UPDATE kb_articles SET category_id = NULL WHERE id = :id",
+                    { id : a.getId() }
+                );
+            }
+        }
+        a.save();
+        return a;
+    }
+
+    /**
+     * Publish an article: snapshot the body into kb_article_versions,
+     * flip status to "published", and stamp published_at. Idempotent
+     * republish (e.g. an agent fixed a typo and presses Publish
+     * again) creates another snapshot row, which is the audit value
+     * we want.
+     */
+    public any function publishArticle( required string articleId, string agentId = "", string changeNote = "" ){
+        var a = getArticleById( arguments.articleId );
+        if ( isNull( a ) ) {
+            throw( type="KnowledgebaseService.UnknownArticle", message="No article [#arguments.articleId#]." );
+        }
+
+        var nextVersion = queryExecute(
+            "SELECT COALESCE( MAX( version_number ), 0 ) + 1 AS n FROM kb_article_versions WHERE article_id = :aid",
+            { aid : a.getId() },
+            { returntype : "array" }
+        )[ 1 ].n;
+
+        var v = wirebox.getInstance( "ArticleVersion@knowledgebase" );
+        v.setId( newId() );
+        v.setArticleId( a.getId() );
+        v.setVersionNumber( nextVersion );
+        v.setTitleSnapshot( a.getTitle() );
+        v.setBodySnapshot( a.getBody() );
+        if ( len( arguments.changeNote ) ) v.setChangeNote( arguments.changeNote );
+        if ( len( arguments.agentId ) ) v.setPublishedByAgentId( arguments.agentId );
+        v.save();
+
+        a.setStatus( "published" );
+        a.setPublishedAt( now() );
+        a.save();
+
+        auditService.record(
+            eventType      : "kb.article_published",
+            entityType     : "Article",
+            entityId       : a.getId(),
+            actorType      : len( arguments.agentId ) ? "agent" : "system",
+            actorId        : arguments.agentId,
+            metadata       : { "version" : nextVersion, "slug" : a.getSlug(), "visibility" : a.getVisibility() }
+        );
+        return a;
+    }
+
+    public any function unpublishArticle( required string articleId, string agentId = "" ){
+        var a = getArticleById( arguments.articleId );
+        if ( isNull( a ) ) return javaCast( "null", "" );
+        a.setStatus( "draft" );
+        a.save();
+        auditService.record(
+            eventType      : "kb.article_unpublished",
+            entityType     : "Article",
+            entityId       : a.getId(),
+            actorType      : len( arguments.agentId ) ? "agent" : "system",
+            actorId        : arguments.agentId
+        );
+        return a;
+    }
+
+    public void function deleteArticle( required string articleId, string agentId = "" ){
+        // Cascade deletes feedback, versions, org-joins via DB FKs.
+        queryExecute( "DELETE FROM kb_articles WHERE id = :id", { id : arguments.articleId } );
+        auditService.record(
+            eventType  : "kb.article_deleted",
+            entityType : "Article",
+            entityId   : arguments.articleId,
+            actorType  : len( arguments.agentId ) ? "agent" : "system",
+            actorId    : arguments.agentId
+        );
+    }
+
+    // ------------------ Organization mapping ------------------
+
+    public void function setArticleOrganizations(
+        required string articleId,
+        required array  organizationIds
+    ){
+        queryExecute(
+            "DELETE FROM kb_article_organizations WHERE article_id = :aid",
+            { aid : arguments.articleId }
+        );
+        for ( var orgId in arguments.organizationIds ) {
+            if ( !len( orgId ) ) continue;
+            queryExecute(
+                "INSERT INTO kb_article_organizations ( article_id, organization_id )
+                 VALUES ( :aid, :oid )",
+                { aid : arguments.articleId, oid : orgId }
+            );
+        }
+    }
+
+    public array function listOrganizationIdsForArticle( required string articleId ){
+        var rows = queryExecute(
+            "SELECT organization_id FROM kb_article_organizations WHERE article_id = :aid",
+            { aid : arguments.articleId },
+            { returntype : "array" }
+        );
+        var ids = [];
+        for ( var row in rows ) ids.append( row.organization_id );
+        return ids;
+    }
+
+    // ------------------ Reads ------------------
+
+    public any function getArticleById( required string id ){
+        var a = wirebox.getInstance( "Article@knowledgebase" )
+            .where( "id", arguments.id ).first();
+        return isNull( a ) ? javaCast( "null", "" ) : a;
+    }
+
+    public any function getArticleBySlug( required string slug ){
+        var a = wirebox.getInstance( "Article@knowledgebase" )
+            .where( "slug", arguments.slug ).first();
+        return isNull( a ) ? javaCast( "null", "" ) : a;
+    }
+
+    /**
+     * The single read decision point. Returns true when the viewer
+     * is allowed to see the article.
+     *
+     * `viewer` is a struct: { kind: "agent"|"contact"|"anonymous",
+     *                         contactOrganizationId: <optional> }.
+     */
+    public boolean function canRead( required struct viewer, required any article ){
+        if ( arguments.viewer.kind == "agent" ) return true;
+
+        // Non-agents need a published article.
+        if ( !arguments.article.isPublished() ) return false;
+
+        var vis = arguments.article.getVisibility();
+        if ( vis == "public" ) return true;
+        if ( vis == "internal" ) return false;
+
+        // organization-scoped
+        if ( arguments.viewer.kind != "contact" ) return false;
+        var orgId = arguments.viewer.contactOrganizationId ?: "";
+        if ( !len( orgId ) ) return false;
+        var orgIds = listOrganizationIdsForArticle( arguments.article.getId() );
+        for ( var id in orgIds ) {
+            if ( id == orgId ) return true;
+        }
+        return false;
+    }
+
+    /**
+     * List articles visible to the given viewer. Filters by
+     * visibility + organization assignment + published status in
+     * SQL so a Contact never sees rows they shouldn't.
+     */
+    public array function listVisibleArticles(
+        required struct viewer,
+        string categoryId = "",
+        string statusFilter = ""
+    ){
+        var q = wirebox.getInstance( "Article@knowledgebase" );
+
+        if ( arguments.viewer.kind == "agent" ) {
+            // Agent sees everything; status filter is optional.
+            if ( len( arguments.statusFilter ) ) {
+                q = q.where( "status", arguments.statusFilter );
+            }
+        } else {
+            // Non-agents always require published.
+            q = q.where( "status", "published" );
+
+            if ( arguments.viewer.kind == "anonymous" ) {
+                q = q.where( "visibility", "public" );
+            } else {
+                // contact: public OR organization-scoped (where their
+                // org is in the join). Internal never reaches here.
+                var orgId = arguments.viewer.contactOrganizationId ?: "";
+                if ( !len( orgId ) ) {
+                    q = q.where( "visibility", "public" );
+                } else {
+                    q = q.where( function( inner ){
+                        inner.where( "visibility", "public" );
+                        inner.orWhere( function( o ){
+                            o.where( "visibility", "organization" )
+                             .whereIn( "id", function( sub ){
+                                 sub.from( "kb_article_organizations" )
+                                    .select( "article_id" )
+                                    .where( "organization_id", orgId );
+                             } );
+                        } );
+                    } );
+                }
+            }
+        }
+
+        if ( len( arguments.categoryId ) ) {
+            q = q.where( "category_id", arguments.categoryId );
+        }
+        return q.orderBy( "title" ).get();
+    }
+
+    /**
+     * Increment view count. Cheap upsert via raw SQL so we don't
+     * race Quick's load + save cycle.
+     */
+    public void function recordView( required string articleId ){
+        queryExecute(
+            "UPDATE kb_articles SET view_count = view_count + 1 WHERE id = :id",
+            { id : arguments.articleId }
+        );
+    }
+
+    // ------------------ Feedback ------------------
+
+    public any function submitFeedback( required struct data ){
+        var f = wirebox.getInstance( "ArticleFeedback@knowledgebase" );
+        f.setId( newId() );
+        f.setArticleId( arguments.data.articleId );
+        f.setRating( arguments.data.rating );
+        if ( len( arguments.data.contactId ?: "" ) ) f.setContactId( arguments.data.contactId );
+        if ( len( arguments.data.ipHash    ?: "" ) ) f.setIpHash( arguments.data.ipHash );
+        if ( len( arguments.data.comment   ?: "" ) ) f.setComment( arguments.data.comment );
+        f.save();
+        return f;
+    }
+
+    public struct function feedbackTotalsForArticle( required string articleId ){
+        var row = queryExecute(
+            "SELECT
+                SUM( CASE WHEN rating > 0 THEN 1 ELSE 0 END ) AS helpful,
+                SUM( CASE WHEN rating < 0 THEN 1 ELSE 0 END ) AS not_helpful
+             FROM kb_article_feedback
+             WHERE article_id = :aid",
+            { aid : arguments.articleId },
+            { returntype : "array" }
+        );
+        if ( !arrayLen( row ) ) return { "helpful" : 0, "notHelpful" : 0 };
+        // The SUM aggregates come back as strings on some Postgres /
+        // JDBC stacks; val() tolerates both string and numeric input
+        // where int() does not.
+        return {
+            "helpful"    : val( row[ 1 ].helpful    ?: 0 ),
+            "notHelpful" : val( row[ 1 ].not_helpful ?: 0 )
+        };
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+    private string function slugify( required string text ){
+        return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+    }
+
+}

@@ -1,0 +1,34 @@
+/**
+ * Category: a knowledge-base category / folder.
+ *
+ * parent_id is a self-reference so categories can nest. Phase 2d
+ * ships flat-or-shallow lists; deeper trees work but the rendering
+ * helpers do not draw breadcrumbs yet.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="kb_categories"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="slug";
+    property name="parentId"   column="parent_id";
+    property name="sortOrder"  column="sort_order";
+    property name="createdAt"  column="created_at" sqltype="timestamp";
+    property name="updatedAt"  column="updated_at" sqltype="timestamp";
+
+    function parent(){
+        return belongsTo( "Category@knowledgebase", "parent_id" );
+    }
+
+    function children(){
+        return hasMany( "Category@knowledgebase", "parent_id" );
+    }
+
+    function articles(){
+        return hasMany( "Article@knowledgebase", "category_id" );
+    }
+
+}

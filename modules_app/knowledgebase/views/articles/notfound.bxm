@@ -1,0 +1,9 @@
+<bx:output>
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5">Article not found</h2>
+        <p class="text-body-secondary">The article you are looking for is unavailable.</p>
+        <a class="btn btn-outline-secondary" href="/kb">Back to the knowledge base</a>
+    </div>
+</div>
+</bx:output>

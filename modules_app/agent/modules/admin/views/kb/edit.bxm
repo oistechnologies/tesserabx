@@ -1,0 +1,94 @@
+<bx:output>
+<bx:set local.isNew = !structKeyExists( prc, "article" ) >
+<bx:set local.postUrl = local.isNew ? "/agent/admin/kb/new" : "/agent/admin/kb/" & encodeForHTMLAttribute( prc.article.getId() ) >
+
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+        <form method="post" action="#local.postUrl#" class="card">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-12 col-md-9">
+                        <label class="form-label" for="title">Title <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="title" name="title" required value="#encodeForHTMLAttribute( prc.formData.title ?: "" )#">
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label" for="slug">Slug</label>
+                        <input type="text" class="form-control" id="slug" name="slug" value="#encodeForHTMLAttribute( prc.formData.slug ?: "" )#" placeholder="auto from title">
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label" for="visibility">Visibility</label>
+                        <select class="form-select" id="visibility" name="visibility" onchange="document.getElementById('orgs-row').style.display = this.value === 'organization' ? '' : 'none';">
+                            <option value="public"      <bx:if ( prc.formData.visibility ?: "" ) eq "public"> selected</bx:if>>Public</option>
+                            <option value="organization"<bx:if ( prc.formData.visibility ?: "" ) eq "organization"> selected</bx:if>>Organization-scoped</option>
+                            <option value="internal"    <bx:if ( prc.formData.visibility ?: "" ) eq "internal"> selected</bx:if>>Internal (agents only)</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label" for="categoryId">Category</label>
+                        <select class="form-select" id="categoryId" name="categoryId">
+                            <option value="">No category</option>
+                            <bx:loop array="#prc.categories#" item="c">
+                                <option value="#encodeForHTMLAttribute( c.getId() )#"<bx:if ( prc.formData.categoryId ?: "" ) eq c.getId()> selected</bx:if>>#encodeForHTML( c.getName() )#</option>
+                            </bx:loop>
+                        </select>
+                    </div>
+                    <div class="col-12" id="orgs-row" style="display: <bx:if ( prc.formData.visibility ?: "" ) eq "organization">block<bx:else>none</bx:if>;">
+                        <label class="form-label" for="organizationIds">Organizations that can see this</label>
+                        <select class="form-select" id="organizationIds" name="organizationIds" multiple size="6">
+                            <bx:loop array="#prc.organizations#" item="org">
+                                <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if arrayFindNoCase( prc.formData.organizationIds ?: [], org.getId() )> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                            </bx:loop>
+                        </select>
+                        <div class="form-text">Hold Ctrl / Cmd to select multiple.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="body">Body</label>
+                        <textarea class="form-control font-monospace" id="body" name="body" rows="18">#encodeForHTML( prc.formData.body ?: "" )#</textarea>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between mt-4">
+                    <a class="btn btn-outline-secondary" href="/agent/admin/kb">Cancel</a>
+                    <button class="btn btn-primary" type="submit">Save</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <bx:if !local.isNew>
+        <div class="col-12 col-lg-4">
+            <div class="card mb-3">
+                <div class="card-header"><strong>Status</strong></div>
+                <div class="card-body">
+                    <p class="mb-2">
+                        <bx:if prc.article.isPublished()>
+                            <span class="badge text-bg-success">published</span>
+                            <span class="text-body-secondary small ms-2">since #encodeForHTML( dateTimeFormat( prc.article.getPublishedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
+                        <bx:else>
+                            <span class="badge text-bg-warning">draft</span>
+                            <span class="text-body-secondary small ms-2">not visible on the portal</span>
+                        </bx:if>
+                    </p>
+                    <bx:if prc.article.isPublished()>
+                        <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( prc.article.getId() )#/unpublish">
+                            <button class="btn btn-outline-warning w-100" type="submit">Unpublish</button>
+                        </form>
+                    <bx:else>
+                        <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( prc.article.getId() )#/publish">
+                            <input type="text" class="form-control form-control-sm mb-2" name="changeNote" placeholder="Change note (optional)">
+                            <button class="btn btn-success w-100" type="submit">Publish</button>
+                        </form>
+                    </bx:if>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><strong>Danger zone</strong></div>
+                <div class="card-body">
+                    <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( prc.article.getId() )#/delete" onsubmit="return confirm('Delete this article and all its versions and feedback?');">
+                        <button class="btn btn-outline-danger w-100" type="submit">Delete</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </bx:if>
+</div>
+</bx:output>

@@ -1,9 +1,13 @@
 /**
  * knowledgebase module.
  *
- * Owns Article, ArticleVersion, ArticleFeedback, Category, and
- * ArticleOrganization (the many-to-many join for org-scoped articles).
+ * Owns Article, ArticleVersion, ArticleFeedback, Category, and the
+ * ArticleOrganization join (many-to-many for org-scoped articles).
  * Three visibility tiers: public, organization-scoped, internal.
+ *
+ * Serves the read-only /kb surface (browse + view). Authoring lives
+ * in the agent admin module at /agent/admin/kb and calls back here
+ * through KnowledgebaseService.
  */
 class {
 
@@ -21,13 +25,26 @@ class {
     this.dependencies       = [ "contacts", "audit" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings              = {};
+        variables.routes                = [];
+        variables.interceptorSettings   = { customInterceptionPoints : [] };
+        variables.interceptors          = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "Category@knowledgebase" )
+              .to( "#moduleMapping#.models.Category" );
+        binder.map( "Article@knowledgebase" )
+              .to( "#moduleMapping#.models.Article" );
+        binder.map( "ArticleVersion@knowledgebase" )
+              .to( "#moduleMapping#.models.ArticleVersion" );
+        binder.map( "ArticleFeedback@knowledgebase" )
+              .to( "#moduleMapping#.models.ArticleFeedback" );
+        binder.map( "KnowledgebaseService@knowledgebase" )
+              .to( "#moduleMapping#.models.KnowledgebaseService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

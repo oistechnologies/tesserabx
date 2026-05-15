@@ -1,0 +1,44 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <p class="mb-0 text-body-secondary">All articles across every visibility tier. Drafts never reach the public surfaces.</p>
+    <a class="btn btn-primary" href="/agent/admin/kb/new"><i class="bi bi-plus-lg"></i> New article</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Slug</th>
+                    <th>Visibility</th>
+                    <th>Status</th>
+                    <th>Views</th>
+                    <th>Updated</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.articles )>
+                    <tr><td colspan="6" class="text-center text-body-secondary py-4">No articles yet. <a href="/agent/admin/kb/new">Author one.</a></td></tr>
+                </bx:if>
+                <bx:loop array="#prc.articles#" item="a">
+                    <tr>
+                        <td><a href="/agent/admin/kb/#encodeForURL( a.getId() )#">#encodeForHTML( a.getTitle() )#</a></td>
+                        <td><code>#encodeForHTML( a.getSlug() )#</code></td>
+                        <td><span class="badge text-bg-secondary">#encodeForHTML( a.getVisibility() )#</span></td>
+                        <td>
+                            <bx:if a.isPublished()>
+                                <span class="badge text-bg-success">published</span>
+                            <bx:else>
+                                <span class="badge text-bg-warning">draft</span>
+                            </bx:if>
+                        </td>
+                        <td>#encodeForHTML( a.getViewCount() )#</td>
+                        <td><small>#encodeForHTML( dateTimeFormat( a.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#</small></td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,26 @@
+/**
+ * ArticleFeedback: one helpful / not-helpful vote on an article.
+ *
+ * contact_id is nullable so anonymous visitors can still leave
+ * feedback. ip_hash lets the service de-duplicate repeat votes
+ * from the same address without persisting raw IPs.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="kb_article_feedback"
+    accessors="true"
+{
+
+    property name="id";
+    property name="articleId"   column="article_id";
+    property name="contactId"   column="contact_id";
+    property name="ipHash"      column="ip_hash";
+    property name="rating"      sqltype="smallint";
+    property name="comment";
+    property name="createdAt"   column="created_at" sqltype="timestamp";
+
+    function article(){
+        return belongsTo( "Article@knowledgebase", "article_id" );
+    }
+
+}

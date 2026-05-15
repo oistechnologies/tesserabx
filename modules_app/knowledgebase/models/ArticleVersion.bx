@@ -1,0 +1,24 @@
+/**
+ * ArticleVersion: snapshot of an article captured each time it
+ * was published. Used for audit / rollback inspection.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="kb_article_versions"
+    accessors="true"
+{
+
+    property name="id";
+    property name="articleId"           column="article_id";
+    property name="versionNumber"       column="version_number";
+    property name="titleSnapshot"       column="title_snapshot";
+    property name="bodySnapshot"        column="body_snapshot";
+    property name="changeNote"          column="change_note";
+    property name="publishedByAgentId"  column="published_by_agent_id";
+    property name="publishedAt"         column="published_at" sqltype="timestamp";
+
+    function article(){
+        return belongsTo( "Article@knowledgebase", "article_id" );
+    }
+
+}

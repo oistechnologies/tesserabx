@@ -1,0 +1,49 @@
+/**
+ * Article: a knowledge-base article row.
+ *
+ * Visibility is one of:
+ *   - public:       anyone, including unauthenticated visitors
+ *   - organization: members of any organization listed in the
+ *                   kb_article_organizations join (many-to-many)
+ *   - internal:     provider agents only
+ *
+ * Status is "draft" or "published". Drafts never reach the portal
+ * read surfaces; the visibility check still applies on top of
+ * status filtering.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="kb_articles"
+    accessors="true"
+{
+
+    property name="id";
+    property name="title";
+    property name="slug";
+    property name="body";
+    property name="categoryId"      column="category_id";
+    property name="visibility";
+    property name="status";
+    property name="authorAgentId"   column="author_agent_id";
+    property name="viewCount"       column="view_count";
+    property name="createdAt"       column="created_at"   sqltype="timestamp";
+    property name="updatedAt"       column="updated_at"   sqltype="timestamp";
+    property name="publishedAt"     column="published_at" sqltype="timestamp";
+
+    function category(){
+        return belongsTo( "Category@knowledgebase", "category_id" );
+    }
+
+    function versions(){
+        return hasMany( "ArticleVersion@knowledgebase", "article_id" );
+    }
+
+    function feedback(){
+        return hasMany( "ArticleFeedback@knowledgebase", "article_id" );
+    }
+
+    public boolean function isPublished(){
+        return ( getStatus() ?: "draft" ) == "published";
+    }
+
+}

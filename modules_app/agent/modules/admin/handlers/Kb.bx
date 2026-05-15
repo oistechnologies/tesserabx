@@ -1,0 +1,147 @@
+/**
+ * /agent/admin/kb handler.
+ *
+ * Authoring surface over knowledge-base articles. Delegates every
+ * write to KnowledgebaseService; never reads Article / Category
+ * entities directly.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*.
+ */
+class {
+
+    property name="kb"              inject="KnowledgebaseService@knowledgebase";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle    = "Knowledge base";
+        prc.articles     = kb.listVisibleArticles(
+            viewer = { kind : "agent" }
+        );
+        prc.organizations = contactsService.listOrganizations();
+        event.setView( "kb/index" );
+    }
+
+    function new( event, rc, prc ){
+        prc.pageTitle = "New article";
+        prc.formData = {
+            title           : rc.title      ?: "",
+            slug            : rc.slug       ?: "",
+            body            : rc.body       ?: "",
+            visibility      : rc.visibility ?: "internal",
+            categoryId      : rc.categoryId ?: "",
+            organizationIds : []
+        };
+        prc.organizations = contactsService.listOrganizations();
+        prc.categories    = kb.listCategories();
+        event.setView( "kb/edit" );
+    }
+
+    function create( event, rc, prc ){
+        var fields = readArticleFields( rc );
+        if ( !len( trim( fields.title ) ) ) {
+            messagebox.error( "Title is required." );
+            return new( event, rc, prc );
+        }
+        var article = kb.createArticle( fields, currentAgentId() );
+        if ( fields.visibility == "organization" ) {
+            kb.setArticleOrganizations( article.getId(), fields.organizationIds );
+        }
+        messagebox.info( "Article saved as a draft." );
+        relocate( uri = "/agent/admin/kb/" & article.getId() );
+    }
+
+    function edit( event, rc, prc ){
+        var article = kb.getArticleById( rc.id ?: "" );
+        if ( isNull( article ) ) {
+            messagebox.warn( "That article does not exist." );
+            relocate( uri = "/agent/admin/kb" );
+            return;
+        }
+        prc.pageTitle = "Edit article";
+        prc.article   = article;
+        prc.formData = {
+            title           : article.getTitle(),
+            slug            : article.getSlug(),
+            body            : article.getBody() ?: "",
+            visibility      : article.getVisibility(),
+            categoryId      : article.getCategoryId() ?: "",
+            organizationIds : kb.listOrganizationIdsForArticle( article.getId() )
+        };
+        prc.organizations = contactsService.listOrganizations();
+        prc.categories    = kb.listCategories();
+        event.setView( "kb/edit" );
+    }
+
+    function update( event, rc, prc ){
+        var article = kb.getArticleById( rc.id ?: "" );
+        if ( isNull( article ) ) {
+            messagebox.warn( "That article does not exist." );
+            relocate( uri = "/agent/admin/kb" );
+            return;
+        }
+        var fields = readArticleFields( rc );
+        kb.updateArticle( article.getId(), fields );
+        if ( fields.visibility == "organization" ) {
+            kb.setArticleOrganizations( article.getId(), fields.organizationIds );
+        } else {
+            kb.setArticleOrganizations( article.getId(), [] );
+        }
+        messagebox.info( "Article updated." );
+        relocate( uri = "/agent/admin/kb/" & article.getId() );
+    }
+
+    function publish( event, rc, prc ){
+        param rc.changeNote = "";
+        kb.publishArticle( arguments.rc.id ?: "", currentAgentId(), rc.changeNote );
+        messagebox.info( "Article published." );
+        relocate( uri = "/agent/admin/kb/" & rc.id );
+    }
+
+    function unpublish( event, rc, prc ){
+        kb.unpublishArticle( rc.id ?: "", currentAgentId() );
+        messagebox.info( "Article unpublished. It is back to a draft." );
+        relocate( uri = "/agent/admin/kb/" & rc.id );
+    }
+
+    function remove( event, rc, prc ){
+        kb.deleteArticle( rc.id ?: "", currentAgentId() );
+        messagebox.info( "Article deleted." );
+        relocate( uri = "/agent/admin/kb" );
+    }
+
+    // ---------- internals ----------
+
+    private struct function readArticleFields( required struct rc ){
+        param arguments.rc.title           = "";
+        param arguments.rc.slug            = "";
+        param arguments.rc.body            = "";
+        param arguments.rc.visibility      = "internal";
+        param arguments.rc.categoryId      = "";
+        param arguments.rc.organizationIds = "";
+        var orgIds = isArray( arguments.rc.organizationIds )
+            ? arguments.rc.organizationIds
+            : listToArray( arguments.rc.organizationIds, "," );
+        return {
+            title           : trim( arguments.rc.title ),
+            slug            : trim( arguments.rc.slug ),
+            body            : arguments.rc.body,
+            visibility      : arguments.rc.visibility,
+            categoryId      : trim( arguments.rc.categoryId ),
+            organizationIds : orgIds
+        };
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

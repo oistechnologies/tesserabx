@@ -1,0 +1,108 @@
+/**
+ * knowledgebase:Articles handler.
+ *
+ * Public read-only surface at /kb. Visibility decisions go through
+ * KnowledgebaseService.canRead / listVisibleArticles so this
+ * handler never has to re-implement the rules.
+ *
+ * Viewer kind:
+ *   - unauthenticated visitor -> "anonymous"  (public articles only)
+ *   - signed-in Contact       -> "contact"    (public + their org's
+ *                                              organization-scoped)
+ *   - signed-in Agent         -> "agent"      (everything)
+ */
+class {
+
+    property name="kb"   inject="KnowledgebaseService@knowledgebase";
+    property name="auth" inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        // Reuse whichever layout matches the current user: agents
+        // browsing /kb stay in their dashboard chrome, everyone else
+        // gets the public Portal layout.
+        var viewer = viewerFor();
+        prc.viewer = viewer;
+        if ( viewer.kind == "agent" ) {
+            event.setLayout( name = "Agent", module = "core" );
+        } else {
+            event.setLayout( name = "Portal", module = "core" );
+        }
+    }
+
+    function index( event, rc, prc ){
+        param rc.categoryId = "";
+        prc.pageTitle  = "Knowledge Base";
+        prc.articles   = kb.listVisibleArticles(
+            viewer     = prc.viewer,
+            categoryId = rc.categoryId
+        );
+        prc.categories = kb.listCategories();
+        event.setView( "articles/index" );
+    }
+
+    function show( event, rc, prc ){
+        var article = kb.getArticleBySlug( rc.slug ?: "" );
+        if ( isNull( article ) || !kb.canRead( prc.viewer, article ) ) {
+            event.setHTTPHeader( statusCode = 404, statusText = "Not Found" );
+            prc.pageTitle = "Article not found";
+            event.setView( "articles/notfound" );
+            return;
+        }
+        kb.recordView( article.getId() );
+        prc.article   = article;
+        prc.pageTitle = article.getTitle();
+        prc.feedback  = kb.feedbackTotalsForArticle( article.getId() );
+        event.setView( "articles/show" );
+    }
+
+    function feedback( event, rc, prc ){
+        param rc.rating  = "0";
+        param rc.comment = "";
+        var article = kb.getArticleBySlug( rc.slug ?: "" );
+        if ( isNull( article ) || !kb.canRead( prc.viewer, article ) ) {
+            event.setHTTPHeader( statusCode = 404 );
+            return;
+        }
+        var rating = ( rc.rating == "up" || rc.rating == "1" ) ? 1
+                   : ( rc.rating == "down" || rc.rating == "-1" ) ? -1
+                   : 0;
+        if ( rating == 0 ) {
+            relocate( uri = "/kb/" & article.getSlug() );
+            return;
+        }
+        kb.submitFeedback( {
+            articleId : article.getId(),
+            rating    : rating,
+            contactId : ( prc.viewer.kind == "contact" ? prc.viewer.contactId : "" ),
+            ipHash    : ipHash( event ),
+            comment   : rc.comment
+        } );
+        relocate( uri = "/kb/" & article.getSlug() & "?thanks=1" );
+    }
+
+    // ---------- internals ----------
+
+    private struct function viewerFor(){
+        if ( !auth.isLoggedIn() ) {
+            return { kind : "anonymous" };
+        }
+        var u = auth.getUser();
+        if ( isNull( u ) ) return { kind : "anonymous" };
+        if ( structKeyExists( u, "isAgent" ) && u.isAgent() ) {
+            return { kind : "agent", agentId : u.getId() };
+        }
+        return {
+            kind                  : "contact",
+            contactId             : u.getId(),
+            contactOrganizationId : u.getOrganizationId() ?: ""
+        };
+    }
+
+    private string function ipHash( required any event ){
+        var fwd = arguments.event.getHTTPHeader( "X-Forwarded-For", "" );
+        var raw = len( fwd ) ? trim( listFirst( fwd, "," ) ) : ( cgi.remote_addr ?: "" );
+        if ( !len( raw ) ) return "";
+        return hash( raw, "SHA-256" );
+    }
+
+}

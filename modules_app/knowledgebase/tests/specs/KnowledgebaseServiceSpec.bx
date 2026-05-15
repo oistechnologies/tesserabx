@@ -1,0 +1,213 @@
+/**
+ * KnowledgebaseServiceSpec: end-to-end behaviour for KB writes,
+ * visibility decisions, publish lifecycle, and feedback totals.
+ *
+ * Each spec creates ephemeral data tagged with createUUID() and
+ * cleans up at the end, so the running app's seed/demo content
+ * stays untouched.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.kb       = getController().getWireBox().getInstance( "KnowledgebaseService@knowledgebase" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "KnowledgebaseService", function(){
+
+            it( "creates an article as a draft", function(){
+                var a = variables.kb.createArticle( {
+                    title      : "Spec Draft " & createUUID(),
+                    body       : "Body.",
+                    visibility : "public"
+                } );
+                expect( a.getStatus() ).toBe( "draft" );
+                expect( isNull( a.getPublishedAt() ) ).toBeTrue();
+                expect( a.getSlug() ).notToBeEmpty();
+                cleanup( a.getId() );
+            } );
+
+            it( "publish flips status, stamps published_at, snapshots a version", function(){
+                var a = variables.kb.createArticle( {
+                    title      : "Spec Pub " & createUUID(),
+                    body       : "Body v1",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( a.getId(), "", "first" );
+                var refreshed = variables.kb.getArticleById( a.getId() );
+                expect( refreshed.isPublished() ).toBeTrue();
+                expect( isNull( refreshed.getPublishedAt() ) ).toBeFalse();
+
+                var versions = queryExecute(
+                    "SELECT COUNT(*) AS n FROM kb_article_versions WHERE article_id = :id",
+                    { id : a.getId() },
+                    { returntype : "array" }
+                );
+                expect( val( versions[ 1 ].n ) ).toBe( 1 );
+
+                cleanup( a.getId() );
+            } );
+
+            it( "republish creates a second version row", function(){
+                var a = variables.kb.createArticle( {
+                    title      : "Spec ReP " & createUUID(),
+                    body       : "Body v1",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( a.getId() );
+                variables.kb.updateArticle( a.getId(), { body : "Body v2" } );
+                variables.kb.publishArticle( a.getId(), "", "edit" );
+
+                var n = queryExecute(
+                    "SELECT COUNT(*) AS n FROM kb_article_versions WHERE article_id = :id",
+                    { id : a.getId() },
+                    { returntype : "array" }
+                )[ 1 ].n;
+                expect( val( n ) ).toBe( 2 );
+
+                cleanup( a.getId() );
+            } );
+
+            describe( "canRead visibility decisions", function(){
+
+                it( "agent sees everything regardless of status", function(){
+                    var a = variables.kb.createArticle( {
+                        title      : "Internal Draft " & createUUID(),
+                        body       : ".",
+                        visibility : "internal"
+                    } );
+                    expect( variables.kb.canRead(
+                        { kind : "agent" },
+                        a
+                    ) ).toBeTrue();
+                    cleanup( a.getId() );
+                } );
+
+                it( "anonymous sees only published public articles", function(){
+                    var pub = variables.kb.createArticle( {
+                        title      : "Public Spec " & createUUID(),
+                        body       : ".",
+                        visibility : "public"
+                    } );
+                    variables.kb.publishArticle( pub.getId() );
+                    var refreshed = variables.kb.getArticleById( pub.getId() );
+
+                    var draft = variables.kb.createArticle( {
+                        title      : "Public Draft " & createUUID(),
+                        body       : ".",
+                        visibility : "public"
+                    } );
+
+                    var internal = variables.kb.createArticle( {
+                        title      : "Internal " & createUUID(),
+                        body       : ".",
+                        visibility : "internal"
+                    } );
+                    variables.kb.publishArticle( internal.getId() );
+
+                    var viewer = { kind : "anonymous" };
+                    expect( variables.kb.canRead( viewer, refreshed ) ).toBeTrue();
+                    expect( variables.kb.canRead( viewer, draft ) ).toBeFalse();
+                    expect( variables.kb.canRead( viewer, variables.kb.getArticleById( internal.getId() ) ) ).toBeFalse();
+
+                    cleanup( pub.getId() );
+                    cleanup( draft.getId() );
+                    cleanup( internal.getId() );
+                } );
+
+                it( "organization-scoped article visible to mapped org, hidden from others", function(){
+                    var orgA = variables.contacts.createOrganization( {
+                        name : "Spec KB Org A " & createUUID(),
+                        slug : "kb-a-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                    } );
+                    var orgB = variables.contacts.createOrganization( {
+                        name : "Spec KB Org B " & createUUID(),
+                        slug : "kb-b-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                    } );
+
+                    var a = variables.kb.createArticle( {
+                        title      : "Org-scoped " & createUUID(),
+                        body       : ".",
+                        visibility : "organization"
+                    } );
+                    variables.kb.publishArticle( a.getId() );
+                    variables.kb.setArticleOrganizations( a.getId(), [ orgA.getId() ] );
+                    var refreshed = variables.kb.getArticleById( a.getId() );
+
+                    var viewerA = { kind : "contact", contactOrganizationId : orgA.getId() };
+                    var viewerB = { kind : "contact", contactOrganizationId : orgB.getId() };
+                    var anon    = { kind : "anonymous" };
+
+                    expect( variables.kb.canRead( viewerA, refreshed ) ).toBeTrue();
+                    expect( variables.kb.canRead( viewerB, refreshed ) ).toBeFalse();
+                    expect( variables.kb.canRead( anon,    refreshed ) ).toBeFalse();
+
+                    cleanup( a.getId() );
+                    queryExecute( "DELETE FROM audit_events WHERE organization_id IN ( :a, :b )", { a : orgA.getId(), b : orgB.getId() } );
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgA.getId() } );
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgB.getId() } );
+                } );
+
+            } );
+
+            it( "listVisibleArticles for anonymous returns only published public articles", function(){
+                var pub = variables.kb.createArticle( {
+                    title      : "List Pub " & createUUID(),
+                    body       : ".",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( pub.getId() );
+
+                var internal = variables.kb.createArticle( {
+                    title      : "List Internal " & createUUID(),
+                    body       : ".",
+                    visibility : "internal"
+                } );
+                variables.kb.publishArticle( internal.getId() );
+
+                var list = variables.kb.listVisibleArticles( viewer = { kind : "anonymous" } );
+                var pubVisible = false;
+                var intVisible = false;
+                for ( var a in list ) {
+                    if ( a.getId() == pub.getId() ) pubVisible = true;
+                    if ( a.getId() == internal.getId() ) intVisible = true;
+                }
+                expect( pubVisible ).toBeTrue();
+                expect( intVisible ).toBeFalse();
+
+                cleanup( pub.getId() );
+                cleanup( internal.getId() );
+            } );
+
+            it( "submitFeedback + feedbackTotalsForArticle round trip", function(){
+                var a = variables.kb.createArticle( {
+                    title      : "FB " & createUUID(),
+                    body       : ".",
+                    visibility : "public"
+                } );
+                variables.kb.submitFeedback( { articleId : a.getId(), rating : 1 } );
+                variables.kb.submitFeedback( { articleId : a.getId(), rating : 1 } );
+                variables.kb.submitFeedback( { articleId : a.getId(), rating : -1 } );
+                var totals = variables.kb.feedbackTotalsForArticle( a.getId() );
+                expect( totals.helpful ).toBe( 2 );
+                expect( totals.notHelpful ).toBe( 1 );
+                cleanup( a.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------- helpers ----------
+
+    private void function cleanup( required string id ){
+        queryExecute( "DELETE FROM kb_article_feedback   WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_article_versions   WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_article_organizations WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events          WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_articles           WHERE id         = :id", { id : arguments.id } );
+    }
+
+}

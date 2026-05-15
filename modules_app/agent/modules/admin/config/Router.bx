@@ -21,6 +21,20 @@ class {
             "GET"  : "index",
             "POST" : "create"
         } );
+
+        // Knowledge base authoring (CRUD over Article).
+        route( "kb/new" ).withHandler( "Kb" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
+        route( "kb/:id/publish" ).withVerbs( "POST" ).to( "Kb.publish" );
+        route( "kb/:id/unpublish" ).withVerbs( "POST" ).to( "Kb.unpublish" );
+        route( "kb/:id/delete" ).withVerbs( "POST" ).to( "Kb.remove" );
+        route( "kb/:id" ).withHandler( "Kb" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "kb" ).to( "Kb.index" );
     }
 
 }
