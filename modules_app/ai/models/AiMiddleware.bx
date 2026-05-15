@@ -199,6 +199,72 @@ class singleton=true {
     }
 
     /**
+     * Pull the first valid JSON object out of a model response.
+     *
+     * Real-world model output, especially from "thinking" providers,
+     * often wraps the JSON in prose: an apology, a chain-of-thought
+     * preamble, or markdown fences. We scan for the first balanced
+     * top-level object (tracking braces, respecting strings and
+     * escapes) and return that substring; if no balanced object is
+     * found, we fall back to whatever isJSON accepts on the trimmed
+     * input, and finally to "".
+     *
+     * Public so every AI feature shares one extractor and the rules
+     * stay consistent across triage / summary / reply / etc.
+     */
+    public string function extractJsonObject( required string raw ){
+        var src = trim( arguments.raw );
+        if ( !len( src ) ) return "";
+
+        // Strip code fences if present so the substring scan does not
+        // have to know about them.
+        if ( left( src, 7 ) == "```json" ) src = listRest( src, char( 10 ) );
+        else if ( left( src, 3 ) == "```" ) src = listRest( src, char( 10 ) );
+        if ( right( src, 3 ) == "```" ) src = left( src, len( src ) - 3 );
+        src = trim( src );
+        if ( !len( src ) ) return "";
+
+        // Fast path: the whole thing parses.
+        if ( isJSON( src ) ) return src;
+
+        // Scan for a balanced { ... } object. Tracks string literals
+        // and escapes so a brace inside a string does not throw the
+        // depth counter off. char(34) is " and char(92) is \, used
+        // through char() to dodge BoxLang's string-literal escape
+        // rules.
+        var QUOTE     = char( 34 );
+        var BACKSLASH = char( 92 );
+        var depth     = 0;
+        var start     = 0;
+        var inStr     = false;
+        var escaped   = false;
+        for ( var i = 1; i <= len( src ); i++ ) {
+            var c = mid( src, i, 1 );
+            if ( escaped ) { escaped = false; continue; }
+            if ( inStr ) {
+                if ( c == BACKSLASH ) { escaped = true; continue; }
+                if ( c == QUOTE )     { inStr   = false; continue; }
+                continue;
+            }
+            if ( c == QUOTE ) { inStr = true; continue; }
+            if ( c == "{" ) {
+                if ( depth == 0 ) start = i;
+                depth++;
+            } else if ( c == "}" ) {
+                depth--;
+                if ( depth == 0 && start > 0 ) {
+                    var candidate = mid( src, start, i - start + 1 );
+                    if ( isJSON( candidate ) ) return candidate;
+                    // Premature closing means we picked up an inner
+                    // object as the outer; reset and keep looking.
+                    start = 0;
+                }
+            }
+        }
+        return "";
+    }
+
+    /**
      * Redact PII before any payload leaves the system. Phase 4a
      * masks email addresses; phone numbers and digit runs are TODOs
      * tracked for the security review pass in Phase 6.

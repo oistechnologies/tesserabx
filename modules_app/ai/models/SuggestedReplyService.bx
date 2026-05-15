@@ -90,37 +90,30 @@ class singleton=true {
     }
 
     /**
-     * Parse the model's strict-JSON output into {reply, notes}.
-     * Tolerates code-fence wrapping and a missing notes field. If
-     * the response is not parseable at all, the whole text becomes
-     * the reply (with a note recording the parse failure) so the
-     * agent still sees something useful instead of an empty box.
+     * Parse the model's JSON output into {reply, notes}.
+     *
+     * Real model output sometimes prefixes the JSON with thinking
+     * prose ("Let me think about this..."). The middleware's
+     * extractor handles that; we just deserialize what it returns.
+     * If nothing parseable came back, surface a clear note to the
+     * agent and leave the reply blank rather than pasting raw
+     * thinking text into a customer-facing textarea.
      */
     private struct function parseModelJson( required string raw ){
-        var stripped = stripCodeFences( trim( arguments.raw ) );
-        var fallback = { "reply" : arguments.raw, "notes" : "" };
-
-        if ( !len( stripped ) ) return fallback;
-        if ( !isJSON( stripped ) ) return { "reply" : arguments.raw, "notes" : "(AI did not return JSON; showing raw output.)" };
-
+        var jsonStr = middleware.extractJsonObject( arguments.raw );
+        if ( !len( jsonStr ) ) {
+            return { "reply" : "", "notes" : "(AI did not return parseable JSON; the raw output is in the interaction log.)" };
+        }
         try {
-            var data = jsonDeserialize( stripped );
-            if ( !isStruct( data ) ) return fallback;
+            var data = jsonDeserialize( jsonStr );
+            if ( !isStruct( data ) ) return { "reply" : "", "notes" : "" };
             return {
                 "reply" : toString( data.reply ?: "" ),
                 "notes" : toString( data.notes ?: "" )
             };
         } catch ( any e ) {
-            return { "reply" : arguments.raw, "notes" : "(AI returned malformed JSON: " & e.message & ")" };
+            return { "reply" : "", "notes" : "(AI returned malformed JSON: " & e.message & ")" };
         }
-    }
-
-    private string function stripCodeFences( required string text ){
-        var t = arguments.text;
-        if ( left( t, 7 ) == "```json" ) t = listRest( t, char( 10 ) );
-        else if ( left( t, 3 ) == "```" ) t = listRest( t, char( 10 ) );
-        if ( right( t, 3 ) == "```" ) t = left( t, len( t ) - 3 );
-        return trim( t );
     }
 
     private string function buildUserPrompt( required any ticket ){

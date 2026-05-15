@@ -210,11 +210,8 @@ class {
         }
         var result = summarizationService.summarize( t.getId() );
         if ( result.outcome == "ok" && ( len( result.summary ) || result.keyPoints.len() ) ) {
-            flash.put( "aiSummary", {
-                "summary"   : result.summary,
-                "keyPoints" : result.keyPoints,
-                "nextStep"  : result.nextStep
-            } );
+            // SummarizationService already persisted onto the ticket;
+            // the show action reads it from there.
             messagebox.info( "Summary generated." );
         } else if ( result.outcome == "error" ) {
             messagebox.error( "AI summary failed: " & result.error );
@@ -440,9 +437,11 @@ class {
         arguments.prc.suggestedReply    = flash.get( "suggestedReply", "" );
         arguments.prc.suggestedNotes    = flash.get( "suggestedNotes", "" );
 
-        // AI thread summary survives the post-redirect-get via flash;
-        // the view renders it in the Summary card when present.
-        arguments.prc.aiSummary = flash.get( "aiSummary", {} );
+        // AI thread summary is persisted on the ticket; reads here
+        // so refreshing the page shows the last generation without
+        // re-running the model. Comes back null when never generated.
+        var persistedSummary = ticketsService.getAiSummary( arguments.ticket.getId() );
+        arguments.prc.aiSummary = !isNull( persistedSummary ) ? persistedSummary : {};
 
         arguments.prc.tags = ticketsService.listTagsForTicket( arguments.ticket.getId() );
     }

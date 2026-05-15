@@ -117,11 +117,13 @@ class singleton=true {
     // ---------------- internals ----------------
 
     private struct function parseModelJson( required string raw ){
-        var stripped = stripCodeFences( trim( arguments.raw ) );
+        // Delegates to the middleware's shared extractor so triage
+        // tolerates thinking-text preambles like the other features.
+        var jsonStr = middleware.extractJsonObject( arguments.raw );
         var fallback = { "priority" : "", "ticketType" : "", "tags" : [], "sentiment" : "", "rationale" : "" };
-        if ( !len( stripped ) || !isJSON( stripped ) ) return fallback;
+        if ( !len( jsonStr ) ) return fallback;
         try {
-            var data = jsonDeserialize( stripped );
+            var data = jsonDeserialize( jsonStr );
             if ( !isStruct( data ) ) return fallback;
             return {
                 "priority"   : toString( data.priority   ?: "" ),
@@ -133,14 +135,6 @@ class singleton=true {
         } catch ( any e ) {
             return fallback;
         }
-    }
-
-    private string function stripCodeFences( required string text ){
-        var t = arguments.text;
-        if ( left( t, 7 ) == "```json" ) t = listRest( t, char( 10 ) );
-        else if ( left( t, 3 ) == "```" ) t = listRest( t, char( 10 ) );
-        if ( right( t, 3 ) == "```" ) t = left( t, len( t ) - 3 );
-        return trim( t );
     }
 
     private string function buildUserPrompt( required any ticket ){

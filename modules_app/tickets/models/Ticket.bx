@@ -43,6 +43,13 @@ class
     property name="firstResponseAt"     column="first_response_at"     sqltype="timestamp";
     property name="slaPausedAt"         column="sla_paused_at"         sqltype="timestamp";
 
+    // AI artifacts (Phase 4d). aiSummary holds the JSON struct
+    // SummarizationService produced ({summary, keyPoints, nextStep});
+    // aiSummaryAt stamps when it was generated. Both null until the
+    // first run; subsequent runs overwrite.
+    property name="aiSummary"   column="ai_summary";
+    property name="aiSummaryAt" column="ai_summary_at" sqltype="timestamp";
+
     function applyGlobalScopes( builder ){
         variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
         return this;

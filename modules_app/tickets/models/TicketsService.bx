@@ -257,6 +257,49 @@ class singleton=true {
     }
 
     /**
+     * Persist (or overwrite) the AI thread summary on a ticket.
+     * SummarizationService calls this after a successful generation
+     * so the result survives navigation and shows a "generated at"
+     * timestamp without having to re-run the model.
+     */
+    public void function saveAiSummary(
+        required string ticketId,
+        required struct summary
+    ){
+        var t = getTicket( arguments.ticketId );
+        if ( isNull( t ) ) return;
+        t.setAiSummary( jsonSerialize( {
+            "summary"   : arguments.summary.summary   ?: "",
+            "keyPoints" : arguments.summary.keyPoints ?: [],
+            "nextStep"  : arguments.summary.nextStep  ?: ""
+        } ) );
+        t.setAiSummaryAt( now() );
+        t.save();
+    }
+
+    /**
+     * Read the persisted AI summary back into the struct shape the
+     * agent UI renders. Returns null when no summary has been run.
+     */
+    public any function getAiSummary( required string ticketId ){
+        var t = getTicket( arguments.ticketId );
+        if ( isNull( t ) ) return javaCast( "null", "" );
+        var raw = t.getAiSummary() ?: "";
+        if ( !len( raw ) ) return javaCast( "null", "" );
+        try {
+            var data = jsonDeserialize( raw );
+            return {
+                "summary"     : data.summary   ?: "",
+                "keyPoints"   : isArray( data.keyPoints ?: [] ) ? data.keyPoints : [],
+                "nextStep"    : data.nextStep  ?: "",
+                "generatedAt" : t.getAiSummaryAt()
+            };
+        } catch ( any e ) {
+            return javaCast( "null", "" );
+        }
+    }
+
+    /**
      * Public wrapper around recordTicketEvent for AI triage runs.
      * Keeps the private recorder private to non-tickets callers while
      * giving the AI triage service a one-call way to land a clean

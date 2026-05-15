@@ -179,11 +179,17 @@
                                     <strong>Next step:</strong> #encodeForHTML( local.summaryData.nextStep )#
                                 </div>
                             </bx:if>
+                            <bx:if !isNull( local.summaryData.generatedAt ?: javaCast( "null", "" ) ) && isDate( local.summaryData.generatedAt )>
+                                <div class="text-body-secondary mb-2">
+                                    <i class="bi bi-clock"></i>
+                                    Generated #encodeForHTML( dateTimeFormat( local.summaryData.generatedAt, "yyyy-mm-dd HH:nn" ) )#
+                                </div>
+                            </bx:if>
                         </bx:if>
                         <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/summarize">
                             <button class="btn btn-outline-info btn-sm w-100" type="submit">
                                 <i class="bi bi-stars"></i>
-                                <bx:if local.hasSummary>Regenerate summary<bx:else>Generate summary</bx:if>
+                                <bx:if local.hasSummary>Refresh summary<bx:else>Generate summary</bx:if>
                             </button>
                         </form>
                     </div>
