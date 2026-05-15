@@ -330,6 +330,13 @@ class singleton=true {
             actorId        : arguments.data.actorId ?: "",
             metadata       : { "from" : from, "to" : to }
         );
+
+        interceptorService.announce( "onTicketStatusChanged", {
+            "ticket" : t,
+            "from"   : from,
+            "to"     : to
+        } );
+
         return t;
     }
 

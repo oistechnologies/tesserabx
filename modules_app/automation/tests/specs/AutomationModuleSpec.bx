@@ -12,10 +12,13 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( modules ).toHaveKey( "automation" );
             } );
 
-            it( "exposes its entry point", function(){
+            it( "is service-only (no HTTP entry point)", function(){
+                // automation is a service-only module. Phase 5 surfaces
+                // rule management through /agent/admin, not a top-level
+                // /automation route.
                 var cache = getController().getModuleService().getModuleConfigCache();
                 expect( cache ).toHaveKey( "automation" );
-                expect( cache[ "automation" ].entryPoint ).notToBeEmpty();
+                expect( cache[ "automation" ].entryPoint ).toBe( "" );
             } );
         } );
     }

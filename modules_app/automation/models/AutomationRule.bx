@@ -1,0 +1,25 @@
+/**
+ * AutomationRule: one trigger-condition-action rule.
+ *
+ * conditions and actions are stored as JSON text columns; the
+ * AutomationService deserializes on read. Provider-side configuration,
+ * not tenant-scoped.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="automation_rules"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="description";
+    property name="trigger";
+    property name="conditions";
+    property name="actions";
+    property name="precedence";
+    property name="isActive"  column="is_active";
+    property name="createdAt" column="created_at" sqltype="timestamp";
+    property name="updatedAt" column="updated_at" sqltype="timestamp";
+
+}

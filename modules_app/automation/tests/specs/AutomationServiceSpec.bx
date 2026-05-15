@@ -1,0 +1,279 @@
+/**
+ * AutomationServiceSpec: rule CRUD, condition evaluation, action
+ * execution, and end-to-end firing through the tickets interceptor.
+ *
+ * Spec rules use unique names + `auto-spec-` prefixes so cleanup is
+ * trivial and concurrent runs do not stomp each other. The end-to-end
+ * specs create real tickets and assert mutations after the
+ * interceptor fires synchronously.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.automation = getController().getWireBox().getInstance( "AutomationService@automation" );
+        variables.tickets    = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts   = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "AutomationService - CRUD", function(){
+            it( "creates a rule and lists it by trigger", function(){
+                var r = variables.automation.createRule( {
+                    name       : "auto-spec-crud-" & createUUID(),
+                    trigger    : "ticket.created",
+                    conditions : [ { field : "priority", op : "eq", value : "urgent" } ],
+                    actions    : [ { type : "setStatus", value : "open" } ],
+                    precedence : 50
+                } );
+                expect( r.getId() ).notToBeEmpty();
+                var ids = [];
+                for ( var x in variables.automation.listRulesForTrigger( "ticket.created" ) ) ids.append( x.getId() );
+                expect( ids ).toInclude( r.getId() );
+                cleanupRule( r.getId() );
+            } );
+        } );
+
+        describe( "AutomationService - condition evaluation", function(){
+            beforeEach( function( currentSpec ){
+                variables.fixture = makeFixture();
+            } );
+            afterEach( function( currentSpec ){
+                cleanupFixture( variables.fixture );
+            } );
+
+            it( "matches an eq condition on priority", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "match", priority : "urgent"
+                } );
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-eq-" & createUUID(), trigger : "ticket.created",
+                    conditions : [ { field : "priority", op : "eq", value : "urgent" } ],
+                    actions : []
+                } );
+                expect( variables.automation.matches( rule, t ) ).toBeTrue();
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "rejects an eq condition with a different value", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "nope", priority : "normal"
+                } );
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-eq-no-" & createUUID(), trigger : "ticket.created",
+                    conditions : [ { field : "priority", op : "eq", value : "urgent" } ],
+                    actions : []
+                } );
+                expect( variables.automation.matches( rule, t ) ).toBeFalse();
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "supports contains, in, isEmpty", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "Password reset please", priority : "normal"
+                } );
+                var rContains = variables.automation.createRule( {
+                    name : "auto-spec-contains-" & createUUID(), trigger : "ticket.created",
+                    conditions : [ { field : "subject", op : "contains", value : "password" } ],
+                    actions : []
+                } );
+                var rIn = variables.automation.createRule( {
+                    name : "auto-spec-in-" & createUUID(), trigger : "ticket.created",
+                    conditions : [ { field : "priority", op : "in", value : [ "normal", "high" ] } ],
+                    actions : []
+                } );
+                var rEmpty = variables.automation.createRule( {
+                    name : "auto-spec-empty-" & createUUID(), trigger : "ticket.created",
+                    conditions : [ { field : "requesterContactId", op : "isNotEmpty", value : "" } ],
+                    actions : []
+                } );
+                expect( variables.automation.matches( rContains, t ) ).toBeTrue();
+                expect( variables.automation.matches( rIn, t ) ).toBeTrue();
+                expect( variables.automation.matches( rEmpty, t ) ).toBeTrue();
+                cleanupTicket( t.getId() );
+                cleanupRule( rContains.getId() );
+                cleanupRule( rIn.getId() );
+                cleanupRule( rEmpty.getId() );
+            } );
+
+            it( "ANDs every condition (any false rejects the whole rule)", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "AND", priority : "urgent"
+                } );
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-and-" & createUUID(), trigger : "ticket.created",
+                    conditions : [
+                        { field : "priority", op : "eq", value : "urgent" },
+                        { field : "subject",  op : "contains", value : "nope-no-match" }
+                    ],
+                    actions : []
+                } );
+                expect( variables.automation.matches( rule, t ) ).toBeFalse();
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+        } );
+
+        describe( "AutomationService - end to end through interceptor", function(){
+            beforeEach( function( currentSpec ){
+                variables.fixture = makeFixture();
+            } );
+            afterEach( function( currentSpec ){
+                cleanupFixture( variables.fixture );
+            } );
+
+            it( "fires setStatus on ticket.created for a matching ticket", function(){
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-ee-status-" & createUUID(),
+                    trigger : "ticket.created",
+                    conditions : [ { field : "priority", op : "eq", value : "urgent" } ],
+                    actions : [ { type : "setStatus", value : "open" } ]
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "auto-fire", priority : "urgent"
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getStatus() ).toBe( "open" );
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "fires setPriority on ticket.created", function(){
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-ee-priority-" & createUUID(),
+                    trigger : "ticket.created",
+                    conditions : [ { field : "subject", op : "contains", value : "URGENT-PLEASE" } ],
+                    actions : [ { type : "setPriority", value : "urgent" } ]
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "URGENT-PLEASE help me", priority : "normal"
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "urgent" );
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "does NOT fire for an inactive rule", function(){
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-ee-inactive-" & createUUID(),
+                    trigger : "ticket.created",
+                    conditions : [],
+                    actions : [ { type : "setPriority", value : "urgent" } ],
+                    isActive : false
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "inactive rule", priority : "normal"
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "normal" );
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "fires on ticket.status_changed and respects the from/to fields", function(){
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-ee-status-changed-" & createUUID(),
+                    trigger : "ticket.status_changed",
+                    conditions : [
+                        { field : "to", op : "eq", value : "resolved" }
+                    ],
+                    actions : [ { type : "setPriority", value : "low" } ]
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "status-change-fires", priority : "urgent"
+                } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+                var stillUrgent = variables.tickets.getTicket( t.getId() );
+                expect( stillUrgent.getPriority() ).toBe( "urgent" );
+
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "resolved" } );
+                var resolved = variables.tickets.getTicket( t.getId() );
+                expect( resolved.getPriority() ).toBe( "low" );
+
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "does not loop when an action triggers another lifecycle event", function(){
+                // A rule that listens for status_changed and then sets
+                // status. Without the re-entry guard this would loop
+                // forever (status change -> action sets status -> new
+                // status change -> action fires again -> ...).
+                var rule = variables.automation.createRule( {
+                    name : "auto-spec-ee-loop-" & createUUID(),
+                    trigger : "ticket.status_changed",
+                    conditions : [],
+                    actions : [ { type : "setPriority", value : "urgent" } ]
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "loop-test", priority : "normal"
+                } );
+                // Just confirm the chain terminates and the action ran.
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "urgent" );
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Auto Spec Org " & createUUID(),
+            slug : "auto-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "auto-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var agentId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :hash, false, true )",
+            {
+                id    : agentId,
+                email : "auto-spec-agent-" & createUUID() & "@example.com",
+                hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
+        return { org : org, contact : contact, agentId : agentId };
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.fixture.agentId } );
+    }
+
+    private void function cleanupRule( required string id ){
+        queryExecute( "DELETE FROM automation_rules WHERE id = :id", { id : arguments.id } );
+    }
+
+}

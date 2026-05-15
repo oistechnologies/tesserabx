@@ -35,7 +35,8 @@ class {
         // via getPropertyMixin.
         variables.interceptorSettings = { customInterceptionPoints : [
             "onTicketCreated",
-            "onTicketMessageAdded"
+            "onTicketMessageAdded",
+            "onTicketStatusChanged"
         ] };
         variables.interceptors = [];
     }

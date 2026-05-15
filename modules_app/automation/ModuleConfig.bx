@@ -2,6 +2,9 @@
  * automation module: trigger-condition-action rules engine.
  *
  * Owns AutomationRule plus escalation and assignment-strategy config.
+ * Wires an interceptor that bridges the tickets module's announces
+ * (onTicketCreated, onTicketStatusChanged) into the rules engine so
+ * other modules never have to know automation exists.
  */
 class {
 
@@ -12,20 +15,35 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    this.entryPoint         = "automation";
+    // Service-only module: no HTTP surface. The admin UI in Phase 5
+    // surfaces rule management under /agent/admin.
+    this.entryPoint         = "";
     this.modelNamespace     = "automation";
     this.cfmapping          = "tesserabx.modules.automation";
     this.autoMapModels      = false;
     this.dependencies       = [ "tickets", "contacts" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings            = {};
+        variables.routes              = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors        = [
+            {
+                class      : "#moduleMapping#.interceptors.AutomationRuleInterceptor",
+                name       : "AutomationRuleInterceptor",
+                properties : {}
+            }
+        ];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "AutomationRule@automation" )
+              .to( "#moduleMapping#.models.AutomationRule" );
+        binder.map( "AutomationService@automation" )
+              .to( "#moduleMapping#.models.AutomationService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

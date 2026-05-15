@@ -1,0 +1,275 @@
+/**
+ * AutomationService: the rules engine.
+ *
+ * Phase 3c scope:
+ *   - CRUD over AutomationRule
+ *   - evaluateForTicket( trigger, ticket [, eventData ] ): pick every
+ *     active rule whose `trigger` matches, evaluate its conditions
+ *     against the ticket, and execute the rule's actions in declared
+ *     order for each match.
+ *   - listenOnTicketCreated / listenOnTicketStatusChanged: the
+ *     module's onLoad registers an interceptor that calls these.
+ *
+ * Re-entrancy guard: action execution can move ticket status or
+ * priority, which fires further interceptors. We use a thread-local
+ * boolean to short-circuit nested automation evaluation so a chain
+ * of automation actions does not re-trigger this service. Direct
+ * service calls from outside automation are unaffected.
+ *
+ * Trigger names match the ColdBox custom interception points the
+ * tickets module declares ("onTicketCreated", "onTicketStatusChanged").
+ * Persisted rules store a normalized form: "ticket.created" and
+ * "ticket.status_changed".
+ *
+ * Conditions: AND across all entries. Fields supported in Phase 3c:
+ *   priority, status, ticketType, source, subject, organizationId,
+ *   requesterContactId, originatingEmail, isAccountless.
+ * Operators: eq, neq, contains, notContains, in, notIn, isEmpty, isNotEmpty.
+ *
+ * Actions (Phase 3c): setPriority, setStatus, assignToAgent.
+ * Routing strategies (round-robin etc.) land in 3d.
+ */
+class singleton=true {
+
+    property name="wirebox"            inject="wirebox";
+    property name="ticketsService"     inject="TicketsService@tickets";
+
+    variables.SUPPORTED_TRIGGERS = [ "ticket.created", "ticket.status_changed" ];
+    variables.SUPPORTED_OPS      = [ "eq", "neq", "contains", "notContains", "in", "notIn", "isEmpty", "isNotEmpty" ];
+    variables.SUPPORTED_ACTIONS  = [ "setPriority", "setStatus", "assignToAgent" ];
+
+    // Per-thread re-entrancy guard. createObject().init() makes a Java
+    // ThreadLocal we set/clear around every action execution; an
+    // action-initiated event will see it set and bail out.
+    variables.reentryGuard = createObject( "java", "java.lang.ThreadLocal" ).init();
+
+    public array function listSupportedTriggers() { return variables.SUPPORTED_TRIGGERS; }
+    public array function listSupportedOps()      { return variables.SUPPORTED_OPS; }
+    public array function listSupportedActions()  { return variables.SUPPORTED_ACTIONS; }
+
+    // ---------------- CRUD ----------------
+
+    public array function listRules(){
+        return wirebox.getInstance( "AutomationRule@automation" )
+            .orderBy( "precedence", "desc" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function getRule( required string id ){
+        var r = wirebox.getInstance( "AutomationRule@automation" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( r ) ? javaCast( "null", "" ) : r;
+    }
+
+    public array function listRulesForTrigger( required string trigger ){
+        return wirebox.getInstance( "AutomationRule@automation" )
+            .where( "trigger", arguments.trigger )
+            .where( "is_active", true )
+            .orderBy( "precedence", "desc" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function createRule( required struct data ){
+        var r = wirebox.getInstance( "AutomationRule@automation" );
+        r.setId( newId() );
+        r.setName( arguments.data.name );
+        if ( structKeyExists( arguments.data, "description" ) ) r.setDescription( arguments.data.description );
+        r.setTrigger( arguments.data.trigger );
+        r.setConditions( normalizeJson( arguments.data.conditions ?: [] ) );
+        r.setActions(    normalizeJson( arguments.data.actions    ?: [] ) );
+        r.setPrecedence( arguments.data.precedence ?: 0 );
+        r.setIsActive(   structKeyExists( arguments.data, "isActive" ) ? !!arguments.data.isActive : true );
+        r.save();
+        return r;
+    }
+
+    public any function updateRule( required string id, required struct data ){
+        var r = getRule( arguments.id );
+        if ( isNull( r ) ) {
+            throw( type = "AutomationService.RuleNotFound", message = "No rule with id [#arguments.id#]" );
+        }
+        if ( structKeyExists( arguments.data, "name"        ) ) r.setName( arguments.data.name );
+        if ( structKeyExists( arguments.data, "description" ) ) r.setDescription( arguments.data.description );
+        if ( structKeyExists( arguments.data, "trigger"     ) ) r.setTrigger( arguments.data.trigger );
+        if ( structKeyExists( arguments.data, "conditions"  ) ) r.setConditions( normalizeJson( arguments.data.conditions ) );
+        if ( structKeyExists( arguments.data, "actions"     ) ) r.setActions(    normalizeJson( arguments.data.actions    ) );
+        if ( structKeyExists( arguments.data, "precedence"  ) ) r.setPrecedence( arguments.data.precedence );
+        if ( structKeyExists( arguments.data, "isActive"    ) ) r.setIsActive( !!arguments.data.isActive );
+        r.save();
+        return r;
+    }
+
+    public void function deleteRule( required string id ){
+        queryExecute( "DELETE FROM automation_rules WHERE id = :id", { id : arguments.id } );
+    }
+
+    // ---------------- Evaluation ----------------
+
+    /**
+     * Evaluate every active rule for the given trigger against the
+     * ticket. Returns an array of structs describing what happened,
+     * for the spec suite to assert and for the audit timeline to
+     * carry. A no-op when the re-entry guard is set.
+     */
+    public array function evaluateForTicket(
+        required string trigger,
+        required any ticket,
+        struct eventData = {}
+    ){
+        if ( !isNull( variables.reentryGuard.get() ) && variables.reentryGuard.get() == true ) {
+            return [ { "skipped" : "reentry" } ];
+        }
+        var fired = [];
+        var rules = listRulesForTrigger( arguments.trigger );
+        for ( var rule in rules ) {
+            if ( !matches( rule, arguments.ticket, arguments.eventData ) ) continue;
+            var applied = executeActions( rule, arguments.ticket );
+            fired.append( { "ruleId" : rule.getId(), "ruleName" : rule.getName(), "applied" : applied } );
+        }
+        return fired;
+    }
+
+    /**
+     * Are every one of the rule's conditions true for this ticket?
+     * Public so specs can stress condition evaluation without going
+     * through executeActions.
+     */
+    public boolean function matches( required any rule, required any ticket, struct eventData = {} ){
+        var conds = jsonDeserialize( arguments.rule.getConditions() ?: "[]" );
+        if ( !isArray( conds ) || !conds.len() ) return true;
+        for ( var c in conds ) {
+            if ( !conditionPasses( c, arguments.ticket, arguments.eventData ) ) return false;
+        }
+        return true;
+    }
+
+    private boolean function conditionPasses( required struct condition, required any ticket, required struct eventData ){
+        var field = arguments.condition.field ?: "";
+        var op    = arguments.condition.op    ?: "eq";
+        var want  = arguments.condition.value ?: "";
+        var actual = readField( field, arguments.ticket, arguments.eventData );
+
+        switch ( op ) {
+            case "eq":           return ( actual == want );
+            case "neq":          return ( actual != want );
+            case "contains":     return ( findNoCase( toString( want ), toString( actual ) ) > 0 );
+            case "notContains":  return ( findNoCase( toString( want ), toString( actual ) ) == 0 );
+            case "in":           return arrayContainsCi( asArray( want ), actual );
+            case "notIn":        return !arrayContainsCi( asArray( want ), actual );
+            case "isEmpty":      return ( !len( toString( actual ) ) );
+            case "isNotEmpty":   return ( len( toString( actual ) ) > 0 );
+            default: return false;
+        }
+    }
+
+    private any function readField( required string field, required any ticket, required struct eventData ){
+        switch ( arguments.field ) {
+            case "priority":           return arguments.ticket.getPriority() ?: "";
+            case "status":             return arguments.ticket.getStatus() ?: "";
+            case "ticketType":         return arguments.ticket.getTicketType() ?: "";
+            case "source":             return arguments.ticket.getSource() ?: "";
+            case "subject":            return arguments.ticket.getSubject() ?: "";
+            case "organizationId":     return arguments.ticket.getOrganizationId() ?: "";
+            case "requesterContactId": return arguments.ticket.getRequesterContactId() ?: "";
+            case "originatingEmail":   return arguments.ticket.getOriginatingEmail() ?: "";
+            case "isAccountless":      return arguments.ticket.isAccountless() ? "true" : "false";
+            case "from":               return arguments.eventData.from ?: "";
+            case "to":                 return arguments.eventData.to ?: "";
+        }
+        return "";
+    }
+
+    private array function executeActions( required any rule, required any ticket ){
+        var actions = jsonDeserialize( arguments.rule.getActions() ?: "[]" );
+        if ( !isArray( actions ) || !actions.len() ) return [];
+        var applied = [];
+
+        variables.reentryGuard.set( true );
+        try {
+            for ( var a in actions ) {
+                var record = applyOne( a, arguments.ticket, arguments.rule );
+                applied.append( record );
+            }
+        } finally {
+            variables.reentryGuard.remove();
+        }
+        return applied;
+    }
+
+    private struct function applyOne( required struct action, required any ticket, required any rule ){
+        var type  = arguments.action.type ?: "";
+        var value = arguments.action.value ?: "";
+        var t     = arguments.ticket;
+        switch ( type ) {
+            case "setPriority":
+                t.setPriority( value );
+                t.save();
+                return { "type" : type, "value" : value };
+            case "setStatus":
+                ticketsService.changeStatus( {
+                    ticketId  : t.getId(),
+                    status    : value,
+                    actorType : "automation",
+                    actorId   : arguments.rule.getId()
+                } );
+                return { "type" : type, "value" : value };
+            case "assignToAgent":
+                ticketsService.assignToAgent( {
+                    ticketId  : t.getId(),
+                    agentId   : value,
+                    actorType : "automation",
+                    actorId   : arguments.rule.getId()
+                } );
+                return { "type" : type, "value" : value };
+        }
+        return { "type" : type, "skipped" : true, "reason" : "unsupported" };
+    }
+
+    // ---------------- Interceptor handlers ----------------
+
+    /**
+     * onTicketCreated listener entry. The interceptor wired in
+     * ModuleConfig calls this with the standard ColdBox `data` struct.
+     */
+    public void function handleTicketCreated( struct data = {} ){
+        if ( !structKeyExists( arguments.data, "ticket" ) || isNull( arguments.data.ticket ) ) return;
+        evaluateForTicket( "ticket.created", arguments.data.ticket );
+    }
+
+    public void function handleTicketStatusChanged( struct data = {} ){
+        if ( !structKeyExists( arguments.data, "ticket" ) || isNull( arguments.data.ticket ) ) return;
+        evaluateForTicket(
+            "ticket.status_changed",
+            arguments.data.ticket,
+            { from : arguments.data.from ?: "", to : arguments.data.to ?: "" }
+        );
+    }
+
+    // ---------------- internals ----------------
+
+    private boolean function arrayContainsCi( required array list, required any value ){
+        for ( var v in arguments.list ) {
+            if ( toString( v ) == toString( arguments.value ) ) return true;
+        }
+        return false;
+    }
+
+    private array function asArray( required any value ){
+        if ( isArray( arguments.value ) ) return arguments.value;
+        if ( isSimpleValue( arguments.value ) ) return listToArray( arguments.value, "," );
+        return [];
+    }
+
+    private string function normalizeJson( required any value ){
+        if ( isSimpleValue( arguments.value ) ) return arguments.value;
+        return jsonSerialize( arguments.value );
+    }
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}
