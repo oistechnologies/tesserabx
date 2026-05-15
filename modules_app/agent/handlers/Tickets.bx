@@ -12,12 +12,14 @@
  */
 class {
 
-    property name="ticketsService"  inject="TicketsService@tickets";
-    property name="contactsService" inject="ContactsService@contacts";
-    property name="channelsService" inject="ChannelsService@channels";
-    property name="slaService"      inject="SlaService@sla";
-    property name="messagebox"      inject="messagebox@cbmessagebox";
-    property name="auth"            inject="AuthenticationService@cbauth";
+    property name="ticketsService"        inject="TicketsService@tickets";
+    property name="contactsService"       inject="ContactsService@contacts";
+    property name="channelsService"       inject="ChannelsService@channels";
+    property name="slaService"            inject="SlaService@sla";
+    property name="aiCapability"          inject="AiCapability@ai";
+    property name="suggestedReplyService" inject="SuggestedReplyService@ai";
+    property name="messagebox"            inject="messagebox@cbmessagebox";
+    property name="auth"                  inject="AuthenticationService@cbauth";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
@@ -146,6 +148,40 @@ class {
 
     function reply( event, rc, prc ){
         return postMessage( event, rc, prc, false, "Reply sent." );
+    }
+
+    /**
+     * Draft a reply through the AI middleware and redirect back to
+     * the ticket page with the suggestion in flash so the view can
+     * prefill the public-reply textarea. A no-op (redirect with a
+     * warning) when the AI capability is off, which keeps the
+     * route safe even if someone hits it directly.
+     */
+    function suggestReply( event, rc, prc ){
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !aiCapability.isFeatureEnabled( "suggested-reply" ) ) {
+            messagebox.warn( "AI suggestions are not enabled." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        var result = suggestedReplyService.suggest(
+            ticketId     : t.getId(),
+            actorAgentId : currentAgentId()
+        );
+        if ( result.outcome == "ok" && len( result.text ) ) {
+            flash.put( "suggestedReply", result.text );
+            messagebox.info( "Reply drafted." );
+        } else if ( result.outcome == "error" ) {
+            messagebox.error( "AI suggestion failed: " & result.error );
+        } else {
+            messagebox.warn( "AI suggestion not available (outcome: " & result.outcome & ")." );
+        }
+        relocate( uri = "/agent/tickets/" & t.getId() );
     }
 
     function internalNote( event, rc, prc ){
@@ -355,6 +391,15 @@ class {
         arguments.prc.slaPolicy = len( arguments.ticket.getSlaPolicyId() ?: "" )
             ? slaService.getPolicyById( arguments.ticket.getSlaPolicyId() )
             : javaCast( "null", "" );
+
+        // AI affordances. When the capability is off, render nothing
+        // anywhere; the view checks `prc.aiEnabled` before drawing
+        // any AI control. Per CLAUDE.md: AI must be invisible when
+        // disabled.
+        arguments.prc.aiEnabled         = aiCapability.isFeatureEnabled( "suggested-reply" );
+        // The suggestReply action stores the draft in flash so it
+        // survives the post-redirect-get cycle and ends up here.
+        arguments.prc.suggestedReply    = flash.get( "suggestedReply", "" );
     }
 
     private string function currentAgentId(){

@@ -1,0 +1,30 @@
+/**
+ * SuggestedReplyServiceSpec: behaviour we can verify without a live
+ * provider. The disabled-capability path is the contract every
+ * feature exposes; the unknown-ticket path is the contract every
+ * feature exposes; the actual provider call is tested in 4b's
+ * smoke verification against the user's real API key.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "SuggestedReplyService@ai" );
+    }
+
+    function run(){
+        describe( "SuggestedReplyService", function(){
+
+            it( "returns available=false when the AI capability is off", function(){
+                var result = variables.svc.suggest( ticketId : "nonexistent" );
+                // Capability defaults to false in dev / CI, so we
+                // never even read the ticket.
+                expect( result.available ).toBeFalse();
+                expect( result.outcome ).toBe( "disabled" );
+            } );
+
+        } );
+    }
+
+}

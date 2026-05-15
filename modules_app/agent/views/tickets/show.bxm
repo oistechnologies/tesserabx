@@ -95,8 +95,16 @@
                 </ul>
                 <div class="tab-content pt-3">
                     <div class="tab-pane fade show active" id="public-pane" role="tabpanel">
+                        <bx:if prc.aiEnabled ?: false>
+                            <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/suggest-reply" class="mb-2">
+                                <button class="btn btn-outline-info btn-sm" type="submit">
+                                    <i class="bi bi-stars"></i> Suggest reply
+                                </button>
+                                <small class="text-body-secondary ms-2">Drafts a reply from the conversation so far.</small>
+                            </form>
+                        </bx:if>
                         <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
-                            <textarea class="form-control mb-2" name="body" rows="4" placeholder="Reply visible to the requester..."></textarea>
+                            <textarea class="form-control mb-2" name="body" rows="4" placeholder="Reply visible to the requester...">#encodeForHTML( prc.suggestedReply ?: "" )#</textarea>
                             <div class="d-flex justify-content-end">
                                 <button class="btn btn-primary" type="submit">Send reply</button>
                             </div>

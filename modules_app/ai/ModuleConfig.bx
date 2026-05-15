@@ -22,7 +22,7 @@ class {
     this.modelNamespace     = "ai";
     this.cfmapping          = "tesserabx.modules.ai";
     this.autoMapModels      = false;
-    this.dependencies       = [ "contacts", "audit" ];
+    this.dependencies       = [ "contacts", "audit", "tickets" ];
 
     function configure(){
         variables.settings = {};
@@ -39,6 +39,9 @@ class {
               .asSingleton();
         binder.map( "AiMiddleware@ai" )
               .to( "#moduleMapping#.models.AiMiddleware" )
+              .asSingleton();
+        binder.map( "SuggestedReplyService@ai" )
+              .to( "#moduleMapping#.models.SuggestedReplyService" )
               .asSingleton();
     }
 

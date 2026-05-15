@@ -1,0 +1,90 @@
+/**
+ * SuggestedReplyService: drafts an agent reply from a ticket's
+ * subject and recent messages.
+ *
+ * Lives in the `ai` module rather than `tickets` so the cross-module
+ * direction stays one-way: AI features import the ticket service
+ * for reads, never the other direction. The build plan's dependency
+ * graph keeps `tickets` below `ai` and forbids `tickets` from knowing
+ * AI is on.
+ *
+ * Phase 4b ships the agent-facing path (synchronous call from a
+ * handler action). Latency-sensitive paths get cbq-job wrapping in
+ * Phase 4c+ when triage and bulk operations land.
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    /**
+     * Suggest a reply for a ticket. Returns:
+     *   { available: bool, text: string, outcome: string, error: string }
+     * `available` is false when the AI capability is disabled OR the
+     * per-feature gate is off; callers use that to decide whether to
+     * render the UI affordance at all.
+     */
+    public struct function suggest( required string ticketId, string actorAgentId = "" ){
+        var off = { "available" : false, "text" : "", "outcome" : "disabled", "error" : "" };
+        if ( !capability.isFeatureEnabled( "suggested-reply" ) ) return off;
+
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) {
+            return { "available" : true, "text" : "", "outcome" : "error", "error" : "Ticket not found" };
+        }
+
+        var prompt = buildPrompt( ticket );
+        var result = middleware.complete(
+            feature : "suggested-reply",
+            prompt  : prompt,
+            options : {
+                organizationId : ticket.getOrganizationId() ?: "",
+                ticketId       : ticket.getId(),
+                agentId        : arguments.actorAgentId,
+                temperature    : 0.4,
+                maxTokens      : 600
+            }
+        );
+        return {
+            "available" : true,
+            "text"      : result.text ?: "",
+            "outcome"   : result.outcome,
+            "error"     : result.error ?: ""
+        };
+    }
+
+    private string function buildPrompt( required any ticket ){
+        var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        var lines = [
+            "You are drafting a reply on behalf of a support agent for a help-desk ticket.",
+            "Respond in a clear, professional tone. Address the customer's most recent message.",
+            "Do not invent facts; if information is missing, ask a focused follow-up question.",
+            "Keep the reply concise (typically 2 to 6 sentences). Sign off with a friendly closing.",
+            "",
+            "Ticket subject: " & arguments.ticket.getSubject(),
+            "Ticket priority: " & ( arguments.ticket.getPriority() ?: "normal" ),
+            ""
+        ];
+        if ( !messages.len() ) {
+            lines.append( "No messages yet on this ticket. Draft an opening response acknowledging the request." );
+            return lines.toList( chr( 10 ) );
+        }
+
+        // Walk the recent messages (oldest first) and label each so
+        // the model can tell who said what. We include up to the last
+        // 10 messages; long threads get the most recent slice.
+        var slice = messages.len() <= 10 ? messages : messages.slice( messages.len() - 9, 10 );
+        lines.append( "Conversation so far:" );
+        for ( var m in slice ) {
+            if ( m.getIsInternal() ?: false ) continue; // never leak internal notes into the model prompt
+            var who = "Customer";
+            if ( len( m.getAuthorAgentId() ?: "" ) ) who = "Agent";
+            lines.append( who & ": " & ( m.getBody() ?: "" ) );
+        }
+        lines.append( "" );
+        lines.append( "Draft the agent's next reply." );
+        return lines.toList( chr( 10 ) );
+    }
+
+}
