@@ -146,74 +146,110 @@
 
         <bx:if prc.canShowBlockCard ?: false>
             <div class="card mb-3 border-danger">
-                <div class="card-header bg-danger-subtle">Block this sender</div>
-                <div class="card-body">
-                    <bx:if prc.isSenderBlocked ?: false>
-                        <p class="small mb-2">
-                            <i class="bi bi-shield-x"></i>
-                            Sender <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> is already on the inbound blacklist.
-                            Future emails from this sender will not become tickets.
-                        </p>
-                        <a class="btn btn-outline-secondary btn-sm w-100" href="/agent/admin/blacklist">
-                            Manage blacklist
-                        </a>
-                    <bx:else>
-                        <p class="small mb-2">Adds <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> (or its domain) to the inbound blacklist. Future emails from a blocked sender are dropped instead of becoming tickets, and this ticket will be auto-closed with an internal note.</p>
-                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/block-sender">
-                            <div class="mb-2">
-                                <select class="form-select form-select-sm" name="scope">
-                                    <option value="email">This address only (#encodeForHTML( local.t.getOriginatingEmail() )#)</option>
-                                    <option value="domain">Entire domain (@#encodeForHTML( listLast( local.t.getOriginatingEmail(), "@" ) )#)</option>
-                                </select>
-                            </div>
-                            <div class="mb-2">
-                                <input type="text" class="form-control form-control-sm" name="reason" placeholder="Reason (optional)">
-                            </div>
-                            <button class="btn btn-danger btn-sm w-100" type="submit">Block</button>
-                        </form>
-                    </bx:if>
+                <div class="card-header bg-danger-subtle p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                       data-bs-toggle="collapse"
+                       href="##block-sender-card"
+                       role="button"
+                       aria-expanded="false"
+                       aria-controls="block-sender-card">
+                        <span>Block this sender</span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="block-sender-card" class="collapse">
+                    <div class="card-body">
+                        <bx:if prc.isSenderBlocked ?: false>
+                            <p class="small mb-2">
+                                <i class="bi bi-shield-x"></i>
+                                Sender <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> is already on the inbound blacklist.
+                                Future emails from this sender will not become tickets.
+                            </p>
+                            <a class="btn btn-outline-secondary btn-sm w-100" href="/agent/admin/blacklist">
+                                Manage blacklist
+                            </a>
+                        <bx:else>
+                            <p class="small mb-2">Adds <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> (or its domain) to the inbound blacklist. Future emails from a blocked sender are dropped instead of becoming tickets, and this ticket will be auto-closed with an internal note.</p>
+                            <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/block-sender">
+                                <div class="mb-2">
+                                    <select class="form-select form-select-sm" name="scope">
+                                        <option value="email">This address only (#encodeForHTML( local.t.getOriginatingEmail() )#)</option>
+                                        <option value="domain">Entire domain (@#encodeForHTML( listLast( local.t.getOriginatingEmail(), "@" ) )#)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <input type="text" class="form-control form-control-sm" name="reason" placeholder="Reason (optional)">
+                                </div>
+                                <button class="btn btn-danger btn-sm w-100" type="submit">Block</button>
+                            </form>
+                        </bx:if>
+                    </div>
                 </div>
             </div>
         </bx:if>
 
         <bx:if local.t.isAccountless()>
             <div class="card mb-3 border-warning">
-                <div class="card-header bg-warning-subtle">Promote sender to contact</div>
-                <div class="card-body">
-                    <p class="small mb-2">Creates a Contact for <code>#encodeForHTML( local.t.getOriginatingEmail() ?: "" )#</code> in the chosen organization and assigns this ticket to them.</p>
-                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/promote-sender">
-                        <div class="mb-2">
-                            <select class="form-select" name="organizationId" required>
-                                <option value="">Select organization...</option>
-                                <bx:loop array="#prc.organizations#" item="local.o">
-                                    <option value="#encodeForHTMLAttribute( local.o.getId() )#">#encodeForHTML( local.o.getName() )#</option>
-                                </bx:loop>
-                            </select>
-                        </div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-6"><input type="text" class="form-control" name="firstName" placeholder="First name"></div>
-                            <div class="col-6"><input type="text" class="form-control" name="lastName" placeholder="Last name"></div>
-                        </div>
-                        <div class="mb-2">
-                            <input type="text" class="form-control" name="password" placeholder="Initial password (min 8 chars)" minlength="8" required>
-                        </div>
-                        <button class="btn btn-warning w-100" type="submit">Promote</button>
-                    </form>
+                <div class="card-header bg-warning-subtle p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                       data-bs-toggle="collapse"
+                       href="##promote-sender-card"
+                       role="button"
+                       aria-expanded="false"
+                       aria-controls="promote-sender-card">
+                        <span>Promote sender to contact</span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="promote-sender-card" class="collapse">
+                    <div class="card-body">
+                        <p class="small mb-2">Creates a Contact for <code>#encodeForHTML( local.t.getOriginatingEmail() ?: "" )#</code> in the chosen organization and assigns this ticket to them.</p>
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/promote-sender">
+                            <div class="mb-2">
+                                <select class="form-select" name="organizationId" required>
+                                    <option value="">Select organization...</option>
+                                    <bx:loop array="#prc.organizations#" item="local.o">
+                                        <option value="#encodeForHTMLAttribute( local.o.getId() )#">#encodeForHTML( local.o.getName() )#</option>
+                                    </bx:loop>
+                                </select>
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6"><input type="text" class="form-control" name="firstName" placeholder="First name"></div>
+                                <div class="col-6"><input type="text" class="form-control" name="lastName" placeholder="Last name"></div>
+                            </div>
+                            <div class="mb-2">
+                                <input type="text" class="form-control" name="password" placeholder="Initial password (min 8 chars)" minlength="8" required>
+                            </div>
+                            <button class="btn btn-warning w-100" type="submit">Promote</button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </bx:if>
 
         <div class="card">
-            <div class="card-header">Timeline</div>
-            <div class="card-body p-0">
-                <ul class="list-group list-group-flush small">
-                    <bx:loop array="#prc.events#" item="local.e">
-                        <li class="list-group-item">
-                            <div class="text-body-secondary">#encodeForHTML( dateTimeFormat( local.e.getOccurredAt(), "yyyy-mm-dd HH:nn:ss" ) )#</div>
-                            <code>#encodeForHTML( local.e.getEventType() )#</code>
-                        </li>
-                    </bx:loop>
-                </ul>
+            <div class="card-header p-0">
+                <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                   data-bs-toggle="collapse"
+                   href="##timeline-card"
+                   role="button"
+                   aria-expanded="false"
+                   aria-controls="timeline-card">
+                    <span>Timeline</span>
+                    <i class="bi bi-chevron-down"></i>
+                </a>
+            </div>
+            <div id="timeline-card" class="collapse">
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush small">
+                        <bx:loop array="#prc.events#" item="local.e">
+                            <li class="list-group-item">
+                                <div class="text-body-secondary">#encodeForHTML( dateTimeFormat( local.e.getOccurredAt(), "yyyy-mm-dd HH:nn:ss" ) )#</div>
+                                <code>#encodeForHTML( local.e.getEventType() )#</code>
+                            </li>
+                        </bx:loop>
+                    </ul>
+                </div>
             </div>
         </div>
 

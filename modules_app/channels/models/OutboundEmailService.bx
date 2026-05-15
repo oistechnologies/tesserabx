@@ -40,7 +40,7 @@ class singleton=true {
         var recipient = recipientAddress( arguments.ticket );
         if ( !len( recipient ) ) return javaCast( "null", "" );
 
-        var ackSources = [ "email", "portal", "widget" ];
+        var ackSources = [ "email", "portal", "widget", "contact-form" ];
         if ( !arrayFindNoCase( ackSources, arguments.ticket.getSource() ) ) {
             return javaCast( "null", "" );
         }

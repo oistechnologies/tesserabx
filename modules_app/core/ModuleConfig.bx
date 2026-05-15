@@ -47,6 +47,9 @@ class {
 
     function onLoad(){
         controller.getLogBox().getLogger( this ).info( "core module loaded" );
+        binder.map( "RateLimiter@core" )
+              .to( "#moduleMapping#.models.RateLimiter" )
+              .asSingleton();
     }
 
     function onUnload(){}

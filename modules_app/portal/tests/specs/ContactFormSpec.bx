@@ -1,0 +1,130 @@
+/**
+ * ContactFormSpec: validates the public guest-submission endpoint
+ * at /contact.
+ *
+ * Exercises the handler via ColdBox's `execute()` so the spec walks
+ * the same code path real HTTP traffic does (preHandler -> rate
+ * limit -> validate -> service call). Each spec uses a unique
+ * remote-IP override so the rate-limiter bucket starts fresh.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.rl = getController().getWireBox().getInstance( "RateLimiter@core" );
+    }
+
+    function afterEach( spec ){
+        // Reset every key we might have touched. Tests use a fixed
+        // string we set on cgi below.
+        variables.rl.reset( "portal:contact", "203.0.113.99" );
+    }
+
+    function run(){
+        describe( "portal:Contact", function(){
+
+            it( "GET /contact renders the form", function(){
+                var event = execute( event = "portal:Contact.index", renderResults = true );
+                expect( event.getStatusCode() ).toBe( 200 );
+                expect( event.getRenderedContent() ).toInclude( "Contact support" );
+            } );
+
+            it( "POST creates an accountless ticket when required fields are present", function(){
+                cgi.remote_addr = "203.0.113.99";
+                variables.rl.reset( "portal:contact", "203.0.113.99" );
+
+                var email = lCase( "visitor-" & createUUID() & "@example.com" );
+                var rc = getRequestContext();
+                rc.setValue( "email", email );
+                rc.setValue( "subject", "Spec subject" );
+                rc.setValue( "body", "Hi please help me with this thing." );
+                execute( event = "portal:Contact.create", renderResults = true );
+
+                var rows = queryExecute(
+                    "SELECT id FROM tickets WHERE originating_email = :e",
+                    { e : email },
+                    { returntype : "array" }
+                );
+                expect( arrayLen( rows ) ).toBe( 1 );
+
+                cleanupTicket( rows[ 1 ].id );
+            } );
+
+            it( "POST rejects an empty email", function(){
+                cgi.remote_addr = "203.0.113.99";
+                variables.rl.reset( "portal:contact", "203.0.113.99" );
+
+                var before = queryExecute(
+                    "SELECT count(*) AS n FROM tickets",
+                    {}, { returntype : "array" }
+                )[ 1 ].n;
+
+                var rc = getRequestContext();
+                rc.setValue( "email", "" );
+                rc.setValue( "body", "I forgot my email." );
+                execute( event = "portal:Contact.create", renderResults = true );
+
+                var after = queryExecute(
+                    "SELECT count(*) AS n FROM tickets",
+                    {}, { returntype : "array" }
+                )[ 1 ].n;
+                expect( after ).toBe( before );
+            } );
+
+            it( "POST refuses past the rate limit", function(){
+                cgi.remote_addr = "203.0.113.99";
+                variables.rl.reset( "portal:contact", "203.0.113.99" );
+
+                for ( var i = 1; i <= 5; i++ ) {
+                    var rc = getRequestContext();
+                    rc.setValue( "email", "burner-" & i & "-" & createUUID() & "@example.com" );
+                    rc.setValue( "body",  "Burning through the rate limit." );
+                    execute( event = "portal:Contact.create", renderResults = true );
+                }
+
+                var emailNo6 = "blocked-" & createUUID() & "@example.com";
+                var rc = getRequestContext();
+                rc.setValue( "email", emailNo6 );
+                rc.setValue( "body",  "This one should be blocked." );
+                execute( event = "portal:Contact.create", renderResults = true );
+
+                var blockedRows = queryExecute(
+                    "SELECT id FROM tickets WHERE originating_email = :e",
+                    { e : emailNo6 },
+                    { returntype : "array" }
+                );
+                expect( arrayLen( blockedRows ) ).toBe( 0 );
+
+                // Clean up the five that did go through.
+                queryExecute(
+                    "DELETE FROM ticket_events     WHERE ticket_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )",
+                    {}, { result : "_" }
+                );
+                queryExecute(
+                    "DELETE FROM ticket_messages   WHERE ticket_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )",
+                    {}, { result : "_" }
+                );
+                queryExecute(
+                    "DELETE FROM audit_events      WHERE entity_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )",
+                    {}, { result : "_" }
+                );
+                queryExecute(
+                    "DELETE FROM tickets WHERE originating_email LIKE 'burner-%'",
+                    {}, { result : "_" }
+                );
+            } );
+
+        } );
+    }
+
+    // ---------- helpers ----------
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets WHERE id = :id", { id : arguments.id } );
+    }
+
+}

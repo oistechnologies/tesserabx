@@ -9,6 +9,7 @@
                     <code>/agent</code>.
                 </p>
                 <a href="/login" class="btn btn-primary">Sign in</a>
+                <a href="/contact" class="btn btn-outline-primary">Contact support</a>
             </div>
         </div>
     </div>

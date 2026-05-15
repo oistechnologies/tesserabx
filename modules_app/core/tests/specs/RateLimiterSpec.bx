@@ -1,0 +1,90 @@
+/**
+ * RateLimiterSpec: per-bucket per-key counting + reset.
+ *
+ * Each spec uses a unique bucket so concurrent runs (or specs that
+ * leak state) cannot affect each other. Keys are unique per spec
+ * too.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.rl = getController().getWireBox().getInstance( "RateLimiter@core" );
+    }
+
+    function run(){
+        describe( "RateLimiter", function(){
+
+            it( "allows up to the limit and blocks past it", function(){
+                var bucket = "spec-" & createUUID();
+                var key    = "192.0.2.1";
+
+                for ( var i = 1; i <= 3; i++ ) {
+                    var r = variables.rl.check(
+                        bucket        = bucket,
+                        key           = key,
+                        limit         = 3,
+                        windowSeconds = 60
+                    );
+                    expect( r.allowed ).toBeTrue();
+                }
+
+                var fourth = variables.rl.check(
+                    bucket        = bucket,
+                    key           = key,
+                    limit         = 3,
+                    windowSeconds = 60
+                );
+                expect( fourth.allowed ).toBeFalse();
+                expect( fourth ).toHaveKey( "retryAfter" );
+
+                variables.rl.reset( bucket, key );
+            } );
+
+            it( "isolates buckets from each other", function(){
+                var bucketA = "spec-a-" & createUUID();
+                var bucketB = "spec-b-" & createUUID();
+                var key     = "192.0.2.2";
+
+                variables.rl.check( bucket = bucketA, key = key, limit = 1, windowSeconds = 60 );
+                var nextInA = variables.rl.check( bucket = bucketA, key = key, limit = 1, windowSeconds = 60 );
+                expect( nextInA.allowed ).toBeFalse();
+
+                var firstInB = variables.rl.check( bucket = bucketB, key = key, limit = 1, windowSeconds = 60 );
+                expect( firstInB.allowed ).toBeTrue();
+
+                variables.rl.reset( bucketA, key );
+                variables.rl.reset( bucketB, key );
+            } );
+
+            it( "isolates keys within a bucket", function(){
+                var bucket = "spec-" & createUUID();
+
+                variables.rl.check( bucket = bucket, key = "192.0.2.10", limit = 1, windowSeconds = 60 );
+                var blockedFor10 = variables.rl.check( bucket = bucket, key = "192.0.2.10", limit = 1, windowSeconds = 60 );
+                var allowedFor11 = variables.rl.check( bucket = bucket, key = "192.0.2.11", limit = 1, windowSeconds = 60 );
+
+                expect( blockedFor10.allowed ).toBeFalse();
+                expect( allowedFor11.allowed ).toBeTrue();
+
+                variables.rl.reset( bucket, "192.0.2.10" );
+                variables.rl.reset( bucket, "192.0.2.11" );
+            } );
+
+            it( "reset() lets a blocked caller through again", function(){
+                var bucket = "spec-" & createUUID();
+                var key    = "192.0.2.20";
+
+                variables.rl.check( bucket = bucket, key = key, limit = 1, windowSeconds = 60 );
+                expect( variables.rl.check( bucket = bucket, key = key, limit = 1, windowSeconds = 60 ).allowed ).toBeFalse();
+                variables.rl.reset( bucket, key );
+                expect( variables.rl.check( bucket = bucket, key = key, limit = 1, windowSeconds = 60 ).allowed ).toBeTrue();
+
+                variables.rl.reset( bucket, key );
+            } );
+
+        } );
+    }
+
+}

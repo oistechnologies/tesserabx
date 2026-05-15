@@ -1,0 +1,30 @@
+<bx:output>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="surface" content="widget">
+    <title>Support widget</title>
+    <style>
+        :root { --bg: ##ffffff; --fg: ##212529; --muted: ##6c757d; --primary: ##0d6efd; --border: ##dee2e6; --danger: ##dc3545; --success: ##198754; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; font: 14px/1.5 system-ui, -apple-system, sans-serif; color: var(--fg); background: var(--bg); }
+        body { padding: 16px; }
+        h1 { font-size: 1.1rem; margin: 0 0 12px 0; }
+        label { display: block; font-weight: 500; margin-top: 10px; margin-bottom: 4px; font-size: 13px; }
+        input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+        textarea { min-height: 100px; resize: vertical; }
+        button { background: var(--primary); color: ##fff; border: 0; border-radius: 6px; padding: 10px 14px; font: inherit; cursor: pointer; width: 100%; margin-top: 14px; }
+        button:hover { filter: brightness(0.95); }
+        .muted { color: var(--muted); font-size: 12px; }
+        .success { color: var(--success); }
+        .danger  { color: var(--danger); }
+        .stack-spacing > * + * { margin-top: 12px; }
+    </style>
+</head>
+<body>
+    #view()#
+</body>
+</html>
+</bx:output>

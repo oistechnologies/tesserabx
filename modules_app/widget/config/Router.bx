@@ -1,13 +1,25 @@
 /**
  * widget module router.
  *
- * All routes are auto-prefixed with /widget. Phase 0 ships a placeholder;
- * Phase 2 wires real intake endpoints.
+ * All routes are auto-prefixed with /widget. The widget surface is
+ * deliberately separated from the portal so it can be cached and
+ * rate-limited independently per CLAUDE.md.
  */
 class {
 
     function configure(){
-        // route( "/" ).to( "Home.index" );
+        // Embeddable form HTML (host page iframes this URL or copies
+        // the markup wholesale). GET only; the form posts to /submit.
+        route( "/" ).to( "Intake.show" );
+
+        // POST endpoint for the form. Used by both the iframe page
+        // and by AJAX from third-party host pages.
+        route( "submit" ).withVerbs( "POST" ).to( "Intake.submit" );
+
+        // Drop-in JS that a host page <script src>s to render a
+        // launcher button + iframe overlay. Phase 2c ships the
+        // simplest version: vanilla JS, no build step.
+        route( "loader.js" ).to( "Intake.loader" );
     }
 
 }

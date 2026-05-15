@@ -1,0 +1,15 @@
+<bx:output>
+<bx:if ( prc.result.ok ?: false )>
+    <h1 class="success">Thanks!</h1>
+    <p>We received your request as ticket <strong>###prc.result.ticketNumber#</strong>. A confirmation email is on its way.</p>
+    <p class="muted" style="margin-top:24px">
+        <a href="/widget">Send another</a>
+    </p>
+<bx:else>
+    <h1 class="danger">Something went wrong</h1>
+    <p>#encodeForHTML( prc.result.message ?: "Please try again." )#</p>
+    <p class="muted" style="margin-top:24px">
+        <a href="/widget">Try again</a>
+    </p>
+</bx:if>
+</bx:output>

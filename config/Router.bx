@@ -43,6 +43,14 @@ class extends="coldbox.system.web.routing.Router" {
         route( "/tickets/:id" ).to( "portal:Tickets.show" );
         route( "/tickets" ).to( "portal:Tickets.index" );
 
+        // Public contact form. Unauthenticated visitors land here to
+        // submit a ticket without an account; the form creates an
+        // accountless ticket through TicketsService.
+        route( "/contact" ).withHandler( "portal:Contact" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
+
         // Default catch-all. Module routes are matched first.
         route( ":handler/:action?" ).end();
     }

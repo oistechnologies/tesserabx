@@ -1,0 +1,112 @@
+/**
+ * portal:Contact handler.
+ *
+ * Public contact form at /contact. Unauthenticated visitors submit
+ * a ticket here without registering. The submission becomes an
+ * accountless ticket through TicketsService.createAccountlessTicket;
+ * the outbound auto-ack flow (Phase 2b) sends the visitor a "we got
+ * it" confirmation email at the address they provided.
+ *
+ * Rate limiting on the POST is applied in preHandler; see
+ * RateLimiter@core. The visitor's IP is the bucket key.
+ */
+class {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="rateLimiter"    inject="RateLimiter@core";
+    property name="messagebox"     inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        if ( arguments.action == "create" ) {
+            var check = rateLimiter.check(
+                bucket        = "portal:contact",
+                key           = remoteAddr( event ),
+                limit         = 5,
+                windowSeconds = 3600
+            );
+            if ( !check.allowed ) {
+                messagebox.error(
+                    "You have submitted several requests in a short time. Please try again in about an hour."
+                );
+                relocate( uri = "/contact" );
+            }
+        }
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Contact support";
+        prc.formData  = {
+            name    : rc.name    ?: "",
+            email   : rc.email   ?: "",
+            subject : rc.subject ?: "",
+            body    : rc.body    ?: ""
+        };
+        event.setView( "contact/index" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.name    = "";
+        param rc.email   = "";
+        param rc.subject = "";
+        param rc.body    = "";
+
+        var errors = validateInput( rc );
+        if ( arrayLen( errors ) ) {
+            messagebox.error( errors.toList( "<br>" ) );
+            return index( event, rc, prc );
+        }
+
+        var fullName = trim( rc.name );
+        var subject  = len( trim( rc.subject ) ) ? rc.subject : "(no subject)";
+
+        var ticket = ticketsService.createAccountlessTicket( {
+            originatingEmail : lCase( trim( rc.email ) ),
+            subject          : subject,
+            source           : "contact-form",
+            actorType        : "system"
+        } );
+
+        var firstMessage = len( fullName )
+            ? "From: " & fullName & " <" & rc.email & ">" & char( 10 ) & char( 10 ) & rc.body
+            : rc.body;
+        ticketsService.addMessage( {
+            ticketId    : ticket.getId(),
+            body        : firstMessage,
+            authorEmail : lCase( trim( rc.email ) ),
+            isInternal  : false
+        } );
+
+        prc.pageTitle  = "Thanks for getting in touch";
+        prc.ticketNumber = ticket.getTicketNumber();
+        event.setView( "contact/thanks" );
+    }
+
+    // ---------- internals ----------
+
+    private array function validateInput( required struct rc ){
+        var errors = [];
+        if ( !len( trim( arguments.rc.email ?: "" ) ) ) {
+            errors.append( "Email is required." );
+        } else if ( !isValid( "email", arguments.rc.email ) ) {
+            errors.append( "Please enter a valid email address." );
+        }
+        if ( !len( trim( arguments.rc.body ?: "" ) ) ) {
+            errors.append( "Please describe what you need help with." );
+        }
+        if ( len( arguments.rc.body ?: "" ) > 10000 ) {
+            errors.append( "Message is too long (10,000 character maximum)." );
+        }
+        return errors;
+    }
+
+    private string function remoteAddr( required any event ){
+        // Honour X-Forwarded-For when present (every production deploy
+        // sits behind a reverse proxy per the build plan); fall back
+        // to the direct connection address otherwise.
+        var fwd = arguments.event.getHTTPHeader( "X-Forwarded-For", "" );
+        if ( len( fwd ) ) return trim( listFirst( fwd, "," ) );
+        return cgi.remote_addr ?: "127.0.0.1";
+    }
+
+}

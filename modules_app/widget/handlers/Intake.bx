@@ -1,0 +1,166 @@
+/**
+ * widget:Intake handler.
+ *
+ * Serves the embeddable support widget. Three actions:
+ *   - show()   GET /widget       : the iframe-able form HTML
+ *   - submit() POST /widget/submit: creates an accountless ticket
+ *   - loader() GET /widget/loader.js : drop-in script tag a host
+ *                                       page <script src=>s to mount
+ *                                       a launcher button + iframe.
+ *
+ * Public surface; per-IP rate-limited via RateLimiter@core. The
+ * widget bucket is independent of the contact form so a noisy
+ * widget cannot lock out the dedicated form (and vice versa).
+ */
+class {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="rateLimiter"    inject="RateLimiter@core";
+
+    function show( event, rc, prc ){
+        // Allow the iframe to render anywhere. Standalone /widget is
+        // public + unauthenticated, so frame embedding is fine; if
+        // future requirements add origin restrictions, this is the
+        // place to swap to a Content-Security-Policy with a frame-
+        // ancestors directive.
+        event.setHTTPHeader( name = "X-Frame-Options", value = "ALLOWALL" );
+        event.setLayout( name = "Widget", module = "widget" );
+        event.setView( "intake/show" );
+    }
+
+    function submit( event, rc, prc ){
+        param rc.email   = "";
+        param rc.subject = "";
+        param rc.body    = "";
+        param rc.name    = "";
+        param rc.host    = ""; // window.location.href of embedding page
+
+        var wantsJson = listFindNoCase( event.getHTTPHeader( "Accept", "" ), "application/json" )
+            || event.valueExists( "format" ) && rc.format == "json";
+
+        var check = rateLimiter.check(
+            bucket        = "widget:intake",
+            key           = remoteAddr( event ),
+            limit         = 10,
+            windowSeconds = 3600
+        );
+        if ( !check.allowed ) {
+            return respond( event, prc, wantsJson, {
+                "ok"      : false,
+                "error"   : "rate_limited",
+                "message" : "You have submitted too many requests. Please try again later."
+            }, 429 );
+        }
+
+        var errors = validateInput( rc );
+        if ( arrayLen( errors ) ) {
+            return respond( event, prc, wantsJson, {
+                "ok"      : false,
+                "error"   : "validation",
+                "message" : errors.toList( " " )
+            }, 422 );
+        }
+
+        var ticket = ticketsService.createAccountlessTicket( {
+            originatingEmail : lCase( trim( rc.email ) ),
+            subject          : len( trim( rc.subject ) ) ? rc.subject : "(no subject)",
+            source           : "widget",
+            actorType        : "system"
+        } );
+
+        var nameLine = len( trim( rc.name ) )  ? "From: " & rc.name & " <" & rc.email & ">" & char( 10 ) : "";
+        var hostLine = len( trim( rc.host ) )  ? "Submitted from: " & rc.host & char( 10 )                 : "";
+        var firstMessage = nameLine & hostLine & ( ( len( nameLine ) or len( hostLine ) ) ? char( 10 ) : "" ) & rc.body;
+
+        ticketsService.addMessage( {
+            ticketId    : ticket.getId(),
+            body        : firstMessage,
+            authorEmail : lCase( trim( rc.email ) ),
+            isInternal  : false
+        } );
+
+        return respond( event, prc, wantsJson, {
+            "ok"           : true,
+            "ticketNumber" : ticket.getTicketNumber()
+        }, 200 );
+    }
+
+    function loader( event, rc, prc ){
+        event.setHTTPHeader( name = "Cache-Control", value = "public, max-age=300" );
+        // Cross-origin embedding: any host page can <script src> us.
+        event.setHTTPHeader( name = "Access-Control-Allow-Origin", value = "*" );
+        event.renderData(
+            type        = "plain",
+            data        = loaderScript( event ),
+            contentType = "application/javascript"
+        );
+    }
+
+    // ---------- internals ----------
+
+    private array function validateInput( required struct rc ){
+        var errors = [];
+        if ( !len( trim( arguments.rc.email ?: "" ) ) ) {
+            errors.append( "Email is required." );
+        } else if ( !isValid( "email", arguments.rc.email ) ) {
+            errors.append( "Please enter a valid email address." );
+        }
+        if ( !len( trim( arguments.rc.body ?: "" ) ) ) {
+            errors.append( "Please describe what you need help with." );
+        }
+        if ( len( arguments.rc.body ?: "" ) > 10000 ) {
+            errors.append( "Message is too long." );
+        }
+        return errors;
+    }
+
+    private string function remoteAddr( required any event ){
+        var fwd = arguments.event.getHTTPHeader( "X-Forwarded-For", "" );
+        if ( len( fwd ) ) return trim( listFirst( fwd, "," ) );
+        return cgi.remote_addr ?: "127.0.0.1";
+    }
+
+    private any function respond(
+        required any event,
+        required struct prc,
+        required boolean wantsJson,
+        required struct payload,
+        required numeric statusCode
+    ){
+        arguments.event.setHTTPHeader( statusCode = arguments.statusCode );
+        if ( arguments.wantsJson ) {
+            arguments.event.setHTTPHeader( name = "Access-Control-Allow-Origin", value = "*" );
+            arguments.event.renderData(
+                type = "json",
+                data = arguments.payload
+            );
+            return;
+        }
+        // Browser POST from the iframe: render the thank-you / error
+        // partial in the widget layout.
+        arguments.event.setLayout( name = "Widget", module = "widget" );
+        arguments.prc.result = arguments.payload;
+        arguments.event.setView( "intake/result" );
+    }
+
+    private string function loaderScript( required any event ){
+        var base = "//" & arguments.event.getHTTPHeader( "Host", "localhost" );
+        return "(function(){
+  if ( window.__tesserabxWidget ) return;
+  window.__tesserabxWidget = true;
+  var btn = document.createElement('button');
+  btn.textContent = 'Get support';
+  btn.setAttribute('aria-label','Open support widget');
+  btn.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99998;padding:10px 16px;border:0;border-radius:999px;background:##0d6efd;color:##fff;font:14px system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer';
+  var frame = document.createElement('iframe');
+  frame.src = '" & base & "/widget?embedded=1';
+  frame.style.cssText = 'position:fixed;right:16px;bottom:80px;width:380px;height:560px;z-index:99999;border:0;border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.25);display:none;background:##fff';
+  btn.addEventListener('click', function(){
+    frame.style.display = frame.style.display === 'none' ? 'block' : 'none';
+  });
+  document.body.appendChild(btn);
+  document.body.appendChild(frame);
+})();";
+    }
+
+}

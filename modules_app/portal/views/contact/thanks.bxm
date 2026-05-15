@@ -1,0 +1,13 @@
+<bx:output>
+<div class="row">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title h4"><i class="bi bi-check-circle text-success"></i> Got it.</h2>
+                <p>We received your request as ticket <strong>###prc.ticketNumber#</strong>. A confirmation email is on its way to the address you provided.</p>
+                <p class="text-body-secondary mb-0">Need to send another? <a href="/contact">Open the contact form again</a>.</p>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

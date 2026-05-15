@@ -17,13 +17,19 @@ class {
     this.modelNamespace     = "widget";
     this.cfmapping          = "tesserabx.modules.widget";
     this.autoMapModels      = false;
-    this.dependencies       = [ "tickets" ];
+    this.dependencies       = [ "tickets", "core" ];
 
     function configure(){
-        settings = {};
-        routes = [ { pattern : "/:handler/:action?" } ];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings              = {};
+        variables.routes                = [];
+        variables.interceptorSettings   = { customInterceptionPoints : [] };
+        variables.interceptors          = [];
+        // Widget owns its own layout because the embed surface is
+        // deliberately stripped down (no AdminLTE / sidebar chrome).
+        variables.layoutSettings        = { defaultLayout : "Widget" };
+        variables.layouts               = [
+            { file : "Widget", views : "", folders : "" }
+        ];
     }
 
     function onLoad(){}

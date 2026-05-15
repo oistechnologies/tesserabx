@@ -1,0 +1,81 @@
+/**
+ * RateLimiter: counts requests per (bucket, key) tuple in a fixed
+ * time window and reports whether the caller should be allowed
+ * through.
+ *
+ * Backed by CacheBox so the counter survives across requests and
+ * across worker / scheduler containers (the cbcache provider is
+ * Redis in dev and prod). A tiny over-count under concurrency is
+ * fine; this is a rate limiter, not a strict semaphore.
+ *
+ * Typical usage from a public-intake handler:
+ *
+ *   var hit = rateLimiter.check(
+ *       bucket        = "portal:contact",
+ *       key           = remoteIp,
+ *       limit         = 5,
+ *       windowSeconds = 3600
+ *   );
+ *   if ( !hit.allowed ) {
+ *       relocate( uri = "/contact?throttled=1" );
+ *       return;
+ *   }
+ */
+class singleton=true {
+
+    property name="cachebox" inject="cachebox";
+
+    /**
+     * Atomically (best-effort) bump the counter for this bucket+key
+     * and decide whether the request is allowed.
+     *
+     * Returns:
+     *   { allowed: true,  remaining: <int> }   below the limit
+     *   { allowed: false, retryAfter: <sec> }  over the limit
+     */
+    public struct function check(
+        required string  bucket,
+        required string  key,
+        required numeric limit,
+        required numeric windowSeconds
+    ){
+        var cache    = cachebox.getCache( "default" );
+        var cacheKey = "ratelimit:" & arguments.bucket & ":" & arguments.key;
+
+        var current = cache.get( cacheKey );
+        var count   = isNull( current ) ? 0 : ( isNumeric( current ) ? current : 0 );
+
+        if ( count >= arguments.limit ) {
+            return {
+                "allowed"    : false,
+                "retryAfter" : arguments.windowSeconds
+            };
+        }
+
+        cache.set(
+            objectKey      = cacheKey,
+            object         = count + 1,
+            timeout        = arguments.windowSeconds / 60,
+            lastAccessTimeout = arguments.windowSeconds / 60
+        );
+
+        return {
+            "allowed"   : true,
+            "remaining" : arguments.limit - ( count + 1 )
+        };
+    }
+
+    /**
+     * Reset the counter for a (bucket, key) tuple. Useful from
+     * admin tools or for tests that need to exercise the throttle
+     * boundary precisely.
+     */
+    public void function reset( required string bucket, required string key ){
+        var cache    = cachebox.getCache( "default" );
+        var cacheKey = "ratelimit:" & arguments.bucket & ":" & arguments.key;
+        if ( cache.lookup( cacheKey ) ) {
+            cache.clear( cacheKey );
+        }
+    }
+
+}
