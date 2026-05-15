@@ -1,0 +1,41 @@
+/**
+ * /agent/admin/audit handler.
+ *
+ * Search and listing UI over the central audit log. Admin-only by
+ * the cbSecurity rule on /agent/admin/*. Calls AuditService@audit;
+ * never reads the AuditEvent entity directly.
+ */
+class {
+
+    property name="auditService"    inject="AuditService@audit";
+    property name="contactsService" inject="ContactsService@contacts";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.eventType      = "";
+        param rc.organizationId = "";
+        param rc.entityId       = "";
+        param rc.limit          = 100;
+
+        prc.pageTitle      = "Audit log";
+        prc.events         = auditService.search(
+            eventType      : rc.eventType,
+            organizationId : rc.organizationId,
+            entityId       : rc.entityId,
+            limit          : int( rc.limit )
+        );
+        prc.eventTypes     = auditService.listEventTypes();
+        prc.organizations  = contactsService.listOrganizations();
+        prc.filters        = {
+            eventType      : rc.eventType,
+            organizationId : rc.organizationId,
+            entityId       : rc.entityId,
+            limit          : rc.limit
+        };
+        event.setView( "audit/index" );
+    }
+
+}

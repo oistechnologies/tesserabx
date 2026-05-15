@@ -1,0 +1,90 @@
+<bx:output>
+<form method="get" action="/agent/admin/audit" class="card mb-3">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-3">
+                <label class="form-label" for="eventType">Event type</label>
+                <select class="form-select" id="eventType" name="eventType">
+                    <option value="">All events</option>
+                    <bx:loop array="#prc.eventTypes#" item="t">
+                        <option value="#encodeForHTMLAttribute( t )#"<bx:if ( prc.filters.eventType ?: "" ) eq t> selected</bx:if>>#encodeForHTML( t )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label" for="organizationId">Organization</label>
+                <select class="form-select" id="organizationId" name="organizationId">
+                    <option value="">All organizations</option>
+                    <bx:loop array="#prc.organizations#" item="org">
+                        <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.filters.organizationId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label" for="entityId">Entity ID</label>
+                <input type="text" class="form-control" id="entityId" name="entityId" placeholder="Exact UUID" value="#encodeForHTMLAttribute( prc.filters.entityId ?: "" )#">
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label" for="limit">Limit</label>
+                <select class="form-select" id="limit" name="limit">
+                    <bx:loop array="#[ 25, 50, 100, 250 ]#" item="n">
+                        <option value="#n#"<bx:if int( prc.filters.limit ?: 100 ) eq n> selected</bx:if>>#n#</option>
+                    </bx:loop>
+                </select>
+            </div>
+        </div>
+        <div class="d-flex justify-content-end gap-2 mt-3">
+            <a class="btn btn-outline-secondary" href="/agent/admin/audit">Reset</a>
+            <button class="btn btn-primary" type="submit">Search</button>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Event</th>
+                    <th>Entity</th>
+                    <th>Actor</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.events )>
+                    <tr><td colspan="5" class="text-center text-body-secondary py-4">No events match.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.events#" item="evt">
+                    <tr>
+                        <td class="text-nowrap"><small>#encodeForHTML( dateTimeFormat( evt.getOccurredAt(), "yyyy-mm-dd HH:nn:ss" ) )#</small></td>
+                        <td><code>#encodeForHTML( evt.getEventType() )#</code></td>
+                        <td>
+                            <bx:if !isNull( evt.getEntityType() )>
+                                #encodeForHTML( evt.getEntityType() )#<br>
+                                <small class="text-body-secondary">#encodeForHTML( evt.getEntityId() ?: "" )#</small>
+                            </bx:if>
+                        </td>
+                        <td>
+                            <bx:if !isNull( evt.getActorType() )>
+                                #encodeForHTML( evt.getActorType() )#<br>
+                                <small class="text-body-secondary">#encodeForHTML( evt.getActorId() ?: "" )#</small>
+                            </bx:if>
+                        </td>
+                        <td>
+                            <bx:set local.meta = evt.getMetadataAsStruct() >
+                            <bx:if !structIsEmpty( local.meta )>
+                                <details>
+                                    <summary class="text-body-secondary"><small>view</small></summary>
+                                    <pre class="mb-0 mt-2 small">#encodeForHTML( jsonSerialize( local.meta, true ) )#</pre>
+                                </details>
+                            </bx:if>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

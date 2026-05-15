@@ -24,7 +24,9 @@ class {
     // single flat models/ directory and the scopes/ subfolder confuses
     // ColdBox's mapDirectory in BoxLang. We bind manually in onLoad.
     this.autoMapModels      = false;
-    this.dependencies       = [];
+    // audit must load first so ContactsService can announce role and
+    // merge events through AuditService@audit.
+    this.dependencies       = [ "audit" ];
 
     function configure(){
         settings = {};

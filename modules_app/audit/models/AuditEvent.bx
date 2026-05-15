@@ -1,0 +1,45 @@
+/**
+ * AuditEvent: one row in the central audit log.
+ *
+ * Not tenant-scoped at the entity level. organization_id is captured
+ * for events that have one so the admin UI can filter by tenant;
+ * cross-tenant or system events leave it null.
+ *
+ * `metadata` is JSON-encoded free-form; AuditService serializes
+ * struct input on the way in and getMetadataAsStruct() decodes on
+ * the way out.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="audit_events"
+    accessors="true"
+{
+
+    property name="id";
+    property name="eventType"       column="event_type";
+    property name="entityType"      column="entity_type";
+    property name="entityId"        column="entity_id";
+    property name="organizationId"  column="organization_id";
+    property name="actorType"       column="actor_type";
+    property name="actorId"         column="actor_id";
+    // The accessor is named getMetadataJson / setMetadataJson because
+    // a bare `getMetadata()` collides with BoxLang's built-in
+    // `getMetadata( obj )` BIF (which inspects component metadata).
+    property name="metadataJson"    column="metadata_json";
+    property name="occurredAt"      column="occurred_at" sqltype="timestamp";
+
+    /**
+     * Decode the stored JSON blob into a struct. Returns an empty
+     * struct when nothing was recorded.
+     */
+    public struct function getMetadataAsStruct(){
+        var raw = getMetadataJson();
+        if ( isNull( raw ) || !len( raw ) ) return {};
+        try {
+            return jsonDeserialize( raw );
+        } catch ( any e ) {
+            return { "_rawMetadata" : raw, "_decodeError" : e.message };
+        }
+    }
+
+}

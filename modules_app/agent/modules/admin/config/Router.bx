@@ -10,6 +10,9 @@ class {
     function configure(){
         // /agent/admin landing
         route( "/" ).to( "Home.index" );
+
+        // Audit log search UI.
+        route( "audit" ).to( "Audit.index" );
     }
 
 }

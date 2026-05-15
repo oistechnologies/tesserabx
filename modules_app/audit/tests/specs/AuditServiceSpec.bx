@@ -1,0 +1,116 @@
+/**
+ * AuditServiceSpec: write + search behavior for the audit log.
+ *
+ * Cleans up its own rows in afterEach so it stays isolated from
+ * other specs (and from the running app's accumulated audit history,
+ * which contacts now writes to on every provisioning operation).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.audit = getController().getWireBox().getInstance( "AuditService@audit" );
+    }
+
+    function run(){
+        describe( "AuditService", function(){
+
+            it( "records an event with all fields", function(){
+                var evt = variables.audit.record(
+                    eventType      : "spec.example",
+                    entityType     : "Contact",
+                    entityId       : "00000000-0000-0000-0000-000000000001",
+                    organizationId : "00000000-0000-0000-0000-000000000002",
+                    actorType      : "agent",
+                    actorId        : "00000000-0000-0000-0000-000000000003",
+                    metadata       : { "foo" : "bar", "n" : 1 }
+                );
+                expect( evt.getId() ).notToBeEmpty();
+                expect( evt.getEventType() ).toBe( "spec.example" );
+
+                var meta = evt.getMetadataAsStruct();
+                expect( meta.foo ).toBe( "bar" );
+                expect( meta.n ).toBe( 1 );
+
+                cleanup( evt.getId() );
+            } );
+
+            it( "records an event with no optional fields", function(){
+                var evt = variables.audit.record( eventType : "spec.minimal" );
+                expect( evt.getId() ).notToBeEmpty();
+                expect( evt.getEventType() ).toBe( "spec.minimal" );
+                expect( isNull( evt.getEntityType() ) ).toBeTrue();
+                expect( isNull( evt.getMetadataJson() ) ).toBeTrue();
+                cleanup( evt.getId() );
+            } );
+
+            it( "search filters by event_type", function(){
+                var marker = "spec.search." & createUUID();
+                var a = variables.audit.record( eventType : marker );
+                var b = variables.audit.record( eventType : marker );
+                variables.audit.record( eventType : "spec.unrelated" );
+
+                var results = variables.audit.search( eventType : marker, limit : 50 );
+                expect( arrayLen( results ) ).toBe( 2 );
+
+                cleanup( a.getId() );
+                cleanup( b.getId() );
+                queryExecute(
+                    "DELETE FROM audit_events WHERE event_type = :t",
+                    { t : "spec.unrelated" }
+                );
+            } );
+
+            it( "search filters by organization_id", function(){
+                var orgA = "00000000-0000-0000-0000-aaaaaaaaaaaa";
+                var orgB = "00000000-0000-0000-0000-bbbbbbbbbbbb";
+                var marker = "spec.org." & createUUID();
+                var a = variables.audit.record( eventType : marker, organizationId : orgA );
+                var b = variables.audit.record( eventType : marker, organizationId : orgB );
+
+                var results = variables.audit.search( eventType : marker, organizationId : orgA );
+                expect( arrayLen( results ) ).toBe( 1 );
+                expect( results[ 1 ].getOrganizationId() ).toBe( orgA );
+
+                cleanup( a.getId() );
+                cleanup( b.getId() );
+            } );
+
+            it( "search orders newest first", function(){
+                var marker = "spec.order." & createUUID();
+                var a = variables.audit.record( eventType : marker, metadata : { "i" : 1 } );
+                sleep( 10 );
+                var b = variables.audit.record( eventType : marker, metadata : { "i" : 2 } );
+                sleep( 10 );
+                var c = variables.audit.record( eventType : marker, metadata : { "i" : 3 } );
+
+                var results = variables.audit.search( eventType : marker, limit : 10 );
+                expect( arrayLen( results ) ).toBe( 3 );
+                expect( results[ 1 ].getMetadataAsStruct().i ).toBe( 3 );
+                expect( results[ 3 ].getMetadataAsStruct().i ).toBe( 1 );
+
+                cleanup( a.getId() );
+                cleanup( b.getId() );
+                cleanup( c.getId() );
+            } );
+
+            it( "listEventTypes returns distinct event types", function(){
+                var marker = "spec.types." & createUUID();
+                var evt = variables.audit.record( eventType : marker );
+                var types = variables.audit.listEventTypes();
+                expect( types ).toInclude( marker );
+                cleanup( evt.getId() );
+            } );
+
+        } );
+    }
+
+    private void function cleanup( required string id ){
+        queryExecute(
+            "DELETE FROM audit_events WHERE id = :id",
+            { id : arguments.id }
+        );
+    }
+
+}

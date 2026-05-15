@@ -23,8 +23,9 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
-    property name="bcrypt"  inject="@BCrypt";
+    property name="wirebox"      inject="wirebox";
+    property name="bcrypt"       inject="@BCrypt";
+    property name="auditService" inject="AuditService@audit";
 
     // ---------------- Organizations ----------------
 
@@ -57,6 +58,13 @@ class singleton=true {
             org.setTier( arguments.data.tier );
         }
         org.save();
+        recordAudit(
+            eventType      : "organization.created",
+            entityType     : "Organization",
+            entityId       : org.getId(),
+            organizationId : org.getId(),
+            metadata       : { "name" : org.getName(), "slug" : org.getSlug(), "tier" : org.getTier() ?: "" }
+        );
         return org;
     }
 
@@ -128,6 +136,13 @@ class singleton=true {
             contact.setOfficeId( arguments.data.officeId );
         }
         contact.save();
+        recordAudit(
+            eventType      : "contact.provisioned",
+            entityType     : "Contact",
+            entityId       : contact.getId(),
+            organizationId : contact.getOrganizationId(),
+            metadata       : { "email" : contact.getEmail() }
+        );
         return contact;
     }
 
@@ -136,6 +151,12 @@ class singleton=true {
         if ( isNull( contact ) ) return javaCast( "null", "" );
         contact.setIsActive( false );
         contact.save();
+        recordAudit(
+            eventType      : "contact.deactivated",
+            entityType     : "Contact",
+            entityId       : contact.getId(),
+            organizationId : contact.getOrganizationId()
+        );
         return contact;
     }
 
@@ -167,6 +188,16 @@ class singleton=true {
             assignment.setGrantedByAgentId( arguments.grantedByAgentId );
         }
         assignment.save();
+        var contact = getContactById( arguments.contactId );
+        recordAudit(
+            eventType      : "contact.role_granted",
+            entityType     : "Contact",
+            entityId       : arguments.contactId,
+            organizationId : isNull( contact ) ? "" : contact.getOrganizationId(),
+            actorType      : "agent",
+            actorId        : arguments.grantedByAgentId ?: "",
+            metadata       : { "roleKey" : arguments.roleKey }
+        );
         return assignment;
     }
 
@@ -178,6 +209,14 @@ class singleton=true {
             .where( "contact_id", arguments.contactId )
             .where( "role_key", arguments.roleKey )
             .delete();
+        var contact = getContactById( arguments.contactId );
+        recordAudit(
+            eventType      : "contact.role_revoked",
+            entityType     : "Contact",
+            entityId       : arguments.contactId,
+            organizationId : isNull( contact ) ? "" : contact.getOrganizationId(),
+            metadata       : { "roleKey" : arguments.roleKey }
+        );
     }
 
     // ---------------- Domain mapping ----------------
@@ -210,6 +249,13 @@ class singleton=true {
         mapping.setDomain( lCase( arguments.domain ) );
         mapping.setIsVerified( arguments.isVerified );
         mapping.save();
+        recordAudit(
+            eventType      : "organization.domain_mapped",
+            entityType     : "Organization",
+            entityId       : arguments.organizationId,
+            organizationId : arguments.organizationId,
+            metadata       : { "domain" : mapping.getDomain(), "isVerified" : arguments.isVerified }
+        );
         return mapping;
     }
 
@@ -256,6 +302,18 @@ class singleton=true {
         source.setIsActive( false );
         source.save();
 
+        recordAudit(
+            eventType      : "contact.merged",
+            entityType     : "Contact",
+            entityId       : target.getId(),
+            organizationId : target.getOrganizationId(),
+            metadata       : {
+                "sourceContactId" : source.getId(),
+                "targetContactId" : target.getId(),
+                "rolesMoved"      : moved
+            }
+        );
+
         return {
             "sourceContactId" : source.getId(),
             "targetContactId" : target.getId(),
@@ -271,6 +329,29 @@ class singleton=true {
 
     private string function slugify( required string text ){
         return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+    }
+
+    /**
+     * Thin wrapper around AuditService.record that drops empty
+     * optional fields. Keeps call sites in this service compact.
+     */
+    private void function recordAudit(
+        required string eventType,
+        string entityType,
+        string entityId,
+        string organizationId,
+        string actorType,
+        string actorId,
+        struct metadata
+    ){
+        var args = { "eventType" : arguments.eventType };
+        if ( structKeyExists( arguments, "entityType" ) && len( arguments.entityType ?: "" ) ) args.entityType = arguments.entityType;
+        if ( structKeyExists( arguments, "entityId" ) && len( arguments.entityId ?: "" ) ) args.entityId = arguments.entityId;
+        if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) args.organizationId = arguments.organizationId;
+        if ( structKeyExists( arguments, "actorType" ) && len( arguments.actorType ?: "" ) ) args.actorType = arguments.actorType;
+        if ( structKeyExists( arguments, "actorId" ) && len( arguments.actorId ?: "" ) ) args.actorId = arguments.actorId;
+        if ( structKeyExists( arguments, "metadata" ) && !isNull( arguments.metadata ) ) args.metadata = arguments.metadata;
+        auditService.record( argumentCollection = args );
     }
 
 }

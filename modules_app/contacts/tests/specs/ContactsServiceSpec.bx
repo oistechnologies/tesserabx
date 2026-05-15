@@ -119,6 +119,40 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupOrganization( org.getId() );
             } );
 
+            it( "writes audit events for role grant and revoke", function(){
+                var audit = getController().getWireBox().getInstance( "AuditService@audit" );
+                var org = makeOrg();
+                var contact = makeContact( org.getId() );
+
+                variables.service.assignRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+                variables.service.revokeRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+
+                var grants = audit.search(
+                    eventType : "contact.role_granted",
+                    entityId  : contact.getId(),
+                    limit     : 10
+                );
+                var revokes = audit.search(
+                    eventType : "contact.role_revoked",
+                    entityId  : contact.getId(),
+                    limit     : 10
+                );
+                expect( arrayLen( grants ) ).toBe( 1 );
+                expect( arrayLen( revokes ) ).toBe( 1 );
+                expect( grants[ 1 ].getMetadataAsStruct().roleKey ).toBe( "organization-admin" );
+
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : contact.getId() } );
+                cleanupContact( contact.getId() );
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : org.getId() } );
+                cleanupOrganization( org.getId() );
+            } );
+
             it( "mergeContacts moves roles onto the target and deactivates the source", function(){
                 var org = makeOrg();
                 var source = makeContact( org.getId(), "src-" & createUUID() & "@example.com" );

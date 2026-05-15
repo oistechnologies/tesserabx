@@ -1,0 +1,137 @@
+/**
+ * AuditService: the public surface other modules call to record
+ * significant operations and the admin UI calls to search the log.
+ *
+ * Per CLAUDE.md the audit module is cross-cutting: many modules
+ * write to it, none read its entities directly except through this
+ * service.
+ *
+ * record() is the only write path. Callers pass an event_type in
+ * dotted-notation ("contact.role_granted") and any structured detail
+ * as a metadata struct; the service serializes the struct to JSON
+ * for storage. Missing optional fields stay null.
+ *
+ * search() is the admin read path. Filter args are all optional;
+ * leaving them off returns the most recent events.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    /**
+     * Record one audit event.
+     *
+     * @eventType        Required. Dotted-notation event key.
+     * @entityType       Optional. The affected entity's logical type.
+     * @entityId         Optional. The affected entity's identifier.
+     * @organizationId   Optional. The tenant context the event ran in.
+     * @actorType        Optional. "agent" | "contact" | "system".
+     * @actorId          Optional. Identifier of the actor.
+     * @metadata         Optional struct. Serialized to JSON on insert.
+     */
+    public any function record(
+        required string eventType,
+        string entityType,
+        string entityId,
+        string organizationId,
+        string actorType,
+        string actorId,
+        struct metadata
+    ){
+        var event = wirebox.getInstance( "AuditEvent@audit" );
+        event.setId( newId() );
+        event.setEventType( arguments.eventType );
+        if ( structKeyExists( arguments, "entityType" ) && len( arguments.entityType ?: "" ) ) {
+            event.setEntityType( arguments.entityType );
+        }
+        if ( structKeyExists( arguments, "entityId" ) && len( arguments.entityId ?: "" ) ) {
+            event.setEntityId( arguments.entityId );
+        }
+        if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) {
+            event.setOrganizationId( arguments.organizationId );
+        }
+        if ( structKeyExists( arguments, "actorType" ) && len( arguments.actorType ?: "" ) ) {
+            event.setActorType( arguments.actorType );
+        }
+        if ( structKeyExists( arguments, "actorId" ) && len( arguments.actorId ?: "" ) ) {
+            event.setActorId( arguments.actorId );
+        }
+        if ( structKeyExists( arguments, "metadata" ) && !isNull( arguments.metadata ) ) {
+            event.setMetadataJson( jsonSerialize( arguments.metadata ) );
+        }
+        event.save();
+        return event;
+    }
+
+    /**
+     * Search the audit log. All filters optional; results are ordered
+     * newest first. `limit` caps the page size; `offset` paginates.
+     */
+    public array function search(
+        string eventType,
+        string entityType,
+        string entityId,
+        string organizationId,
+        string actorType,
+        string actorId,
+        any occurredAfter,
+        any occurredBefore,
+        numeric limit = 100,
+        numeric offset = 0
+    ){
+        var q = wirebox.getInstance( "AuditEvent@audit" );
+        if ( structKeyExists( arguments, "eventType" ) && len( arguments.eventType ?: "" ) ) {
+            q = q.where( "event_type", arguments.eventType );
+        }
+        if ( structKeyExists( arguments, "entityType" ) && len( arguments.entityType ?: "" ) ) {
+            q = q.where( "entity_type", arguments.entityType );
+        }
+        if ( structKeyExists( arguments, "entityId" ) && len( arguments.entityId ?: "" ) ) {
+            q = q.where( "entity_id", arguments.entityId );
+        }
+        if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) {
+            q = q.where( "organization_id", arguments.organizationId );
+        }
+        if ( structKeyExists( arguments, "actorType" ) && len( arguments.actorType ?: "" ) ) {
+            q = q.where( "actor_type", arguments.actorType );
+        }
+        if ( structKeyExists( arguments, "actorId" ) && len( arguments.actorId ?: "" ) ) {
+            q = q.where( "actor_id", arguments.actorId );
+        }
+        if ( structKeyExists( arguments, "occurredAfter" ) && !isNull( arguments.occurredAfter ) ) {
+            q = q.where( "occurred_at", ">=", arguments.occurredAfter );
+        }
+        if ( structKeyExists( arguments, "occurredBefore" ) && !isNull( arguments.occurredBefore ) ) {
+            q = q.where( "occurred_at", "<=", arguments.occurredBefore );
+        }
+        return q.orderBy( "occurred_at", "desc" )
+            .limit( arguments.limit )
+            .offset( arguments.offset )
+            .get();
+    }
+
+    /**
+     * The distinct event_type values currently in the log. Used by the
+     * admin search UI to populate a filter dropdown without hardcoding
+     * the known event types.
+     */
+    public array function listEventTypes(){
+        var rows = queryExecute(
+            "SELECT DISTINCT event_type FROM audit_events ORDER BY event_type",
+            {},
+            { returntype: "array" }
+        );
+        var out = [];
+        for ( var row in rows ) {
+            out.append( row.event_type );
+        }
+        return out;
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}

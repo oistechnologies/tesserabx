@@ -1,9 +1,16 @@
 /**
  * audit module: cross-cutting compliance log.
  *
- * Owns AuditEvent. Service layer other modules call to record
- * significant operations. Distinct from tickets's own TicketEvent
- * (the agent-facing ticket timeline).
+ * Owns AuditEvent and the AuditService surface other modules call to
+ * record significant operations. Distinct from tickets's own
+ * TicketEvent (the agent-facing ticket timeline) and from any
+ * module's own internal history.
+ *
+ * Sits low in the dependency graph: depends on no module above it,
+ * is depended on by many. The AuditEvent entity extends the shared
+ * TesseraBXEntity in contacts via cfmapping (compile-time
+ * resolution), not via a module load-order dependency, so audit
+ * stays free of a hard dep on contacts.
  */
 class {
 
@@ -18,7 +25,7 @@ class {
     this.modelNamespace     = "audit";
     this.cfmapping          = "tesserabx.modules.audit";
     this.autoMapModels      = false;
-    this.dependencies       = [ "contacts" ];
+    this.dependencies       = [];
 
     function configure(){
         settings = {};
@@ -27,7 +34,14 @@ class {
         interceptors = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "AuditEvent@audit" )
+              .to( "#moduleMapping#.models.AuditEvent" );
+        binder.map( "AuditService@audit" )
+              .to( "#moduleMapping#.models.AuditService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }
