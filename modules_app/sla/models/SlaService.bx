@@ -1,0 +1,387 @@
+/**
+ * SlaService: the public surface other modules use for SLA work.
+ *
+ * Phase 3a scope:
+ *   - BusinessHoursCalendar CRUD-ish helpers (the admin UI in Phase 5
+ *     extends these).
+ *   - SlaPolicy CRUD-ish helpers.
+ *   - matchPolicyForTicket: pick the most specific active policy for
+ *     a given ticket (priority + organization tier).
+ *   - addBusinessMinutes: advance a UTC instant by N minutes of
+ *     business time on a given calendar, skipping nights, weekends,
+ *     and holidays.
+ *
+ * Phase 3b wires these into Ticket lifecycle: stamping first-response
+ * and resolution targets on create, recomputing on status changes,
+ * pause/resume during the pending state.
+ *
+ * Note on tenancy: SLA configuration is provider-side. Neither
+ * BusinessHoursCalendar nor SlaPolicy carries `organization_id`, so
+ * we do not apply the tenant scope here.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    // ---------------- Calendars ----------------
+
+    public any function getCalendarById( required string id ){
+        var cal = wirebox.getInstance( "BusinessHoursCalendar@sla" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( cal ) ? javaCast( "null", "" ) : cal;
+    }
+
+    public any function getDefaultCalendar(){
+        var cal = wirebox.getInstance( "BusinessHoursCalendar@sla" )
+            .where( "is_default", true )
+            .where( "is_active",  true )
+            .first();
+        return isNull( cal ) ? javaCast( "null", "" ) : cal;
+    }
+
+    public array function listCalendars(){
+        return wirebox.getInstance( "BusinessHoursCalendar@sla" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function createCalendar( required struct data ){
+        var cal = wirebox.getInstance( "BusinessHoursCalendar@sla" );
+        cal.setId( newId() );
+        cal.setName( arguments.data.name );
+        cal.setTimezone( arguments.data.timezone ?: "UTC" );
+        cal.setWeeklyHours( jsonSerialize( arguments.data.weeklyHours ?: defaultWeeklyHours() ) );
+        cal.setHolidays(    jsonSerialize( arguments.data.holidays    ?: [] ) );
+        if ( structKeyExists( arguments.data, "isDefault" ) && arguments.data.isDefault ) {
+            clearOtherDefaultCalendars();
+            cal.setIsDefault( true );
+        } else {
+            cal.setIsDefault( false );
+        }
+        cal.setIsActive( structKeyExists( arguments.data, "isActive" ) ? !!arguments.data.isActive : true );
+        cal.save();
+        return cal;
+    }
+
+    public any function updateCalendar( required string id, required struct data ){
+        var cal = getCalendarById( arguments.id );
+        if ( isNull( cal ) ) {
+            throw( type = "SlaCalendarNotFound", message = "Calendar #arguments.id# not found" );
+        }
+        if ( structKeyExists( arguments.data, "name"        ) ) cal.setName( arguments.data.name );
+        if ( structKeyExists( arguments.data, "timezone"    ) ) cal.setTimezone( arguments.data.timezone );
+        if ( structKeyExists( arguments.data, "weeklyHours" ) ) cal.setWeeklyHours( jsonSerialize( arguments.data.weeklyHours ) );
+        if ( structKeyExists( arguments.data, "holidays"    ) ) cal.setHolidays( jsonSerialize( arguments.data.holidays ) );
+        if ( structKeyExists( arguments.data, "isActive"    ) ) cal.setIsActive( !!arguments.data.isActive );
+        if ( structKeyExists( arguments.data, "isDefault"   ) ) {
+            if ( arguments.data.isDefault ) {
+                clearOtherDefaultCalendars( excludeId = arguments.id );
+                cal.setIsDefault( true );
+            } else {
+                cal.setIsDefault( false );
+            }
+        }
+        cal.save();
+        return cal;
+    }
+
+    public any function getWeeklyHoursFor( required any calendar ){
+        return jsonDeserialize( arguments.calendar.getWeeklyHours() ?: "{}" );
+    }
+
+    public array function getHolidaysFor( required any calendar ){
+        return jsonDeserialize( arguments.calendar.getHolidays() ?: "[]" );
+    }
+
+    // ---------------- Policies ----------------
+
+    public any function getPolicyById( required string id ){
+        var p = wirebox.getInstance( "SlaPolicy@sla" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( p ) ? javaCast( "null", "" ) : p;
+    }
+
+    public array function listPolicies(){
+        return wirebox.getInstance( "SlaPolicy@sla" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function createPolicy( required struct data ){
+        var p = wirebox.getInstance( "SlaPolicy@sla" );
+        p.setId( newId() );
+        p.setName( arguments.data.name );
+        p.setDescription( arguments.data.description ?: "" );
+        p.setPriority( len( arguments.data.priority ?: "" ) ? arguments.data.priority : javaCast( "null", "" ) );
+        p.setTier(     len( arguments.data.tier     ?: "" ) ? arguments.data.tier     : javaCast( "null", "" ) );
+        p.setFirstResponseMinutes( arguments.data.firstResponseMinutes );
+        p.setResolutionMinutes(    arguments.data.resolutionMinutes    );
+        if ( len( arguments.data.businessHoursCalendarId ?: "" ) ) {
+            p.setBusinessHoursCalendarId( arguments.data.businessHoursCalendarId );
+        }
+        p.setPrecedence( arguments.data.precedence ?: 0 );
+        if ( structKeyExists( arguments.data, "isDefault" ) && arguments.data.isDefault ) {
+            clearOtherDefaultPolicies();
+            p.setIsDefault( true );
+        } else {
+            p.setIsDefault( false );
+        }
+        p.setIsActive( structKeyExists( arguments.data, "isActive" ) ? !!arguments.data.isActive : true );
+        p.save();
+        return p;
+    }
+
+    /**
+     * Pick the most specific active policy that fits the given ticket.
+     *
+     * Ranking:
+     *   - score = (priority specified ? 1 : 0) + (tier specified ? 1 : 0)
+     *   - within the same score, higher `precedence` wins
+     *   - within the same score and precedence, is_default wins
+     * If no policy matches at all, return the default policy if one
+     * exists, otherwise null.
+     */
+    public any function matchPolicyForTicket( required any ticket ){
+        var priority = arguments.ticket.getPriority() ?: "";
+        var tier     = "";
+        var orgId    = arguments.ticket.getOrganizationId() ?: "";
+        if ( len( orgId ) ) {
+            var org = wirebox.getInstance( "Organization@contacts" )
+                .where( "id", orgId )
+                .first();
+            if ( !isNull( org ) ) tier = org.getTier() ?: "";
+        }
+
+        var policies = wirebox.getInstance( "SlaPolicy@sla" )
+            .where( "is_active", true )
+            .get();
+
+        // BoxLang treats `var x = javaCast("null", "")` as not declaring
+        // x at all, so we hold the best match in a single-slot array
+        // and return either its element or an explicit null.
+        var bestRef    = [];
+        var bestScore  = -1;
+        var bestPrec   = -1;
+        var bestIsDef  = false;
+        for ( var p in policies ) {
+            var pPriority = p.getPriority() ?: "";
+            var pTier     = p.getTier()     ?: "";
+            if ( len( pPriority ) && pPriority != priority ) continue;
+            if ( len( pTier     ) && pTier     != tier     ) continue;
+
+            var score = ( len( pPriority ) ? 1 : 0 ) + ( len( pTier ) ? 1 : 0 );
+            var prec  = p.getPrecedence() ?: 0;
+            var isDef = !!( p.getIsDefault() ?: false );
+            if (
+                score > bestScore
+                || ( score == bestScore && prec > bestPrec )
+                || ( score == bestScore && prec == bestPrec && isDef && !bestIsDef )
+            ) {
+                bestRef   = [ p ];
+                bestScore = score;
+                bestPrec  = prec;
+                bestIsDef = isDef;
+            }
+        }
+        return bestRef.len() ? bestRef[ 1 ] : javaCast( "null", "" );
+    }
+
+    // ---------------- Target calculation ----------------
+
+    /**
+     * Compute the first-response deadline for a ticket against a
+     * policy, returning a java.time.Instant. The caller persists it
+     * as a UTC timestamp on the ticket in Phase 3b.
+     */
+    public any function computeFirstResponseDeadline(
+        required any ticket,
+        required any policy
+    ){
+        var calendar = calendarFor( arguments.policy );
+        var startInstant = toInstant( arguments.ticket.getCreatedAt() );
+        return addBusinessMinutes(
+            startInstant : startInstant,
+            minutes      : arguments.policy.getFirstResponseMinutes(),
+            calendar     : calendar
+        );
+    }
+
+    public any function computeResolutionDeadline(
+        required any ticket,
+        required any policy
+    ){
+        var calendar = calendarFor( arguments.policy );
+        var startInstant = toInstant( arguments.ticket.getCreatedAt() );
+        return addBusinessMinutes(
+            startInstant : startInstant,
+            minutes      : arguments.policy.getResolutionMinutes(),
+            calendar     : calendar
+        );
+    }
+
+    /**
+     * Advance `startInstant` by `minutes` of business time on the
+     * given calendar, returning a java.time.Instant.
+     *
+     * Math runs in the calendar's timezone so daily windows are
+     * literal local-time slots (09:00 to 17:00 in the calendar's
+     * zone, regardless of the caller's locale).
+     */
+    public any function addBusinessMinutes(
+        required any startInstant,
+        required numeric minutes,
+        required any calendar
+    ){
+        var weeklyHours = getWeeklyHoursFor( arguments.calendar );
+        var holidayList = getHolidaysFor( arguments.calendar );
+        var holidays = {};
+        for ( var h in holidayList ) holidays[ h ] = true;
+
+        var zoneIdClass   = createObject( "java", "java.time.ZoneId" );
+        var localTimeCls  = createObject( "java", "java.time.LocalTime" );
+        var durationClass = createObject( "java", "java.time.Duration" );
+
+        var zone = zoneIdClass.of( arguments.calendar.getTimezone() ?: "UTC" );
+        var zdt  = arguments.startInstant.atZone( zone );
+        var remaining = arguments.minutes;
+
+        // Safety bound: refuse to scan more than a year of calendar
+        // looking for capacity. A calendar with no open windows on any
+        // day would otherwise loop forever.
+        var dayBudget = 366;
+
+        while ( true ) {
+            if ( --dayBudget < 0 ) {
+                throw(
+                    type    = "SlaTargetUnreachable",
+                    message = "Could not consume " & arguments.minutes & " minutes within a year on calendar " & ( arguments.calendar.getName() ?: "(unnamed)" )
+                );
+            }
+            var dayKey  = left( lCase( zdt.getDayOfWeek().toString() ), 3 );
+            var dateKey = zdt.toLocalDate().toString(); // ISO YYYY-MM-DD
+
+            var windows = ( structKeyExists( holidays, dateKey ) || !structKeyExists( weeklyHours, dayKey ) )
+                          ? []
+                          : weeklyHours[ dayKey ];
+
+            for ( var w in windows ) {
+                var winStart = zdt.with( localTimeCls.parse( w.start ) );
+                var winEnd   = zdt.with( localTimeCls.parse( w.end   ) );
+
+                if ( zdt.isAfter( winEnd ) || zdt.isEqual( winEnd ) ) continue;
+                if ( zdt.isBefore( winStart ) ) zdt = winStart;
+
+                var minutesInWindow = durationClass.between( zdt, winEnd ).toMinutes();
+                if ( remaining <= minutesInWindow ) {
+                    return zdt.plusMinutes( javaCast( "long", remaining ) ).toInstant();
+                }
+                remaining -= minutesInWindow;
+                zdt = winEnd;
+            }
+
+            // Advance to start of next day, in this zone.
+            zdt = zdt.toLocalDate()
+                     .plusDays( javaCast( "long", 1 ) )
+                     .atStartOfDay( zone );
+        }
+    }
+
+    /**
+     * Convert a UTC-ish input (string, CFML date, java.time.Instant,
+     * java.util.Date) into a java.time.Instant.
+     */
+    public any function toInstant( required any when ){
+        var instantClass = createObject( "java", "java.time.Instant" );
+        if ( isInstanceOf( arguments.when, "java.time.Instant" ) ) return arguments.when;
+        if ( isInstanceOf( arguments.when, "java.util.Date"   ) ) return arguments.when.toInstant();
+        if ( isDate( arguments.when ) ) {
+            // Treat CFML datetime as UTC; ticket timestamps are stored UTC.
+            var iso = dateTimeFormat( arguments.when, "yyyy-mm-dd'T'HH:nn:ss" ) & "Z";
+            return instantClass.parse( iso );
+        }
+        if ( isSimpleValue( arguments.when ) ) {
+            var s = trim( arguments.when );
+            // Already an ISO instant?
+            if ( s.endsWith( "Z" ) || reFind( "[+-]\d\d:?\d\d$", s ) ) {
+                return instantClass.parse( s );
+            }
+            // "YYYY-MM-DD HH:MM:SS[.fff]" from Postgres - treat as UTC.
+            if ( reFind( "^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", s ) ) {
+                var normalized = replace( s, " ", "T" );
+                if ( find( ".", normalized ) ) normalized = listFirst( normalized, "." );
+                return instantClass.parse( normalized & "Z" );
+            }
+            return instantClass.parse( s );
+        }
+        throw( type = "SlaToInstant.UnsupportedType",
+               message = "Cannot convert value to Instant: " & arguments.when.toString() );
+    }
+
+    /**
+     * Format a java.time.Instant as a Postgres-friendly UTC timestamp
+     * string (yyyy-mm-dd HH:nn:ss). Used by callers persisting an SLA
+     * target back into a `timestamp` column.
+     */
+    public string function formatInstantUtc( required any instant ){
+        var s = arguments.instant.toString(); // "2026-05-15T14:32:00Z"
+        s = replace( s, "T", " " );
+        s = replace( s, "Z", "" );
+        if ( find( ".", s ) ) s = listFirst( s, "." );
+        return s;
+    }
+
+    // ---------------- Internals ----------------
+
+    private any function calendarFor( required any policy ){
+        var calId = arguments.policy.getBusinessHoursCalendarId() ?: "";
+        if ( len( calId ) ) {
+            var cal = getCalendarById( calId );
+            if ( !isNull( cal ) ) return cal;
+        }
+        var def = getDefaultCalendar();
+        if ( isNull( def ) ) {
+            throw( type    = "SlaNoCalendar",
+                   message = "Policy " & ( arguments.policy.getName() ?: arguments.policy.getId() ) & " has no calendar and no default calendar is configured." );
+        }
+        return def;
+    }
+
+    private void function clearOtherDefaultCalendars( string excludeId = "" ){
+        var q = wirebox.getInstance( "BusinessHoursCalendar@sla" )
+            .where( "is_default", true );
+        if ( len( arguments.excludeId ) ) q = q.where( "id", "!=", arguments.excludeId );
+        for ( var c in q.get() ) {
+            c.setIsDefault( false );
+            c.save();
+        }
+    }
+
+    private void function clearOtherDefaultPolicies( string excludeId = "" ){
+        var q = wirebox.getInstance( "SlaPolicy@sla" )
+            .where( "is_default", true );
+        if ( len( arguments.excludeId ) ) q = q.where( "id", "!=", arguments.excludeId );
+        for ( var p in q.get() ) {
+            p.setIsDefault( false );
+            p.save();
+        }
+    }
+
+    private struct function defaultWeeklyHours(){
+        return {
+            "mon" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "tue" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "wed" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "thu" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "fri" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "sat" : [],
+            "sun" : []
+        };
+    }
+
+    private string function newId(){
+        return lCase( replace( createUUID(), "-", "", "all" ) );
+    }
+
+}

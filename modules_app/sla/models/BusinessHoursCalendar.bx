@@ -1,0 +1,30 @@
+/**
+ * BusinessHoursCalendar: weekly business hours plus a holiday list,
+ * stamped with a timezone.
+ *
+ * weeklyHours and holidays come back from Postgres as JSON text; the
+ * SlaService deserializes them on demand. We deliberately do not
+ * declare Quick casts here because the JSONB column comes back as a
+ * string and BoxLang's jsonDeserialize is cheap enough to call where
+ * the data is actually used.
+ *
+ * Not tenant-scoped: SLA calendars are provider configuration, not
+ * customer data.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="business_hours_calendars"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="timezone";
+    property name="weeklyHours" column="weekly_hours";
+    property name="holidays";
+    property name="isDefault"  column="is_default";
+    property name="isActive"   column="is_active";
+    property name="createdAt"  column="created_at" sqltype="timestamp";
+    property name="updatedAt"  column="updated_at" sqltype="timestamp";
+
+}

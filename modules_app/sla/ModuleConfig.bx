@@ -20,13 +20,22 @@ class {
     this.dependencies       = [ "contacts" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings              = {};
+        variables.routes                = [];
+        variables.interceptorSettings   = { customInterceptionPoints : [] };
+        variables.interceptors          = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "BusinessHoursCalendar@sla" )
+              .to( "#moduleMapping#.models.BusinessHoursCalendar" );
+        binder.map( "SlaPolicy@sla" )
+              .to( "#moduleMapping#.models.SlaPolicy" );
+        binder.map( "SlaService@sla" )
+              .to( "#moduleMapping#.models.SlaService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

@@ -1,0 +1,241 @@
+/**
+ * SlaServiceSpec: covers calendar / policy CRUD basics, policy
+ * matching specificity, and the addBusinessMinutes math (single
+ * window, end-of-day, weekend, holiday, before/after business hours).
+ *
+ * Calendars and policies are created with unique names per spec and
+ * cleaned up at the end so the suite stays repeatable. We avoid
+ * touching is_default unless a spec needs it, because the partial
+ * unique index across the whole table makes is_default a shared
+ * resource between specs.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.sla = getController().getWireBox().getInstance( "SlaService@sla" );
+    }
+
+    function run(){
+        describe( "SlaService - calendars and policies", function(){
+
+            it( "creates and reads a calendar", function(){
+                var cal = variables.sla.createCalendar( {
+                    name        : "spec-cal-" & createUUID(),
+                    timezone    : "America/New_York",
+                    weeklyHours : {
+                        "mon" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "tue" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "wed" : [], "thu" : [], "fri" : [], "sat" : [], "sun" : []
+                    },
+                    holidays    : [ "2026-12-25" ]
+                } );
+                expect( cal.getId() ).notToBeEmpty();
+                expect( cal.getTimezone() ).toBe( "America/New_York" );
+
+                var refreshed = variables.sla.getCalendarById( cal.getId() );
+                var hours = variables.sla.getWeeklyHoursFor( refreshed );
+                expect( hours.mon[ 1 ].start ).toBe( "09:00" );
+                cleanupCalendar( cal.getId() );
+            } );
+
+            it( "creates and reads a policy", function(){
+                var p = variables.sla.createPolicy( {
+                    name                  : "spec-pol-" & createUUID(),
+                    priority              : "high",
+                    tier                  : "Gold",
+                    firstResponseMinutes  : 60,
+                    resolutionMinutes     : 480
+                } );
+                expect( p.getId() ).notToBeEmpty();
+                expect( p.getFirstResponseMinutes() ).toBe( 60 );
+                cleanupPolicy( p.getId() );
+            } );
+
+        } );
+
+        describe( "SlaService - matchPolicyForTicket", function(){
+
+            it( "prefers exact priority+tier over priority-only", function(){
+                var general = variables.sla.createPolicy( {
+                    name                  : "spec-match-general-" & createUUID(),
+                    priority              : "high",
+                    firstResponseMinutes  : 60,
+                    resolutionMinutes     : 480
+                } );
+                var specific = variables.sla.createPolicy( {
+                    name                  : "spec-match-specific-" & createUUID(),
+                    priority              : "high",
+                    tier                  : "Gold",
+                    firstResponseMinutes  : 15,
+                    resolutionMinutes     : 120
+                } );
+
+                var ticket = stubTicket( priority = "high", tier = "Gold" );
+                var match  = variables.sla.matchPolicyForTicket( ticket );
+                expect( match.getId() ).toBe( specific.getId() );
+
+                cleanupPolicy( general.getId() );
+                cleanupPolicy( specific.getId() );
+            } );
+
+            it( "falls back to a policy with no scoping (catch-all) when nothing better matches", function(){
+                var catchAll = variables.sla.createPolicy( {
+                    name                  : "spec-catchall-" & createUUID(),
+                    firstResponseMinutes  : 480,
+                    resolutionMinutes     : 2880
+                } );
+
+                var ticket = stubTicket( priority = "urgent", tier = "Bronze" );
+                var match  = variables.sla.matchPolicyForTicket( ticket );
+                expect( match.getId() ).toBe( catchAll.getId() );
+
+                cleanupPolicy( catchAll.getId() );
+            } );
+
+            it( "skips policies that do not match the ticket priority", function(){
+                var onlyMatchesLow = variables.sla.createPolicy( {
+                    name                  : "spec-low-" & createUUID(),
+                    priority              : "low",
+                    firstResponseMinutes  : 60,
+                    resolutionMinutes     : 480
+                } );
+
+                var ticket = stubTicket( priority = "urgent", tier = "" );
+                var match  = variables.sla.matchPolicyForTicket( ticket );
+                if ( !isNull( match ) ) {
+                    expect( match.getId() ).notToBe( onlyMatchesLow.getId() );
+                }
+                cleanupPolicy( onlyMatchesLow.getId() );
+            } );
+
+        } );
+
+        describe( "SlaService - addBusinessMinutes", function(){
+
+            beforeEach( function( currentSpec ){
+                // Mon-Fri 09:00-17:00 in UTC for predictable math.
+                variables.cal = variables.sla.createCalendar( {
+                    name     : "spec-math-" & createUUID(),
+                    timezone : "UTC",
+                    weeklyHours : {
+                        "mon" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "tue" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "wed" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "thu" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "fri" : [ { "start" : "09:00", "end" : "17:00" } ],
+                        "sat" : [],
+                        "sun" : []
+                    },
+                    holidays : [ "2026-05-15" ]  // a Friday
+                } );
+            } );
+
+            afterEach( function( currentSpec ){
+                cleanupCalendar( variables.cal.getId() );
+            } );
+
+            it( "consumes minutes within a single open window", function(){
+                // Tuesday 2026-05-12 10:00 UTC + 120 minutes = 12:00.
+                var start = parseInstant( "2026-05-12T10:00:00Z" );
+                var end   = variables.sla.addBusinessMinutes( start, 120, variables.cal );
+                expect( end.toString() ).toBe( "2026-05-12T12:00:00Z" );
+            } );
+
+            it( "crosses an end-of-day boundary into the next day", function(){
+                // Tuesday 2026-05-12 16:00 UTC + 120 minutes.
+                // 60 mins consumes 16:00-17:00 Tuesday; remaining 60 starts Wed 09:00.
+                var start = parseInstant( "2026-05-12T16:00:00Z" );
+                var end   = variables.sla.addBusinessMinutes( start, 120, variables.cal );
+                expect( end.toString() ).toBe( "2026-05-13T10:00:00Z" );
+            } );
+
+            it( "skips the weekend", function(){
+                // Friday 2026-05-08 16:00 UTC + 120 minutes.
+                // 60 mins consumes 16:00-17:00 Fri; remaining 60 lands Mon 09:00 -> 10:00.
+                var start = parseInstant( "2026-05-08T16:00:00Z" );
+                var end   = variables.sla.addBusinessMinutes( start, 120, variables.cal );
+                expect( end.toString() ).toBe( "2026-05-11T10:00:00Z" );
+            } );
+
+            it( "skips a configured holiday", function(){
+                // Thursday 2026-05-14 16:00 UTC + 120 minutes.
+                // 60 mins consumes 16:00-17:00 Thu; Fri 2026-05-15 is a holiday;
+                // remaining 60 lands Mon 09:00 -> 10:00 on 2026-05-18.
+                var start = parseInstant( "2026-05-14T16:00:00Z" );
+                var end   = variables.sla.addBusinessMinutes( start, 120, variables.cal );
+                expect( end.toString() ).toBe( "2026-05-18T10:00:00Z" );
+            } );
+
+            it( "advances from before-business-hours to the window open", function(){
+                // Tuesday 2026-05-12 06:30 UTC + 30 minutes -> 09:30.
+                var start = parseInstant( "2026-05-12T06:30:00Z" );
+                var end   = variables.sla.addBusinessMinutes( start, 30, variables.cal );
+                expect( end.toString() ).toBe( "2026-05-12T09:30:00Z" );
+            } );
+
+            it( "advances from after-business-hours to the next day's open", function(){
+                // Tuesday 2026-05-12 22:00 UTC + 30 minutes -> Wed 09:30.
+                var start = parseInstant( "2026-05-12T22:00:00Z" );
+                var end   = variables.sla.addBusinessMinutes( start, 30, variables.cal );
+                expect( end.toString() ).toBe( "2026-05-13T09:30:00Z" );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function parseInstant( required string iso ){
+        return createObject( "java", "java.time.Instant" ).parse( arguments.iso );
+    }
+
+    /**
+     * Build a lightweight stand-in for a Ticket that exposes the
+     * getters matchPolicyForTicket needs: getPriority and
+     * getOrganizationId. If a `tier` is supplied, the stub also
+     * provides an organization row so the service's lookup hits
+     * something real.
+     */
+    private any function stubTicket( string priority = "normal", string tier = "" ){
+        var orgId = "";
+        if ( len( arguments.tier ) ) {
+            orgId = lCase( replace( createUUID(), "-", "", "all" ) );
+            queryExecute(
+                "INSERT INTO organizations (id, name, slug, tier, is_active, created_at, updated_at)
+                 VALUES (:id, :name, :slug, :tier, true, NOW(), NOW())",
+                {
+                    id   : orgId,
+                    name : "Spec Org " & orgId,
+                    slug : "spec-" & orgId,
+                    tier : arguments.tier
+                }
+            );
+            variables.stubOrgIds = ( variables.stubOrgIds ?: [] );
+            variables.stubOrgIds.append( orgId );
+        }
+        return new tests.support.StubTicket(
+            priority       = arguments.priority,
+            organizationId = orgId
+        );
+    }
+
+    private void function cleanupCalendar( required string id ){
+        queryExecute( "DELETE FROM business_hours_calendars WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupPolicy( required string id ){
+        queryExecute( "DELETE FROM sla_policies WHERE id = :id", { id : arguments.id } );
+    }
+
+    function afterAll(){
+        if ( structKeyExists( variables, "stubOrgIds" ) ) {
+            for ( var id in variables.stubOrgIds ) {
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : id } );
+            }
+        }
+        super.afterAll();
+    }
+
+}

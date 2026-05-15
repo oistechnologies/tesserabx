@@ -1,0 +1,35 @@
+/**
+ * SlaPolicy: declares first-response and resolution targets in
+ * minutes of business time, evaluated against a BusinessHoursCalendar.
+ *
+ * Scoping:
+ *   - priority NULL = applies to any priority
+ *   - tier NULL     = applies to any tier
+ * SlaService.matchPolicyForTicket selects the most specific active
+ * policy, falling back to the policy flagged is_default.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="sla_policies"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="description";
+    property name="priority";
+    property name="tier";
+    property name="firstResponseMinutes" column="first_response_minutes";
+    property name="resolutionMinutes"    column="resolution_minutes";
+    property name="businessHoursCalendarId" column="business_hours_calendar_id";
+    property name="precedence";
+    property name="isDefault"  column="is_default";
+    property name="isActive"   column="is_active";
+    property name="createdAt"  column="created_at" sqltype="timestamp";
+    property name="updatedAt"  column="updated_at" sqltype="timestamp";
+
+    function calendar(){
+        return belongsTo( "BusinessHoursCalendar@sla", "business_hours_calendar_id" );
+    }
+
+}

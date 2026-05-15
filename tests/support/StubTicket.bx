@@ -1,0 +1,24 @@
+/**
+ * StubTicket: a minimal stand-in for a real Ticket entity used in
+ * service-layer specs that need to exercise behaviour keyed off
+ * getPriority / getOrganizationId / getCreatedAt without a full
+ * Quick row.
+ */
+class accessors=true {
+
+    property name="priority";
+    property name="organizationId";
+    property name="createdAt";
+
+    function init(
+        string priority       = "normal",
+        string organizationId = "",
+        any    createdAt      = ""
+    ){
+        variables.priority       = arguments.priority;
+        variables.organizationId = arguments.organizationId;
+        variables.createdAt      = arguments.createdAt;
+        return this;
+    }
+
+}
