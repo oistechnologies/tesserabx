@@ -1,4 +1,6 @@
 <bx:output>
+<bx:set local.auth = getInstance( "AuthenticationService@cbauth" ) >
+<bx:set local.signedIn = local.auth.isLoggedIn() >
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="light">
 <head>
@@ -25,9 +27,12 @@
                     </li>
                 </ul>
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a href="/login" class="nav-link">Sign in</a>
-                    </li>
+                    <bx:if local.signedIn>
+                        <li class="nav-item"><span class="nav-link text-body-secondary">#encodeForHTML( local.auth.getUser().getEmail() )#</span></li>
+                        <li class="nav-item"><a href="/logout" class="nav-link">Sign out</a></li>
+                    <bx:else>
+                        <li class="nav-item"><a href="/login" class="nav-link">Sign in</a></li>
+                    </bx:if>
                 </ul>
             </div>
         </nav>
@@ -44,6 +49,14 @@
                         <li class="nav-item">
                             <a href="/" class="nav-link"><i class="nav-icon bi bi-house"></i><p>Home</p></a>
                         </li>
+                        <bx:if local.signedIn>
+                            <li class="nav-item">
+                                <a href="/tickets" class="nav-link"><i class="nav-icon bi bi-card-list"></i><p>My tickets</p></a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="/tickets/new" class="nav-link"><i class="nav-icon bi bi-plus-square"></i><p>Submit a ticket</p></a>
+                            </li>
+                        </bx:if>
                         <li class="nav-item">
                             <a href="/kb" class="nav-link"><i class="nav-icon bi bi-book"></i><p>Knowledge Base</p></a>
                         </li>
@@ -60,6 +73,7 @@
             </div>
             <div class="app-content">
                 <div class="container-fluid">
+                    #getInstance( "messagebox@cbmessagebox" ).renderIt()#
                     #view()#
                 </div>
             </div>

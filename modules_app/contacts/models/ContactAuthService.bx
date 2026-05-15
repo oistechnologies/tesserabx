@@ -11,6 +11,7 @@ class singleton=true {
 
     public any function retrieveUserByUsername( required string username ){
         var contact = wirebox.getInstance( "Contact@contacts" )
+            .withoutGlobalScope()
             .where( "email", arguments.username )
             .where( "is_active", true )
             .first();
@@ -19,6 +20,7 @@ class singleton=true {
 
     public any function retrieveUserById( required string id ){
         var contact = wirebox.getInstance( "Contact@contacts" )
+            .withoutGlobalScope()
             .where( "id", arguments.id )
             .first();
         return isNull( contact ) ? javaCast( "null", "" ) : contact;

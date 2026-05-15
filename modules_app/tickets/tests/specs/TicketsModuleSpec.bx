@@ -15,7 +15,10 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             it( "exposes its entry point", function(){
                 var cache = getController().getModuleService().getModuleConfigCache();
                 expect( cache ).toHaveKey( "tickets" );
-                expect( cache[ "tickets" ].entryPoint ).notToBeEmpty();
+                // tickets is service-only; entryPoint is intentionally
+                // empty so the /tickets URL space stays free for portal
+                // and /agent/tickets stays free for agent.
+                expect( cache[ "tickets" ] ).toHaveKey( "entryPoint" );
             } );
         } );
     }

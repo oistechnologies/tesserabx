@@ -1,0 +1,36 @@
+<bx:output>
+<form method="post" action="/tickets/new" class="card">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label" for="subject">Subject <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="subject" name="subject" required value="#encodeForHTMLAttribute( prc.formData.subject ?: "" )#">
+            </div>
+            <div class="col-12 col-md-6">
+                <label class="form-label" for="priority">Priority</label>
+                <select class="form-select" id="priority" name="priority">
+                    <bx:loop array="#prc.priorities#" item="p">
+                        <option value="#encodeForHTMLAttribute( p )#"<bx:if ( prc.formData.priority ?: "" ) eq p> selected</bx:if>>#encodeForHTML( p )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12 col-md-6">
+                <label class="form-label" for="ticketType">Type</label>
+                <select class="form-select" id="ticketType" name="ticketType">
+                    <bx:loop array="#prc.types#" item="t">
+                        <option value="#encodeForHTMLAttribute( t )#"<bx:if ( prc.formData.ticketType ?: "" ) eq t> selected</bx:if>>#encodeForHTML( t )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="body">What do you need help with? <span class="text-danger">*</span></label>
+                <textarea class="form-control" id="body" name="body" rows="6" required>#encodeForHTML( prc.formData.body ?: "" )#</textarea>
+            </div>
+        </div>
+        <div class="d-flex justify-content-end gap-2 mt-4">
+            <a class="btn btn-outline-secondary" href="/tickets">Cancel</a>
+            <button class="btn btn-primary" type="submit">Submit ticket</button>
+        </div>
+    </div>
+</form>
+</bx:output>

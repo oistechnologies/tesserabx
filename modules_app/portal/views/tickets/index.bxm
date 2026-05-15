@@ -1,0 +1,41 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <bx:if prc.isOrgAdmin>
+            <span class="badge text-bg-info">Organization Admin</span>
+            <span class="text-body-secondary">Showing every ticket in your organization.</span>
+        </bx:if>
+    </div>
+    <a class="btn btn-primary" href="/tickets/new"><i class="bi bi-plus-lg"></i> Submit a ticket</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>##</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Updated</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.tickets )>
+                    <tr><td colspan="5" class="text-center text-body-secondary py-4">No tickets yet. <a href="/tickets/new">Submit your first one.</a></td></tr>
+                </bx:if>
+                <bx:loop array="#prc.tickets#" item="t">
+                    <tr>
+                        <td class="text-body-secondary">##<a href="/tickets/#encodeForURL( t.getId() )#" class="link-secondary">#t.getTicketNumber()#</a></td>
+                        <td><a href="/tickets/#encodeForURL( t.getId() )#">#encodeForHTML( t.getSubject() )#</a></td>
+                        <td><span class="badge text-bg-secondary">#encodeForHTML( t.getStatus() )#</span></td>
+                        <td>#encodeForHTML( t.getPriority() )#</td>
+                        <td><small>#encodeForHTML( dateTimeFormat( t.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#</small></td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

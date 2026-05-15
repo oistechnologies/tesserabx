@@ -1,0 +1,190 @@
+<bx:output>
+<bx:set local.t = prc.ticket >
+
+<div class="row g-3">
+
+    <div class="col-12 col-lg-8">
+
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <div class="small text-body-secondary">Ticket ###local.t.getTicketNumber()# &middot; #encodeForHTML( local.t.getTicketType() )# &middot; <span class="badge text-bg-secondary">#encodeForHTML( local.t.getPriority() )#</span></div>
+                        <h2 class="h4 mb-0 mt-1">#encodeForHTML( local.t.getSubject() )#</h2>
+                    </div>
+                    <span class="badge text-bg-primary fs-6">#encodeForHTML( local.t.getStatus() )#</span>
+                </div>
+                <dl class="row small mb-0">
+                    <dt class="col-sm-3">Organization</dt>
+                    <dd class="col-sm-9">
+                        <bx:if local.t.isAccountless()>
+                            <span class="badge text-bg-warning">Accountless</span>
+                            (sender: #encodeForHTML( local.t.getOriginatingEmail() ?: "" )#)
+                        <bx:else>
+                            <bx:if !isNull( prc.organization )>#encodeForHTML( prc.organization.getName() )#</bx:if>
+                        </bx:if>
+                    </dd>
+                    <dt class="col-sm-3">Requester</dt>
+                    <dd class="col-sm-9">
+                        <bx:if !isNull( prc.requester )>
+                            #encodeForHTML( prc.requester.getEmail() )#
+                        <bx:else>
+                            <bx:if len( local.t.getOriginatingEmail() ?: "" )>#encodeForHTML( local.t.getOriginatingEmail() )# (unregistered)<bx:else>(none)</bx:if>
+                        </bx:if>
+                    </dd>
+                    <dt class="col-sm-3">Assigned to</dt>
+                    <dd class="col-sm-9">
+                        <bx:if len( local.t.getAssignedToAgentId() ?: "" )>
+                            #encodeForHTML( local.t.getAssignedToAgentId() )#
+                        <bx:else>
+                            <em class="text-body-secondary">unassigned</em>
+                        </bx:if>
+                    </dd>
+                    <dt class="col-sm-3">Source</dt>
+                    <dd class="col-sm-9">#encodeForHTML( local.t.getSource() )#</dd>
+                </dl>
+            </div>
+        </div>
+
+        <bx:set local.publicCount = 0 >
+        <bx:set local.internalCount = 0 >
+        <bx:loop array="#prc.messages#" item="local.m">
+            <bx:if local.m.getIsInternal()>
+                <bx:set local.internalCount = local.internalCount + 1 >
+            <bx:else>
+                <bx:set local.publicCount = local.publicCount + 1 >
+            </bx:if>
+        </bx:loop>
+
+        <h3 class="h6 mt-4 mb-2">Conversation
+            <small class="text-body-secondary">(#local.publicCount# public, #local.internalCount# internal)</small>
+        </h3>
+
+        <bx:if !arrayLen( prc.messages )>
+            <p class="text-body-secondary">No messages yet.</p>
+        </bx:if>
+        <bx:loop array="#prc.messages#" item="local.m">
+            <div class="card mb-2 #local.m.getIsInternal() ? 'border-warning' : ''#">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between small text-body-secondary mb-2">
+                        <span>
+                            <bx:if local.m.isFromAgent()>
+                                <strong>Agent</strong> #encodeForHTML( local.m.getAuthorAgentId() ?: "" )#
+                            <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
+                                <strong>Contact</strong> #encodeForHTML( local.m.getAuthorContactId() )#
+                            <bx:else>
+                                <strong>Email</strong> #encodeForHTML( local.m.getAuthorEmail() ?: "" )#
+                            </bx:if>
+                            <bx:if local.m.getIsInternal()>
+                                &middot; <span class="badge text-bg-warning">Internal</span>
+                            </bx:if>
+                        </span>
+                        <span>#encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
+                    </div>
+                    <div style="white-space:pre-wrap">#encodeForHTML( local.m.getBody() )#</div>
+                </div>
+            </div>
+        </bx:loop>
+
+        <div class="card mt-3">
+            <div class="card-header">Reply</div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" role="tablist">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="##public-pane" type="button">Public reply</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="##internal-pane" type="button">Internal note</button></li>
+                </ul>
+                <div class="tab-content pt-3">
+                    <div class="tab-pane fade show active" id="public-pane" role="tabpanel">
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
+                            <textarea class="form-control mb-2" name="body" rows="4" placeholder="Reply visible to the requester..."></textarea>
+                            <div class="d-flex justify-content-end">
+                                <button class="btn btn-primary" type="submit">Send reply</button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="tab-pane fade" id="internal-pane" role="tabpanel">
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/internal-note">
+                            <textarea class="form-control mb-2" name="body" rows="4" placeholder="Note visible only to agents..."></textarea>
+                            <div class="d-flex justify-content-end">
+                                <button class="btn btn-warning" type="submit">Add internal note</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="col-12 col-lg-4">
+
+        <div class="card mb-3">
+            <div class="card-header">Status</div>
+            <div class="card-body">
+                <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/status" class="d-flex gap-2">
+                    <select class="form-select" name="status">
+                        <bx:loop array="#prc.statuses#" item="local.s">
+                            <option value="#encodeForHTMLAttribute( local.s )#"<bx:if local.t.getStatus() eq local.s> selected</bx:if>>#encodeForHTML( local.s )#</option>
+                        </bx:loop>
+                    </select>
+                    <button class="btn btn-outline-primary" type="submit">Set</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header">Assignment</div>
+            <div class="card-body">
+                <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/assign">
+                    <input type="text" class="form-control mb-2" name="agentId" placeholder="Agent UUID (leave blank to unassign)" value="#encodeForHTMLAttribute( local.t.getAssignedToAgentId() ?: "" )#">
+                    <div class="d-flex justify-content-end">
+                        <button class="btn btn-outline-primary" type="submit">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <bx:if local.t.isAccountless()>
+            <div class="card mb-3 border-warning">
+                <div class="card-header bg-warning-subtle">Promote sender to contact</div>
+                <div class="card-body">
+                    <p class="small mb-2">Creates a Contact for <code>#encodeForHTML( local.t.getOriginatingEmail() ?: "" )#</code> in the chosen organization and assigns this ticket to them.</p>
+                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/promote-sender">
+                        <div class="mb-2">
+                            <select class="form-select" name="organizationId" required>
+                                <option value="">Select organization...</option>
+                                <bx:loop array="#prc.organizations#" item="local.o">
+                                    <option value="#encodeForHTMLAttribute( local.o.getId() )#">#encodeForHTML( local.o.getName() )#</option>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-6"><input type="text" class="form-control" name="firstName" placeholder="First name"></div>
+                            <div class="col-6"><input type="text" class="form-control" name="lastName" placeholder="Last name"></div>
+                        </div>
+                        <div class="mb-2">
+                            <input type="text" class="form-control" name="password" placeholder="Initial password (min 8 chars)" minlength="8" required>
+                        </div>
+                        <button class="btn btn-warning w-100" type="submit">Promote</button>
+                    </form>
+                </div>
+            </div>
+        </bx:if>
+
+        <div class="card">
+            <div class="card-header">Timeline</div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush small">
+                    <bx:loop array="#prc.events#" item="local.e">
+                        <li class="list-group-item">
+                            <div class="text-body-secondary">#encodeForHTML( dateTimeFormat( local.e.getOccurredAt(), "yyyy-mm-dd HH:nn:ss" ) )#</div>
+                            <code>#encodeForHTML( local.e.getEventType() )#</code>
+                        </li>
+                    </bx:loop>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+</div>
+</bx:output>

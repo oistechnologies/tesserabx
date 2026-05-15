@@ -207,15 +207,23 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             email          : "spec-" & createUUID() & "@example.com",
             password       : "spec-password"
         } );
-        // Borrow the seeded admin agent as the actor (already exists).
-        var agent = queryExecute(
-            "SELECT id FROM agents WHERE email = 'agent@example.com' LIMIT 1",
-            {}, { returntype : "array" }
-        )[ 1 ];
+        // Create a fresh agent row directly (TicketsService doesn't
+        // own agent provisioning, and the spec stays independent of
+        // the dev seeder data so CI sees the same state).
+        var agentId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :hash, false, true )",
+            {
+                id    : agentId,
+                email : "spec-agent-" & createUUID() & "@example.com",
+                hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
         return {
             org     : org,
             contact : contact,
-            agentId : agent.id
+            agentId : agentId
         };
     }
 
@@ -232,6 +240,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
             queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
             queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+            queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.fixture.agentId } );
         }
     }
 

@@ -7,30 +7,46 @@
  *   - Authenticated Contact: returns the contact's organization_id.
  *   - Authenticated Agent  : returns null (agents see across organizations).
  *   - Unauthenticated      : returns null (access control via cbSecurity).
+ *
+ * Reentrant lookups (auth services calling Contact entities while
+ * the auth service is mid-resolution) trip a guard flag so the probe
+ * returns null instead of recursing into the Quick global scope.
  */
 class singleton=true {
 
     property name="authService" inject="AuthenticationService@cbauth";
 
     public any function currentTenantId(){
-        if ( !authService.isLoggedIn() ) {
+        // Guard against reentrancy. cbauth's getUser() may run a Quick
+        // query for the Contact entity, which triggers applyGlobalScopes
+        // -> TenantScope.apply -> back into this method. Without the
+        // guard the chain throws inside cbauth.
+        if ( request.keyExists( "_tenantContextProbeActive" ) && request._tenantContextProbeActive ) {
             return javaCast( "null", "" );
         }
-        var user = authService.getUser();
-        if ( isNull( user ) ) {
-            return javaCast( "null", "" );
-        }
-        if ( structKeyExists( user, "getOrganizationId" ) ) {
-            try {
-                var orgId = user.getOrganizationId();
-                if ( !isNull( orgId ) && len( orgId ) ) {
-                    return orgId;
-                }
-            } catch ( any e ) {
-                // Fall through; no scope applied.
+        request._tenantContextProbeActive = true;
+        try {
+            if ( !authService.isLoggedIn() ) {
+                return javaCast( "null", "" );
             }
+            var user = authService.getUser();
+            if ( isNull( user ) ) {
+                return javaCast( "null", "" );
+            }
+            if ( structKeyExists( user, "getOrganizationId" ) ) {
+                try {
+                    var orgId = user.getOrganizationId();
+                    if ( !isNull( orgId ) && len( orgId ) ) {
+                        return orgId;
+                    }
+                } catch ( any e ) {
+                    // Fall through; no scope applied.
+                }
+            }
+            return javaCast( "null", "" );
+        } finally {
+            request._tenantContextProbeActive = false;
         }
-        return javaCast( "null", "" );
     }
 
 }

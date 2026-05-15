@@ -1,0 +1,271 @@
+/**
+ * agent:Tickets handler.
+ *
+ * Agent-facing ticket workspace. Lists tickets across all
+ * organizations, opens a single ticket with its full timeline,
+ * lets the agent reply (public or internal), change status, assign
+ * or reassign, and promote an accountless ticket's sender into a
+ * Contact.
+ *
+ * All data access flows through TicketsService and ContactsService.
+ * The handler never imports a ticket entity directly.
+ */
+class {
+
+    property name="ticketsService"  inject="TicketsService@tickets";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    // ---------- list / show ----------
+
+    function index( event, rc, prc ){
+        param rc.status            = "";
+        param rc.priority          = "";
+        param rc.organizationId    = "";
+        param rc.assignedToAgentId = "";
+        param rc.accountlessOnly   = false;
+
+        prc.pageTitle     = "Tickets";
+        prc.statuses      = ticketsService.listStatuses();
+        prc.priorities    = ticketsService.listPriorities();
+        prc.organizations = contactsService.listOrganizations();
+        prc.tickets       = ticketsService.listTickets(
+            status            : rc.status,
+            priority          : rc.priority,
+            organizationId    : rc.organizationId,
+            assignedToAgentId : rc.assignedToAgentId,
+            accountlessOnly   : ( rc.accountlessOnly == "true" || rc.accountlessOnly == "1" || rc.accountlessOnly == true ),
+            limit             : 200
+        );
+        prc.orgNamesById = {};
+        for ( var o in prc.organizations ) {
+            prc.orgNamesById[ o.getId() ] = o.getName();
+        }
+        prc.filters = rc;
+        event.setView( "tickets/index" );
+    }
+
+    function show( event, rc, prc ){
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        loadShowContext( prc, t );
+        event.setView( "tickets/show" );
+    }
+
+    function new( event, rc, prc ){
+        prc.pageTitle     = "New ticket";
+        prc.organizations = contactsService.listOrganizations();
+        prc.statuses      = ticketsService.listStatuses();
+        prc.priorities    = ticketsService.listPriorities();
+        prc.types         = ticketsService.listTypes();
+        prc.formData      = {
+            subject              : rc.subject ?: "",
+            organizationId       : rc.organizationId ?: "",
+            requesterContactId   : rc.requesterContactId ?: "",
+            originatingEmail     : rc.originatingEmail ?: "",
+            priority             : rc.priority ?: "normal",
+            ticketType           : rc.ticketType ?: "request"
+        };
+        prc.contactsForOrg = len( prc.formData.organizationId )
+            ? contactsService.listContactsForOrganization( prc.formData.organizationId )
+            : [];
+        event.setView( "tickets/new" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.subject            = "";
+        param rc.organizationId     = "";
+        param rc.requesterContactId = "";
+        param rc.originatingEmail   = "";
+        param rc.priority           = "normal";
+        param rc.ticketType         = "request";
+        param rc.firstMessage       = "";
+
+        if ( !len( trim( rc.subject ) ) ) {
+            messagebox.error( "Subject is required." );
+            return new( event, rc, prc );
+        }
+
+        var ticket = "";
+        if ( len( rc.requesterContactId ) ) {
+            ticket = ticketsService.createTicket( {
+                requesterContactId : rc.requesterContactId,
+                subject            : rc.subject,
+                priority           : rc.priority,
+                ticketType         : rc.ticketType,
+                source             : "agent",
+                actorType          : "agent",
+                actorId            : currentAgentId()
+            } );
+        } else if ( len( rc.originatingEmail ) ) {
+            ticket = ticketsService.createAccountlessTicket( {
+                originatingEmail : rc.originatingEmail,
+                subject          : rc.subject,
+                priority         : rc.priority,
+                ticketType       : rc.ticketType,
+                source           : "agent",
+                actorType        : "agent",
+                actorId          : currentAgentId()
+            } );
+        } else {
+            messagebox.error( "Pick a contact or supply an originating email." );
+            return new( event, rc, prc );
+        }
+
+        if ( len( trim( rc.firstMessage ) ) ) {
+            ticketsService.addMessage( {
+                ticketId      : ticket.getId(),
+                body          : rc.firstMessage,
+                authorAgentId : currentAgentId(),
+                isInternal    : false
+            } );
+        }
+
+        messagebox.info( "Ticket created." );
+        relocate( uri = "/agent/tickets/" & ticket.getId() );
+    }
+
+    // ---------- actions ----------
+
+    function reply( event, rc, prc ){
+        return postMessage( event, rc, prc, false, "Reply sent." );
+    }
+
+    function internalNote( event, rc, prc ){
+        return postMessage( event, rc, prc, true, "Internal note added." );
+    }
+
+    function changeStatus( event, rc, prc ){
+        param rc.status = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        try {
+            ticketsService.changeStatus( {
+                ticketId  : t.getId(),
+                status    : rc.status,
+                actorType : "agent",
+                actorId   : currentAgentId()
+            } );
+            messagebox.info( "Ticket status updated to " & rc.status & "." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    function assign( event, rc, prc ){
+        param rc.agentId = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        ticketsService.assignToAgent( {
+            ticketId : t.getId(),
+            agentId  : rc.agentId,
+            actorId  : currentAgentId()
+        } );
+        messagebox.info( len( rc.agentId ) ? "Ticket assigned." : "Ticket unassigned." );
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    function promoteSender( event, rc, prc ){
+        param rc.organizationId = "";
+        param rc.firstName      = "";
+        param rc.lastName       = "";
+        param rc.password       = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !len( rc.organizationId ) ) {
+            messagebox.error( "Pick an organization for the new contact." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        if ( !len( rc.password ) || len( rc.password ) < 8 ) {
+            messagebox.error( "Password must be at least 8 characters." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        try {
+            ticketsService.promoteSenderToContact( {
+                ticketId       : t.getId(),
+                organizationId : rc.organizationId,
+                firstName      : rc.firstName,
+                lastName       : rc.lastName,
+                password       : rc.password,
+                actorId        : currentAgentId()
+            } );
+            messagebox.info( "Sender promoted to a contact; ticket assigned to the organization." );
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    // ---------- internals ----------
+
+    private any function postMessage( event, rc, prc, required boolean isInternal, required string flash ){
+        param rc.body = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !len( trim( rc.body ) ) ) {
+            messagebox.error( "Message body is required." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        ticketsService.addMessage( {
+            ticketId      : t.getId(),
+            body          : rc.body,
+            authorAgentId : currentAgentId(),
+            isInternal    : arguments.isInternal
+        } );
+        messagebox.info( arguments.flash );
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    private void function loadShowContext( required struct prc, required any ticket ){
+        arguments.prc.ticket       = arguments.ticket;
+        arguments.prc.pageTitle    = "Ticket ##" & arguments.ticket.getTicketNumber();
+        arguments.prc.messages     = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        arguments.prc.events       = ticketsService.listEventsForTicket( arguments.ticket.getId() );
+        arguments.prc.attachments  = ticketsService.listAttachmentsForTicket( arguments.ticket.getId() );
+        arguments.prc.statuses     = ticketsService.listStatuses();
+        arguments.prc.organization = isNull( arguments.ticket.getOrganizationId() ) || !len( arguments.ticket.getOrganizationId() ?: "" )
+            ? javaCast( "null", "" )
+            : contactsService.getOrganizationById( arguments.ticket.getOrganizationId() );
+        arguments.prc.requester    = isNull( arguments.ticket.getRequesterContactId() ) || !len( arguments.ticket.getRequesterContactId() ?: "" )
+            ? javaCast( "null", "" )
+            : contactsService.getContactById( arguments.ticket.getRequesterContactId() );
+        arguments.prc.organizations = contactsService.listOrganizations();
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var user = auth.getUser();
+        if ( isNull( user ) ) return "";
+        return user.getId();
+    }
+
+}

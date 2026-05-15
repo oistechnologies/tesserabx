@@ -23,13 +23,25 @@ class extends="coldbox.system.web.routing.Router" {
         route( "/health/worker" ).to( "core:Health.worker" );
 
         // Portal surface (/) routes. The portal module has an empty
-        // entryPoint, so its own config/Router.bx isn't reliably mounted
-        // by ColdBox's module router. Declaring these here ensures the
-        // client-portal auth flow works end to end.
+        // entryPoint, so ColdBox's ModuleService never loads its
+        // config/Router.bx (ModuleService gates the load on a non-empty
+        // entryPoint). All portal-visible URLs are declared here at the
+        // top level instead.
         route( "/" ).to( "portal:Home.index" );
-        route( "/login" ).withVerbs( "GET" ).to( "portal:Session.new" );
-        route( "/login" ).withVerbs( "POST" ).to( "portal:Session.create" );
+        route( "/login" ).withHandler( "portal:Session" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
         route( "/logout" ).to( "portal:Session.delete" );
+
+        // Client-side tickets workspace. Most-specific patterns first.
+        route( "/tickets/:id/reply" ).withVerbs( "POST" ).to( "portal:Tickets.reply" );
+        route( "/tickets/new" ).withHandler( "portal:Tickets" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
+        route( "/tickets/:id" ).to( "portal:Tickets.show" );
+        route( "/tickets" ).to( "portal:Tickets.index" );
 
         // Default catch-all. Module routes are matched first.
         route( ":handler/:action?" ).end();

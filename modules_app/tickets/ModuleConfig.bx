@@ -15,7 +15,11 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    this.entryPoint         = "tickets";
+    // No URL surface. tickets is service-only; the portal serves /tickets
+    // to client users and the agent module serves /agent/tickets to
+    // provider agents. Leaving entryPoint populated would steal the
+    // /tickets prefix from the portal's router.
+    this.entryPoint         = "";
     this.modelNamespace     = "tickets";
     this.cfmapping          = "tesserabx.modules.tickets";
     this.autoMapModels      = false;

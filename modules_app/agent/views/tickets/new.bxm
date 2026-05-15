@@ -1,0 +1,62 @@
+<bx:output>
+<form method="post" action="/agent/tickets" class="card">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label" for="subject">Subject <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="subject" name="subject" required value="#encodeForHTMLAttribute( prc.formData.subject ?: "" )#">
+            </div>
+            <div class="col-12 col-md-6">
+                <label class="form-label" for="organizationId">Organization</label>
+                <select class="form-select" id="organizationId" name="organizationId" onchange="this.form.submit()">
+                    <option value="">No organization (accountless)</option>
+                    <bx:loop array="#prc.organizations#" item="org">
+                        <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.formData.organizationId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <bx:if len( prc.formData.organizationId ?: "" )>
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="requesterContactId">Requester contact <span class="text-danger">*</span></label>
+                    <select class="form-select" id="requesterContactId" name="requesterContactId">
+                        <option value="">Pick a contact...</option>
+                        <bx:loop array="#prc.contactsForOrg#" item="c">
+                            <option value="#encodeForHTMLAttribute( c.getId() )#"<bx:if ( prc.formData.requesterContactId ?: "" ) eq c.getId()> selected</bx:if>>#encodeForHTML( c.getEmail() )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+            <bx:else>
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="originatingEmail">Originating email <span class="text-danger">*</span></label>
+                    <input type="email" class="form-control" id="originatingEmail" name="originatingEmail" value="#encodeForHTMLAttribute( prc.formData.originatingEmail ?: "" )#" placeholder="sender@example.com">
+                    <div class="form-text">No organization picked, so this becomes an accountless ticket visible only to agents.</div>
+                </div>
+            </bx:if>
+            <div class="col-12 col-md-6">
+                <label class="form-label" for="priority">Priority</label>
+                <select class="form-select" id="priority" name="priority">
+                    <bx:loop array="#prc.priorities#" item="p">
+                        <option value="#encodeForHTMLAttribute( p )#"<bx:if ( prc.formData.priority ?: "" ) eq p> selected</bx:if>>#encodeForHTML( p )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12 col-md-6">
+                <label class="form-label" for="ticketType">Type</label>
+                <select class="form-select" id="ticketType" name="ticketType">
+                    <bx:loop array="#prc.types#" item="t">
+                        <option value="#encodeForHTMLAttribute( t )#"<bx:if ( prc.formData.ticketType ?: "" ) eq t> selected</bx:if>>#encodeForHTML( t )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="firstMessage">First message (optional)</label>
+                <textarea class="form-control" id="firstMessage" name="firstMessage" rows="4" placeholder="An initial agent-authored message; this becomes a public reply on the ticket if filled in."></textarea>
+            </div>
+        </div>
+        <div class="d-flex justify-content-end gap-2 mt-4">
+            <a class="btn btn-outline-secondary" href="/agent/tickets">Cancel</a>
+            <button class="btn btn-primary" type="submit">Create ticket</button>
+        </div>
+    </div>
+</form>
+</bx:output>

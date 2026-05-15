@@ -40,6 +40,21 @@ class {
             "GET"  : "index",
             "POST" : "create"
         } );
+
+        // Tickets workspace. The action routes (reply, internal-note,
+        // status, assign, promote) are all POST-only; the UI uses
+        // small forms per action to keep handlers focused.
+        route( "tickets/new" ).to( "Tickets.new" );
+        route( "tickets/:id/reply" ).withVerbs( "POST" ).to( "Tickets.reply" );
+        route( "tickets/:id/internal-note" ).withVerbs( "POST" ).to( "Tickets.internalNote" );
+        route( "tickets/:id/status" ).withVerbs( "POST" ).to( "Tickets.changeStatus" );
+        route( "tickets/:id/assign" ).withVerbs( "POST" ).to( "Tickets.assign" );
+        route( "tickets/:id/promote-sender" ).withVerbs( "POST" ).to( "Tickets.promoteSender" );
+        route( "tickets/:id" ).to( "Tickets.show" );
+        route( "tickets" ).withHandler( "Tickets" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
     }
 
 }

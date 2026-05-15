@@ -1,0 +1,71 @@
+<bx:output>
+<bx:set local.t = prc.ticket >
+
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="small text-body-secondary">Ticket ###local.t.getTicketNumber()# &middot; #encodeForHTML( local.t.getTicketType() )# &middot; <span class="badge text-bg-secondary">#encodeForHTML( local.t.getPriority() )#</span></div>
+                <h2 class="h4 mb-0 mt-1">#encodeForHTML( local.t.getSubject() )#</h2>
+                <div class="mt-2"><span class="badge text-bg-primary fs-6">#encodeForHTML( local.t.getStatus() )#</span></div>
+            </div>
+        </div>
+
+        <h3 class="h6 mb-2">Conversation</h3>
+        <bx:if !arrayLen( prc.messages )>
+            <p class="text-body-secondary">No messages yet.</p>
+        </bx:if>
+        <bx:loop array="#prc.messages#" item="local.m">
+            <div class="card mb-2">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between small text-body-secondary mb-2">
+                        <span>
+                            <bx:if local.m.isFromAgent()>
+                                <strong>Support</strong>
+                            <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
+                                <strong>You / your team</strong>
+                            <bx:else>
+                                <strong>System</strong>
+                            </bx:if>
+                        </span>
+                        <span>#encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
+                    </div>
+                    <div style="white-space:pre-wrap">#encodeForHTML( local.m.getBody() )#</div>
+                </div>
+            </div>
+        </bx:loop>
+
+        <div class="card mt-3">
+            <div class="card-header">Reply</div>
+            <div class="card-body">
+                <form method="post" action="/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
+                    <textarea class="form-control mb-2" name="body" rows="4" placeholder="Type your reply..." required></textarea>
+                    <div class="d-flex justify-content-end">
+                        <button class="btn btn-primary" type="submit">Send reply</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="col-12 col-lg-4">
+        <div class="card">
+            <div class="card-header">Details</div>
+            <div class="card-body">
+                <dl class="row small mb-0">
+                    <dt class="col-sm-5">Submitted</dt>
+                    <dd class="col-sm-7">#encodeForHTML( dateTimeFormat( local.t.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+                    <dt class="col-sm-5">Last update</dt>
+                    <dd class="col-sm-7">#encodeForHTML( dateTimeFormat( local.t.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+                    <bx:if !isNull( local.t.getResolvedAt() ) and len( local.t.getResolvedAt() ?: "" )>
+                        <dt class="col-sm-5">Resolved</dt>
+                        <dd class="col-sm-7">#encodeForHTML( dateTimeFormat( local.t.getResolvedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+                    </bx:if>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,164 @@
+/**
+ * portal:Tickets handler.
+ *
+ * Client-facing ticket workspace at the application root (/). The
+ * authenticated user is always a Contact; the surface-specific
+ * firewall keeps Agent accounts out. Organization Admin contacts
+ * see every ticket in their organization; regular contacts see only
+ * tickets they raised.
+ *
+ * Internal notes never reach this surface: the service's
+ * listMessagesForTicket() defaults includeInternal=false and this
+ * handler never passes true.
+ */
+class {
+
+    property name="ticketsService"  inject="TicketsService@tickets";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        prc.currentContact = currentContact();
+    }
+
+    function index( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        prc.pageTitle = "My tickets";
+        prc.isOrgAdmin = me.isOrganizationAdmin();
+        prc.tickets = prc.isOrgAdmin
+            ? ticketsService.listTicketsForOrganization( me.getOrganizationId() )
+            : ticketsService.listTicketsForContact( me.getId() );
+        event.setView( "tickets/index" );
+    }
+
+    function show( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) || !canSee( me, t ) ) {
+            messagebox.warn( "That ticket is not available." );
+            relocate( uri = "/tickets" );
+            return;
+        }
+        prc.ticket    = t;
+        prc.pageTitle = "Ticket ##" & t.getTicketNumber();
+        prc.messages  = ticketsService.listMessagesForTicket( t.getId() );
+        event.setView( "tickets/show" );
+    }
+
+    function reply( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        param rc.body = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) || !canSee( me, t ) ) {
+            messagebox.warn( "That ticket is not available." );
+            relocate( uri = "/tickets" );
+            return;
+        }
+        if ( !len( trim( rc.body ) ) ) {
+            messagebox.error( "Message body is required." );
+            relocate( uri = "/tickets/" & t.getId() );
+            return;
+        }
+        ticketsService.addMessage( {
+            ticketId        : t.getId(),
+            body            : rc.body,
+            authorContactId : me.getId(),
+            isInternal      : false
+        } );
+        messagebox.info( "Reply sent." );
+        relocate( uri = "/tickets/" & t.getId() );
+    }
+
+    function new( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        prc.pageTitle = "New ticket";
+        prc.formData  = {
+            subject     : rc.subject ?: "",
+            priority    : rc.priority ?: "normal",
+            ticketType  : rc.ticketType ?: "request",
+            body        : rc.body ?: ""
+        };
+        prc.priorities = ticketsService.listPriorities();
+        prc.types      = ticketsService.listTypes();
+        event.setView( "tickets/new" );
+    }
+
+    function create( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        param rc.subject    = "";
+        param rc.priority   = "normal";
+        param rc.ticketType = "request";
+        param rc.body       = "";
+
+        if ( !len( trim( rc.subject ) ) ) {
+            messagebox.error( "Subject is required." );
+            return new( event, rc, prc );
+        }
+        if ( !len( trim( rc.body ) ) ) {
+            messagebox.error( "Please describe what you need help with." );
+            return new( event, rc, prc );
+        }
+
+        var ticket = ticketsService.createTicket( {
+            requesterContactId : me.getId(),
+            subject            : rc.subject,
+            priority           : rc.priority,
+            ticketType         : rc.ticketType,
+            source             : "portal",
+            actorType          : "contact",
+            actorId            : me.getId()
+        } );
+        ticketsService.addMessage( {
+            ticketId        : ticket.getId(),
+            body            : rc.body,
+            authorContactId : me.getId(),
+            isInternal      : false
+        } );
+        messagebox.info( "Ticket submitted." );
+        relocate( uri = "/tickets/" & ticket.getId() );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Org Admins see every ticket in the org; regular contacts see
+     * only their own. Accountless tickets fail both checks since
+     * neither contact_id nor org_id matches.
+     */
+    private boolean function canSee( required any contact, required any ticket ){
+        if ( arguments.ticket.isAccountless() ) return false;
+        if ( arguments.ticket.getOrganizationId() != arguments.contact.getOrganizationId() ) return false;
+        if ( arguments.contact.isOrganizationAdmin() ) return true;
+        return arguments.ticket.getRequesterContactId() == arguments.contact.getId();
+    }
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        if ( isNull( u ) ) return javaCast( "null", "" );
+        return u;
+    }
+
+}

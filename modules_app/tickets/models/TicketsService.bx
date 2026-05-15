@@ -92,6 +92,21 @@ class singleton=true {
     }
 
     /**
+     * Tickets across one organization. Intended for the Organization
+     * Admin role on the portal: they see the full org-wide queue, not
+     * just tickets they personally raised. The tenant scope on Ticket
+     * already restricts this to the caller's organization in client
+     * context; passing organizationId explicitly is defensive and
+     * lets the agent UI reuse the same method for an org-filter view.
+     */
+    public array function listTicketsForOrganization( required string organizationId ){
+        return wirebox.getInstance( "Ticket@tickets" )
+            .where( "organization_id", arguments.organizationId )
+            .orderBy( "created_at", "desc" )
+            .get();
+    }
+
+    /**
      * Messages for a ticket. includeInternal defaults to false so the
      * portal can call this directly without leaking internal notes.
      * The agent UI passes true.
