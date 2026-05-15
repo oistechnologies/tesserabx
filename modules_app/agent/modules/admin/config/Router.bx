@@ -13,6 +13,14 @@ class {
 
         // Audit log search UI.
         route( "audit" ).to( "Audit.index" );
+
+        // Channel blacklist management.
+        route( "blacklist/:id/toggle" ).withVerbs( "POST" ).to( "Blacklist.toggle" );
+        route( "blacklist/:id/remove" ).withVerbs( "POST" ).to( "Blacklist.remove" );
+        route( "blacklist" ).withHandler( "Blacklist" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
     }
 
 }

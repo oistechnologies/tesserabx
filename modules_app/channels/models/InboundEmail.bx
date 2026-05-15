@@ -1,0 +1,38 @@
+/**
+ * InboundEmail: append-only log of one processed inbound message.
+ *
+ * Outcomes:
+ *   - "ticket_created"     a new ticket was opened for this email.
+ *   - "message_appended"   the email was matched to an existing
+ *                          ticket (via In-Reply-To / References) and
+ *                          added as a TicketMessage.
+ *   - "blocked_blacklist"  the sender or domain was on the blacklist;
+ *                          no ticket created.
+ *   - "blocked_loop_guard" looked like an auto-responder; dropped.
+ *   - "duplicate"          the same RFC 5322 Message-ID was processed
+ *                          already in a previous poll.
+ *   - "error"              parsing or downstream service failed; see
+ *                          notes column for the cause.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="inbound_emails"
+    accessors="true"
+{
+
+    property name="id";
+    property name="messageId"         column="message_id";
+    property name="senderEmail"       column="sender_email";
+    property name="subject";
+    property name="inReplyTo"         column="in_reply_to";
+    property name="referencesChain"   column="references_chain";
+    property name="outcome";
+    property name="ticketId"          column="ticket_id";
+    property name="notes";
+    property name="receivedAt"        column="received_at" sqltype="timestamp";
+
+    function ticket(){
+        return belongsTo( "Ticket@tickets", "ticket_id" );
+    }
+
+}

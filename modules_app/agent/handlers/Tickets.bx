@@ -14,6 +14,7 @@ class {
 
     property name="ticketsService"  inject="TicketsService@tickets";
     property name="contactsService" inject="ContactsService@contacts";
+    property name="channelsService" inject="ChannelsService@channels";
     property name="messagebox"      inject="messagebox@cbmessagebox";
     property name="auth"            inject="AuthenticationService@cbauth";
 
@@ -180,6 +181,44 @@ class {
             actorId  : currentAgentId()
         } );
         messagebox.info( len( rc.agentId ) ? "Ticket assigned." : "Ticket unassigned." );
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    function blockSender( event, rc, prc ){
+        param rc.scope  = "email";
+        param rc.reason = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        var sender = t.getOriginatingEmail() ?: "";
+        if ( !len( sender ) ) {
+            messagebox.error( "Ticket has no originating email to block." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        try {
+            if ( rc.scope == "domain" ) {
+                var domain = listLast( sender, "@" );
+                channelsService.blockDomain(
+                    domain         : domain,
+                    reason         : rc.reason,
+                    addedByAgentId : currentAgentId()
+                );
+                messagebox.info( "Blocked domain " & domain & "." );
+            } else {
+                channelsService.blockEmail(
+                    email          : sender,
+                    reason         : rc.reason,
+                    addedByAgentId : currentAgentId()
+                );
+                messagebox.info( "Blocked " & sender & "." );
+            }
+        } catch ( any e ) {
+            messagebox.error( e.message );
+        }
         relocate( uri = "/agent/tickets/" & t.getId() );
     }
 

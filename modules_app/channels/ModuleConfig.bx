@@ -2,7 +2,12 @@
  * channels module: inbound channel intake and normalization.
  *
  * Owns channel-config entities and the inbound email-address and
- * domain blacklist. Creates tickets through the tickets service.
+ * domain blacklist. Creates tickets through the tickets service;
+ * never writes Ticket entities directly.
+ *
+ * Service-only module (no UI surface). Agents reach blacklist
+ * management through /agent/admin/blacklist; the inbound pipeline
+ * runs in the scheduler container, not via an HTTP route.
  */
 class {
 
@@ -13,11 +18,11 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    this.entryPoint         = "channels";
+    this.entryPoint         = "";
     this.modelNamespace     = "channels";
     this.cfmapping          = "tesserabx.modules.channels";
     this.autoMapModels      = false;
-    this.dependencies       = [ "tickets", "contacts" ];
+    this.dependencies       = [ "tickets", "contacts", "audit" ];
 
     function configure(){
         settings = {};
@@ -26,7 +31,22 @@ class {
         interceptors = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "ChannelBlacklistEntry@channels" )
+              .to( "#moduleMapping#.models.ChannelBlacklistEntry" );
+        binder.map( "InboundEmail@channels" )
+              .to( "#moduleMapping#.models.InboundEmail" );
+        binder.map( "ChannelsService@channels" )
+              .to( "#moduleMapping#.models.ChannelsService" )
+              .asSingleton();
+        binder.map( "InboundEmailProcessor@channels" )
+              .to( "#moduleMapping#.models.InboundEmailProcessor" )
+              .asSingleton();
+        binder.map( "IMAPPoller@channels" )
+              .to( "#moduleMapping#.models.IMAPPoller" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

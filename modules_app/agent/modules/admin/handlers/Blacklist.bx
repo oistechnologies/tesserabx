@@ -1,0 +1,93 @@
+/**
+ * /agent/admin/blacklist handler.
+ *
+ * Manage the inbound channel blacklist. Admin-only via the cbSecurity
+ * rule on /agent/admin/*. All writes go through ChannelsService;
+ * never reads ChannelBlacklistEntry directly.
+ */
+class {
+
+    property name="channelsService" inject="ChannelsService@channels";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.activeOnly = false;
+        prc.pageTitle  = "Inbound blacklist";
+        prc.entries    = channelsService.listBlacklist(
+            activeOnly = ( rc.activeOnly == "true" || rc.activeOnly == "1" || rc.activeOnly == true )
+        );
+        prc.activeOnly = rc.activeOnly;
+        event.setView( "blacklist/index" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.entryType = "email";
+        param rc.value     = "";
+        param rc.reason    = "";
+
+        var value = trim( rc.value );
+        if ( !len( value ) ) {
+            messagebox.error( "Address or domain is required." );
+            relocate( uri = "/agent/admin/blacklist" );
+            return;
+        }
+        if ( rc.entryType == "email" && !find( "@", value ) ) {
+            messagebox.error( "An email entry must contain '@'." );
+            relocate( uri = "/agent/admin/blacklist" );
+            return;
+        }
+        if ( rc.entryType == "domain" && find( "@", value ) ) {
+            messagebox.error( "A domain entry must NOT contain '@' (just the host)." );
+            relocate( uri = "/agent/admin/blacklist" );
+            return;
+        }
+
+        if ( rc.entryType == "domain" ) {
+            channelsService.blockDomain(
+                domain         : value,
+                reason         : rc.reason,
+                addedByAgentId : currentAgentId()
+            );
+        } else {
+            channelsService.blockEmail(
+                email          : value,
+                reason         : rc.reason,
+                addedByAgentId : currentAgentId()
+            );
+        }
+        messagebox.info( "Added to blacklist." );
+        relocate( uri = "/agent/admin/blacklist" );
+    }
+
+    function toggle( event, rc, prc ){
+        channelsService.toggleBlacklistEntry(
+            id           : rc.id ?: "",
+            actorAgentId : currentAgentId()
+        );
+        relocate( uri = "/agent/admin/blacklist" );
+    }
+
+    function remove( event, rc, prc ){
+        channelsService.removeBlacklistEntry(
+            id           : rc.id ?: "",
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Removed from blacklist." );
+        relocate( uri = "/agent/admin/blacklist" );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

@@ -1,0 +1,193 @@
+/**
+ * ChannelsService: the public surface other modules call to manage
+ * the inbound blacklist and to query the inbound-email log.
+ *
+ * The blacklist is the only Phase 2a write API; the inbound-email
+ * log is written by InboundEmailProcessor (this module's internal)
+ * but listed through this service.
+ *
+ * Per CLAUDE.md no other module reads ChannelBlacklistEntry or
+ * InboundEmail directly. agent's "block this sender" action calls
+ * blockEmail; the admin blacklist UI calls list/remove/toggle.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    // ---------- Blacklist ----------
+
+    /**
+     * Block a full email address. Idempotent: an existing entry is
+     * returned untouched.
+     */
+    public any function blockEmail(
+        required string email,
+        string reason         = "",
+        string addedByAgentId = ""
+    ){
+        return addBlacklistEntry( "email", lCase( trim( arguments.email ) ), arguments.reason, arguments.addedByAgentId );
+    }
+
+    /**
+     * Block an entire domain (host portion only, no @). Matches every
+     * inbound sender whose address ends in @<domain>.
+     */
+    public any function blockDomain(
+        required string domain,
+        string reason         = "",
+        string addedByAgentId = ""
+    ){
+        return addBlacklistEntry( "domain", lCase( trim( arguments.domain ) ), arguments.reason, arguments.addedByAgentId );
+    }
+
+    /**
+     * Returns true if the given sender address is matched by any
+     * active blacklist entry (full-address match OR domain match).
+     */
+    public boolean function isBlocked( required string email ){
+        var addr = lCase( trim( arguments.email ) );
+        var parts = listToArray( addr, "@" );
+        if ( arrayLen( parts ) < 2 ) return false;
+        var domain = parts[ arrayLen( parts ) ];
+
+        // Single query: either the full address or the domain.
+        var hits = wirebox.getInstance( "ChannelBlacklistEntry@channels" )
+            .where( "is_active", true )
+            .where( function( q ){
+                q.where( function( inner ){
+                    inner.where( "entry_type", "email" ).where( "value", addr );
+                } );
+                q.orWhere( function( inner ){
+                    inner.where( "entry_type", "domain" ).where( "value", domain );
+                } );
+            } )
+            .count();
+        return hits > 0;
+    }
+
+    public array function listBlacklist( boolean activeOnly = false ){
+        var q = wirebox.getInstance( "ChannelBlacklistEntry@channels" );
+        if ( arguments.activeOnly ) q = q.where( "is_active", true );
+        return q.orderBy( "entry_type" ).orderBy( "value" ).get();
+    }
+
+    public any function getBlacklistEntry( required string id ){
+        var e = wirebox.getInstance( "ChannelBlacklistEntry@channels" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( e ) ? javaCast( "null", "" ) : e;
+    }
+
+    public void function removeBlacklistEntry( required string id, string actorAgentId = "" ){
+        var e = getBlacklistEntry( arguments.id );
+        if ( isNull( e ) ) return;
+        var snapshot = { "entryType" : e.getEntryType(), "value" : e.getValue() };
+        queryExecute( "DELETE FROM channel_blacklist WHERE id = :id", { id : arguments.id } );
+        auditService.record(
+            eventType  : "channels.blacklist_removed",
+            entityType : "ChannelBlacklistEntry",
+            entityId   : arguments.id,
+            actorType  : len( arguments.actorAgentId ) ? "agent" : "system",
+            actorId    : arguments.actorAgentId,
+            metadata   : snapshot
+        );
+    }
+
+    public any function toggleBlacklistEntry( required string id, string actorAgentId = "" ){
+        var e = getBlacklistEntry( arguments.id );
+        if ( isNull( e ) ) return javaCast( "null", "" );
+        e.setIsActive( !e.getIsActive() );
+        e.save();
+        auditService.record(
+            eventType  : e.getIsActive() ? "channels.blacklist_enabled" : "channels.blacklist_disabled",
+            entityType : "ChannelBlacklistEntry",
+            entityId   : e.getId(),
+            actorType  : len( arguments.actorAgentId ) ? "agent" : "system",
+            actorId    : arguments.actorAgentId,
+            metadata   : { "entryType" : e.getEntryType(), "value" : e.getValue() }
+        );
+        return e;
+    }
+
+    // ---------- Inbound log ----------
+
+    public any function recordInboundEmail( required struct data ){
+        var entry = wirebox.getInstance( "InboundEmail@channels" );
+        entry.setId( newId() );
+        entry.setSenderEmail( lCase( arguments.data.senderEmail ) );
+        entry.setOutcome( arguments.data.outcome );
+        if ( len( arguments.data.messageId ?: "" ) )       entry.setMessageId( arguments.data.messageId );
+        if ( len( arguments.data.subject ?: "" ) )         entry.setSubject( left( arguments.data.subject, 998 ) );
+        if ( len( arguments.data.inReplyTo ?: "" ) )       entry.setInReplyTo( arguments.data.inReplyTo );
+        if ( len( arguments.data.referencesChain ?: "" ) ) entry.setReferencesChain( arguments.data.referencesChain );
+        if ( len( arguments.data.ticketId ?: "" ) )        entry.setTicketId( arguments.data.ticketId );
+        if ( len( arguments.data.notes ?: "" ) )           entry.setNotes( arguments.data.notes );
+        entry.save();
+        return entry;
+    }
+
+    public any function findInboundEmailByMessageId( required string messageId ){
+        if ( !len( arguments.messageId ) ) return javaCast( "null", "" );
+        var e = wirebox.getInstance( "InboundEmail@channels" )
+            .where( "message_id", arguments.messageId )
+            .first();
+        return isNull( e ) ? javaCast( "null", "" ) : e;
+    }
+
+    public array function listInboundEmails(
+        string outcome,
+        string senderEmail,
+        numeric limit = 100
+    ){
+        var q = wirebox.getInstance( "InboundEmail@channels" );
+        if ( structKeyExists( arguments, "outcome" ) && len( arguments.outcome ?: "" ) ) {
+            q = q.where( "outcome", arguments.outcome );
+        }
+        if ( structKeyExists( arguments, "senderEmail" ) && len( arguments.senderEmail ?: "" ) ) {
+            q = q.where( "sender_email", lCase( arguments.senderEmail ) );
+        }
+        return q.orderBy( "received_at", "desc" ).limit( arguments.limit ).get();
+    }
+
+    // ---------- Internals ----------
+
+    private any function addBlacklistEntry(
+        required string entryType,
+        required string value,
+        string reason         = "",
+        string addedByAgentId = ""
+    ){
+        var existing = wirebox.getInstance( "ChannelBlacklistEntry@channels" )
+            .where( "entry_type", arguments.entryType )
+            .where( "value", arguments.value )
+            .first();
+        if ( !isNull( existing ) ) return existing;
+
+        var entry = wirebox.getInstance( "ChannelBlacklistEntry@channels" );
+        entry.setId( newId() );
+        entry.setEntryType( arguments.entryType );
+        entry.setValue( arguments.value );
+        // Set is_active explicitly so the post-save entity carries the
+        // value in memory; Quick does not re-read DB column defaults.
+        entry.setIsActive( true );
+        if ( len( arguments.reason ) ) entry.setReason( arguments.reason );
+        if ( len( arguments.addedByAgentId ) ) entry.setAddedByAgentId( arguments.addedByAgentId );
+        entry.save();
+
+        auditService.record(
+            eventType  : "channels.blacklist_added",
+            entityType : "ChannelBlacklistEntry",
+            entityId   : entry.getId(),
+            actorType  : len( arguments.addedByAgentId ) ? "agent" : "system",
+            actorId    : arguments.addedByAgentId,
+            metadata   : { "entryType" : arguments.entryType, "value" : arguments.value, "reason" : arguments.reason }
+        );
+        return entry;
+    }
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}

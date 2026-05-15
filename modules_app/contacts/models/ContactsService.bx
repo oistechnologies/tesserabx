@@ -98,9 +98,13 @@ class singleton=true {
     }
 
     public any function getContactByEmail( required string email ){
+        // Email lookup is case-insensitive (RFC 5321 treats the domain
+        // as case-insensitive and the local part as case-sensitive in
+        // theory, but every mailer in practice lowercases on send).
+        // The Contact column itself is stored lowercased on provision.
         var contact = wirebox.getInstance( "Contact@contacts" )
             .withoutGlobalScope()
-            .where( "email", arguments.email )
+            .where( "email", lCase( arguments.email ) )
             .first();
         return isNull( contact ) ? javaCast( "null", "" ) : contact;
     }
@@ -128,7 +132,9 @@ class singleton=true {
         var contact = wirebox.getInstance( "Contact@contacts" );
         contact.setId( newId() );
         contact.setOrganizationId( arguments.data.organizationId );
-        contact.setEmail( arguments.data.email );
+        // Lowercase email on write so getContactByEmail's case-
+        // insensitive lookup stays a single equality test.
+        contact.setEmail( lCase( arguments.data.email ) );
         contact.setPasswordHash( bcrypt.hashPassword( raw ) );
         if ( structKeyExists( arguments.data, "firstName" ) ) contact.setFirstName( arguments.data.firstName );
         if ( structKeyExists( arguments.data, "lastName" ) )  contact.setLastName( arguments.data.lastName );

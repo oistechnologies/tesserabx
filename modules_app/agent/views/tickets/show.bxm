@@ -144,6 +144,27 @@
             </div>
         </div>
 
+        <bx:if len( local.t.getOriginatingEmail() ?: "" )>
+            <div class="card mb-3 border-danger">
+                <div class="card-header bg-danger-subtle">Block this sender</div>
+                <div class="card-body">
+                    <p class="small mb-2">Adds <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> (or its domain) to the inbound blacklist. Future emails from a blocked sender are dropped instead of becoming tickets.</p>
+                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/block-sender">
+                        <div class="mb-2">
+                            <select class="form-select form-select-sm" name="scope">
+                                <option value="email">This address only (#encodeForHTML( local.t.getOriginatingEmail() )#)</option>
+                                <option value="domain">Entire domain (@#encodeForHTML( listLast( local.t.getOriginatingEmail(), "@" ) )#)</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <input type="text" class="form-control form-control-sm" name="reason" placeholder="Reason (optional)">
+                        </div>
+                        <button class="btn btn-danger btn-sm w-100" type="submit">Block</button>
+                    </form>
+                </div>
+            </div>
+        </bx:if>
+
         <bx:if local.t.isAccountless()>
             <div class="card mb-3 border-warning">
                 <div class="card-header bg-warning-subtle">Promote sender to contact</div>

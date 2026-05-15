@@ -1,0 +1,24 @@
+/**
+ * ChannelBlacklistEntry: one rule the inbound pipeline uses to drop
+ * an email or domain.
+ *
+ * entry_type is "email" or "domain"; the value is lowercased on save
+ * by the service so case-insensitive matching is a single equality
+ * lookup, not a function-on-column predicate.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="channel_blacklist"
+    accessors="true"
+{
+
+    property name="id";
+    property name="entryType"        column="entry_type";
+    property name="value";
+    property name="reason";
+    property name="isActive"         column="is_active";
+    property name="addedByAgentId"   column="added_by_agent_id";
+    property name="createdAt"        column="created_at" sqltype="timestamp";
+    property name="updatedAt"        column="updated_at" sqltype="timestamp";
+
+}

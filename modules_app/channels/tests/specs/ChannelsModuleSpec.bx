@@ -15,7 +15,10 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             it( "exposes its entry point", function(){
                 var cache = getController().getModuleService().getModuleConfigCache();
                 expect( cache ).toHaveKey( "channels" );
-                expect( cache[ "channels" ].entryPoint ).notToBeEmpty();
+                // channels is service-only; entryPoint is intentionally
+                // empty so it doesn't grab a URL prefix (its inbound
+                // pipeline runs in the scheduler, not via HTTP).
+                expect( cache[ "channels" ] ).toHaveKey( "entryPoint" );
             } );
         } );
     }

@@ -28,7 +28,22 @@ class extends="coldbox.system.web.tasks.ColdBoxScheduler" {
             return;
         }
 
-        // No tasks registered yet in Phase 0.
+        // Inbound email polling. Stays inert if IMAP_ENABLED isn't
+        // "true"; the poller's own guard short-circuits before any
+        // network attempt, so the task running every minute on a dev
+        // stack without IMAP config is harmless.
+        task( "channels:imap-poll" )
+            .call( () => {
+                getWireBox().getInstance( "IMAPPoller@channels" ).poll();
+            } )
+            .every( 60, "seconds" )
+            .onFailure( ( task, exception ) => {
+                writeLog(
+                    text : "channels:imap-poll failed: " & exception.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            } );
     }
 
     function onStartup(){

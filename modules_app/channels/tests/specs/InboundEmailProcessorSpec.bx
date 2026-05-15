@@ -1,0 +1,198 @@
+/**
+ * InboundEmailProcessorSpec: end-to-end inbound-message processing.
+ *
+ * Each `it` builds a synthetic email struct, hands it to the
+ * processor, and asserts the resulting inbound_emails outcome and
+ * any side effect (new ticket, appended message, dropped, etc.).
+ *
+ * Fixtures get a unique sender/messageId each run so specs stay
+ * independent.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.processor = getController().getWireBox().getInstance( "InboundEmailProcessor@channels" );
+        variables.channels  = getController().getWireBox().getInstance( "ChannelsService@channels" );
+        variables.contacts  = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.tickets   = getController().getWireBox().getInstance( "TicketsService@tickets" );
+    }
+
+    function run(){
+        describe( "InboundEmailProcessor", function(){
+
+            it( "creates an accountless ticket for an unknown sender", function(){
+                var sender = "stranger-" & createUUID() & "@unknown.test";
+                var msgId  = "msg-" & createUUID() & "@unknown.test";
+                var result = variables.processor.process( {
+                    messageId : msgId,
+                    from      : sender,
+                    subject   : "Hello there",
+                    body      : "Need help with my account.",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+                expect( result.getTicketId() ).notToBeEmpty();
+
+                var t = variables.tickets.getTicket( result.getTicketId() );
+                expect( t.isAccountless() ).toBeTrue();
+                expect( t.getOriginatingEmail() ).toBe( sender );
+
+                cleanupInbound( result.getId() );
+                cleanupTicket( t.getId() );
+            } );
+
+            it( "creates a contact-backed ticket when the sender is a known Contact", function(){
+                var org = variables.contacts.createOrganization( {
+                    name : "Inbound Spec Org " & createUUID(),
+                    slug : "inb-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                var email = "known-" & createUUID() & "@example.com";
+                var contact = variables.contacts.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : email,
+                    password       : "spec-password"
+                } );
+
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@example.com",
+                    from      : email,
+                    subject   : "Please help",
+                    body      : "Got an issue.",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+
+                var t = variables.tickets.getTicket( result.getTicketId() );
+                expect( t.isAccountless() ).toBeFalse();
+                expect( t.getRequesterContactId() ).toBe( contact.getId() );
+                expect( t.getOrganizationId() ).toBe( org.getId() );
+
+                cleanupInbound( result.getId() );
+                cleanupTicket( t.getId() );
+                queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : contact.getId() } );
+                queryExecute( "DELETE FROM contacts WHERE id = :id", { id : contact.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+            } );
+
+            it( "drops a sender on the blacklist", function(){
+                var sender = "spammer-" & createUUID() & "@blocked.test";
+                var entry  = variables.channels.blockEmail( email = sender );
+
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@blocked.test",
+                    from      : sender,
+                    subject   : "Hi",
+                    body      : ".",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "blocked_blacklist" );
+                expect( result.getTicketId() ?: "" ).toBe( "" );
+
+                cleanupInbound( result.getId() );
+                queryExecute( "DELETE FROM channel_blacklist WHERE id = :id", { id : entry.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : entry.getId() } );
+            } );
+
+            it( "detects RFC 3834 Auto-Submitted as a loop", function(){
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@auto.test",
+                    from      : "vacation-" & createUUID() & "@auto.test",
+                    subject   : "Re: your message",
+                    body      : "I'm out of the office.",
+                    headers   : { "Auto-Submitted" : "auto-replied" }
+                } );
+                expect( result.getOutcome() ).toBe( "blocked_loop_guard" );
+                cleanupInbound( result.getId() );
+            } );
+
+            it( "detects auto-reply subject heuristics", function(){
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@auto.test",
+                    from      : "vacation-" & createUUID() & "@auto.test",
+                    subject   : "Out of office: please contact someone else",
+                    body      : ".",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "blocked_loop_guard" );
+                cleanupInbound( result.getId() );
+            } );
+
+            it( "treats a duplicate Message-ID as already processed", function(){
+                var sender = "dup-" & createUUID() & "@example.com";
+                var msgId  = "msg-" & createUUID() & "@example.com";
+                var first  = variables.processor.process( {
+                    messageId : msgId, from : sender, subject : "first", body : "x", headers : {}
+                } );
+                var second = variables.processor.process( {
+                    messageId : msgId, from : sender, subject : "first", body : "x", headers : {}
+                } );
+                expect( first.getOutcome() ).toBe( "ticket_created" );
+                expect( second.getOutcome() ).toBe( "duplicate" );
+
+                cleanupInbound( first.getId() );
+                cleanupInbound( second.getId() );
+                cleanupTicket( first.getTicketId() );
+            } );
+
+            it( "appends to an existing ticket when In-Reply-To matches a prior inbound", function(){
+                var sender = "thread-" & createUUID() & "@example.com";
+                var msgIdA = "msg-A-" & createUUID() & "@example.com";
+                var first  = variables.processor.process( {
+                    messageId : msgIdA, from : sender, subject : "First message", body : "Original.", headers : {}
+                } );
+                expect( first.getOutcome() ).toBe( "ticket_created" );
+
+                var msgIdB = "msg-B-" & createUUID() & "@example.com";
+                var second = variables.processor.process( {
+                    messageId : msgIdB,
+                    from      : sender,
+                    subject   : "Re: First message",
+                    body      : "Adding more.",
+                    inReplyTo : msgIdA,
+                    headers   : {}
+                } );
+                expect( second.getOutcome() ).toBe( "message_appended" );
+                expect( second.getTicketId() ).toBe( first.getTicketId() );
+
+                var messages = variables.tickets.listMessagesForTicket( first.getTicketId(), true );
+                expect( arrayLen( messages ) ).toBe( 2 );
+
+                cleanupInbound( first.getId() );
+                cleanupInbound( second.getId() );
+                cleanupTicket( first.getTicketId() );
+            } );
+
+            it( "extracts the bare address from an angle-bracket From header", function(){
+                var bare = "alice-" & createUUID() & "@example.com";
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@example.com",
+                    from      : "Alice Example <" & bare & ">",
+                    subject   : "Spec",
+                    body      : ".",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+                expect( result.getSenderEmail() ).toBe( bare );
+                cleanupInbound( result.getId() );
+                cleanupTicket( result.getTicketId() );
+            } );
+
+        } );
+    }
+
+    private void function cleanupInbound( required string id ){
+        queryExecute( "DELETE FROM inbound_emails WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupTicket( required string id ){
+        if ( !len( arguments.id ) ) return;
+        queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets WHERE id = :id", { id : arguments.id } );
+    }
+
+}

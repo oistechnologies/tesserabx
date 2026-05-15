@@ -1,0 +1,85 @@
+<bx:output>
+<div class="row g-3">
+
+    <div class="col-12 col-lg-5">
+        <div class="card">
+            <div class="card-header"><strong>Add an entry</strong></div>
+            <div class="card-body">
+                <form method="post" action="/agent/admin/blacklist">
+                    <div class="mb-2">
+                        <label class="form-label" for="entryType">Type</label>
+                        <select class="form-select" id="entryType" name="entryType">
+                            <option value="email">Email address</option>
+                            <option value="domain">Domain</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="value">Address or domain</label>
+                        <input type="text" class="form-control" id="value" name="value" placeholder="alice@example.com or spam.example.com" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="reason">Reason (optional)</label>
+                        <input type="text" class="form-control" id="reason" name="reason">
+                    </div>
+                    <button class="btn btn-danger w-100" type="submit">Block</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h6 mb-0">Entries</h2>
+            <form method="get" action="/agent/admin/blacklist" class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="activeOnly" name="activeOnly" value="true" onchange="this.form.submit()"<bx:if ( prc.activeOnly ?: "" ) eq "true" or ( prc.activeOnly ?: false ) eq true> checked</bx:if>>
+                <label class="form-check-label small" for="activeOnly">Active only</label>
+            </form>
+        </div>
+        <div class="card">
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Value</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <bx:if !arrayLen( prc.entries )>
+                            <tr><td colspan="5" class="text-center text-body-secondary py-4">Nothing on the blacklist.</td></tr>
+                        </bx:if>
+                        <bx:loop array="#prc.entries#" item="e">
+                            <tr>
+                                <td><span class="badge text-bg-secondary">#encodeForHTML( e.getEntryType() )#</span></td>
+                                <td><code>#encodeForHTML( e.getValue() )#</code></td>
+                                <td><small>#encodeForHTML( e.getReason() ?: "" )#</small></td>
+                                <td>
+                                    <bx:if e.getIsActive()>
+                                        <span class="badge text-bg-success">Active</span>
+                                    <bx:else>
+                                        <span class="badge text-bg-secondary">Disabled</span>
+                                    </bx:if>
+                                </td>
+                                <td class="text-end">
+                                    <form method="post" action="/agent/admin/blacklist/#encodeForHTMLAttribute( e.getId() )#/toggle" class="d-inline">
+                                        <button class="btn btn-sm btn-outline-secondary" type="submit">
+                                            <bx:if e.getIsActive()>Disable<bx:else>Enable</bx:if>
+                                        </button>
+                                    </form>
+                                    <form method="post" action="/agent/admin/blacklist/#encodeForHTMLAttribute( e.getId() )#/remove" class="d-inline" onsubmit="return confirm('Remove this blacklist entry?');">
+                                        <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        </bx:loop>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+</bx:output>

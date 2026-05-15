@@ -50,6 +50,7 @@ class {
         route( "tickets/:id/status" ).withVerbs( "POST" ).to( "Tickets.changeStatus" );
         route( "tickets/:id/assign" ).withVerbs( "POST" ).to( "Tickets.assign" );
         route( "tickets/:id/promote-sender" ).withVerbs( "POST" ).to( "Tickets.promoteSender" );
+        route( "tickets/:id/block-sender" ).withVerbs( "POST" ).to( "Tickets.blockSender" );
         route( "tickets/:id" ).to( "Tickets.show" );
         route( "tickets" ).withHandler( "Tickets" ).toAction( {
             "GET"  : "index",

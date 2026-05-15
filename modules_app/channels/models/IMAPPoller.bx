@@ -1,0 +1,174 @@
+/**
+ * IMAPPoller: reads unread messages from the configured mailbox and
+ * feeds them through InboundEmailProcessor.
+ *
+ * Configuration is environment-driven; the poller stays inert when
+ * IMAP_ENABLED is anything but "true". The development docker-compose
+ * leaves it off by default so a fresh dev stack does not try to talk
+ * to a real mailbox.
+ *
+ * Variables (env / Coldbox.bx settings):
+ *   IMAP_ENABLED          "true" to poll; anything else disables.
+ *   IMAP_HOST             mailbox host.
+ *   IMAP_PORT             default 993 for SSL, 143 plain.
+ *   IMAP_USERNAME         mailbox user.
+ *   IMAP_PASSWORD         mailbox password.
+ *   IMAP_FOLDER           mailbox folder, default INBOX.
+ *   IMAP_USE_SSL          "true" / "false", default true.
+ *   IMAP_MAX_PER_POLL     cap per scheduler tick, default 50.
+ *   IMAP_MARK_READ        "true" to mark fetched messages as read,
+ *                          default true. The InboundEmail log handles
+ *                          deduplication independently.
+ *
+ * The poller calls InboundEmailProcessor.process() per message and
+ * never throws past its boundary; errors are caught, logged, and
+ * recorded as inbound_emails outcome="error".
+ */
+class singleton=true {
+
+    property name="processor" inject="InboundEmailProcessor@channels";
+
+    public boolean function isEnabled(){
+        return lCase( getSystemSetting( "IMAP_ENABLED", "false" ) ) == "true";
+    }
+
+    /**
+     * Run one polling cycle. Returns a struct summarising the run.
+     */
+    public struct function poll(){
+        var result = { "processed" : 0, "errors" : 0, "skipped" : false, "reason" : "" };
+
+        if ( !isEnabled() ) {
+            result.skipped = true;
+            result.reason  = "IMAP_ENABLED is not set to true.";
+            return result;
+        }
+
+        var host      = getSystemSetting( "IMAP_HOST", "" );
+        var username  = getSystemSetting( "IMAP_USERNAME", "" );
+        var password  = getSystemSetting( "IMAP_PASSWORD", "" );
+        if ( !len( host ) || !len( username ) ) {
+            result.skipped = true;
+            result.reason  = "IMAP_HOST or IMAP_USERNAME not configured.";
+            return result;
+        }
+
+        var port      = int( getSystemSetting( "IMAP_PORT", "993" ) );
+        var folder    = getSystemSetting( "IMAP_FOLDER", "INBOX" );
+        var useSSL    = lCase( getSystemSetting( "IMAP_USE_SSL", "true" ) ) == "true";
+        var maxPerRun = int( getSystemSetting( "IMAP_MAX_PER_POLL", "50" ) );
+        var markRead  = lCase( getSystemSetting( "IMAP_MARK_READ", "true" ) ) == "true";
+
+        var fetched = "";
+        try {
+            cfimap(
+                action     = "getAll",
+                server     = host,
+                port       = port,
+                username   = username,
+                password   = password,
+                folder     = folder,
+                secure     = useSSL,
+                attachmentPath = "",
+                name       = "fetched",
+                maxRows    = maxPerRun,
+                generateUniqueFilenames = true
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "IMAP fetch failed: " & e.message,
+                log  : "tesserabx-scheduler",
+                type : "error"
+            );
+            result.errors = 1;
+            result.reason = e.message;
+            return result;
+        }
+
+        var messageIdsToMark = [];
+        for ( var row in fetched ) {
+            try {
+                var msg = normaliseRow( row );
+                processor.process( msg );
+                result.processed++;
+                if ( markRead && len( msg.imapUID ) ) {
+                    messageIdsToMark.append( msg.imapUID );
+                }
+            } catch ( any e ) {
+                writeLog(
+                    text : "InboundEmailProcessor failed on UID [#( row.uid ?: '?' )#]: " & e.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+                result.errors++;
+            }
+        }
+
+        if ( markRead && arrayLen( messageIdsToMark ) ) {
+            try {
+                cfimap(
+                    action   = "markRead",
+                    server   = host,
+                    port     = port,
+                    username = username,
+                    password = password,
+                    folder   = folder,
+                    secure   = useSSL,
+                    uid      = arrayToList( messageIdsToMark )
+                );
+            } catch ( any e ) {
+                writeLog(
+                    text : "IMAP markRead failed: " & e.message,
+                    log  : "tesserabx-scheduler",
+                    type : "warn"
+                );
+            }
+        }
+
+        writeLog(
+            text : "IMAP poll: processed=#result.processed# errors=#result.errors#",
+            log  : "tesserabx-scheduler"
+        );
+        return result;
+    }
+
+    // ---------------- helpers ----------------
+
+    /**
+     * Translate a cfimap result row into the struct the processor
+     * expects. Best-effort header parsing; cfimap returns headers as
+     * either a list or a struct depending on the engine version.
+     */
+    private struct function normaliseRow( required any row ){
+        var headers = {};
+        var rawHeaders = arguments.row.header ?: "";
+        if ( isStruct( rawHeaders ) ) {
+            headers = rawHeaders;
+        } else if ( isSimpleValue( rawHeaders ) ) {
+            for ( var line in listToArray( rawHeaders, chr( 10 ) ) ) {
+                var parts = listToArray( line, ":", false, true );
+                if ( arrayLen( parts ) >= 2 ) {
+                    var name = trim( parts[ 1 ] );
+                    var val  = trim( arrayToList( arraySlice( parts, 2 ), ":" ) );
+                    headers[ name ] = val;
+                }
+            }
+        }
+
+        return {
+            messageId  : stripBrackets( arguments.row.messageid ?: arguments.row.messageId ?: "" ),
+            from       : arguments.row.from ?: "",
+            subject    : arguments.row.subject ?: "(no subject)",
+            body       : arguments.row.body ?: arguments.row.textBody ?: "",
+            inReplyTo  : stripBrackets( arguments.row.inReplyTo ?: arguments.row[ "in-reply-to" ] ?: "" ),
+            references : arguments.row.references ?: arguments.row[ "references" ] ?: "",
+            headers    : headers,
+            imapUID    : arguments.row.uid ?: ""
+        };
+    }
+
+    private string function stripBrackets( required string value ){
+        return reReplace( trim( arguments.value ), "[<>]", "", "all" );
+    }
+
+}

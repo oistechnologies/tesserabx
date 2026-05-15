@@ -1,0 +1,84 @@
+/**
+ * ChannelsServiceSpec: blacklist management + inbound-log helpers.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.channels = getController().getWireBox().getInstance( "ChannelsService@channels" );
+    }
+
+    function run(){
+        describe( "ChannelsService", function(){
+
+            it( "blockEmail creates an entry and is idempotent", function(){
+                var email = "spam-" & createUUID() & "@example.com";
+                var first = variables.channels.blockEmail( email = email );
+                var second = variables.channels.blockEmail( email = email );
+                expect( first.getId() ).toBe( second.getId() );
+
+                queryExecute( "DELETE FROM channel_blacklist WHERE id = :id", { id : first.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : first.getId() } );
+            } );
+
+            it( "isBlocked matches by full address", function(){
+                var email = "blocked-" & createUUID() & "@example.com";
+                var entry = variables.channels.blockEmail( email = email );
+                expect( variables.channels.isBlocked( email ) ).toBeTrue();
+                expect( variables.channels.isBlocked( "other-" & createUUID() & "@example.com" ) ).toBeFalse();
+
+                queryExecute( "DELETE FROM channel_blacklist WHERE id = :id", { id : entry.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : entry.getId() } );
+            } );
+
+            it( "isBlocked matches by domain", function(){
+                var domain = "blocked-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+                var entry = variables.channels.blockDomain( domain = domain );
+                expect( variables.channels.isBlocked( "anyone@" & domain ) ).toBeTrue();
+                expect( variables.channels.isBlocked( "anyone@other.test" ) ).toBeFalse();
+
+                queryExecute( "DELETE FROM channel_blacklist WHERE id = :id", { id : entry.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : entry.getId() } );
+            } );
+
+            it( "toggleBlacklistEntry flips is_active", function(){
+                var email = "toggle-" & createUUID() & "@example.com";
+                var entry = variables.channels.blockEmail( email = email );
+                expect( entry.getIsActive() ).toBeTrue();
+                variables.channels.toggleBlacklistEntry( id = entry.getId() );
+                var refreshed = variables.channels.getBlacklistEntry( entry.getId() );
+                expect( refreshed.getIsActive() ).toBeFalse();
+                expect( variables.channels.isBlocked( email ) ).toBeFalse();
+
+                queryExecute( "DELETE FROM channel_blacklist WHERE id = :id", { id : entry.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : entry.getId() } );
+            } );
+
+            it( "removeBlacklistEntry deletes the row", function(){
+                var entry = variables.channels.blockEmail( email = "remove-" & createUUID() & "@example.com" );
+                variables.channels.removeBlacklistEntry( id = entry.getId() );
+                expect( variables.channels.getBlacklistEntry( entry.getId() ) ).toBeNull();
+
+                queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : entry.getId() } );
+            } );
+
+            it( "recordInboundEmail + findInboundEmailByMessageId round trip", function(){
+                var msgId = "spec-" & createUUID() & "@example.com";
+                var row = variables.channels.recordInboundEmail( {
+                    senderEmail : "sender@example.com",
+                    subject     : "Spec inbound",
+                    messageId   : msgId,
+                    outcome     : "ticket_created"
+                } );
+                var found = variables.channels.findInboundEmailByMessageId( msgId );
+                expect( found ).notToBeNull();
+                expect( found.getId() ).toBe( row.getId() );
+
+                queryExecute( "DELETE FROM inbound_emails WHERE id = :id", { id : row.getId() } );
+            } );
+
+        } );
+    }
+
+}
