@@ -62,25 +62,74 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( agentId, "" );
             } );
 
-            it( "skips channels other than inapp in Phase 5c-1", function(){
-                // Insert an email template manually and verify the
-                // dispatch path does NOT create a row for it yet.
+            it( "skips channels that are neither inapp nor email", function(){
+                // Slack template lives in the table but Phase 5c-2
+                // only dispatches inapp + email; slack stays in 5c-3.
                 queryExecute(
                     "INSERT INTO notification_templates
                         ( id, event_key, channel, recipient_type, title_template, body_template, is_active )
                      VALUES
-                        ( :id, 'spec.email_only', 'email', 'agent', 'hello {{subject}}', 'body', TRUE )",
+                        ( :id, 'spec.slack_only', 'slack', 'agent', 'hello {{subject}}', 'body', TRUE )",
                     { id : createUUID() }
                 );
                 var agentId = createUUID();
                 variables.svc.dispatchForEvent(
-                    eventKey   : "spec.email_only",
+                    eventKey   : "spec.slack_only",
                     recipients : [ { "type" : "agent", "id" : agentId } ],
                     context    : { "subject" : "hi" }
                 );
-                var notes = variables.svc.listForRecipient( "agent", agentId );
-                expect( notes.len() ).toBe( 0 );
-                queryExecute( "DELETE FROM notification_templates WHERE event_key = 'spec.email_only'" );
+                var rows = queryExecute(
+                    "SELECT COUNT(*) AS n FROM notifications WHERE recipient_id = :id",
+                    { id : agentId }
+                );
+                expect( rows.n[ 1 ] ).toBe( 0 );
+                queryExecute( "DELETE FROM notification_templates WHERE event_key = 'spec.slack_only'" );
+            } );
+
+            it( "isChannelEnabled defaults to true when no preference row exists", function(){
+                expect( variables.svc.isChannelEnabled( "agent", createUUID(), "ticket.created", "email" ) ).toBeTrue();
+            } );
+
+            it( "setPreference + isChannelEnabled flip and read", function(){
+                var agentId = createUUID();
+                variables.svc.setPreference(
+                    recipientType : "agent",
+                    recipientId   : agentId,
+                    eventKey      : "ticket.status_changed",
+                    channel       : "email",
+                    enabled       : false
+                );
+                expect( variables.svc.isChannelEnabled( "agent", agentId, "ticket.status_changed", "email" ) ).toBeFalse();
+                // Other channels stay on.
+                expect( variables.svc.isChannelEnabled( "agent", agentId, "ticket.status_changed", "inapp" ) ).toBeTrue();
+                queryExecute( "DELETE FROM notification_preferences WHERE recipient_id = :id", { id : agentId } );
+            } );
+
+            it( "dispatch honors a disabled preference and skips that channel", function(){
+                var agentId = createUUID();
+                variables.svc.setPreference(
+                    recipientType : "agent",
+                    recipientId   : agentId,
+                    eventKey      : "ticket.status_changed",
+                    channel       : "email",
+                    enabled       : false
+                );
+                variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.status_changed",
+                    recipients : [ { "type" : "agent", "id" : agentId } ],
+                    context    : { "ticketId" : "t", "ticketNumber" : 1, "subject" : "s", "from" : "open", "to" : "resolved" }
+                );
+                var rows = queryExecute(
+                    "SELECT channel FROM notifications WHERE recipient_id = :id",
+                    { id : agentId }
+                );
+                var channels = [];
+                for ( var i = 1; i <= rows.recordCount; i++ ) channels.append( rows.channel[ i ] );
+                expect( channels ).toInclude( "inapp" );
+                expect( channels ).notToInclude( "email" );
+
+                queryExecute( "DELETE FROM notifications WHERE recipient_id = :id", { id : agentId } );
+                queryExecute( "DELETE FROM notification_preferences WHERE recipient_id = :id", { id : agentId } );
             } );
 
             it( "unreadCount and markRead flip status correctly", function(){

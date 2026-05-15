@@ -20,7 +20,8 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
+    property name="wirebox"     inject="wirebox";
+    property name="mailService" inject="mailService@cbmailservices";
 
     /**
      * Dispatch an event to its configured templates. Returns the
@@ -59,11 +60,16 @@ class singleton=true {
             if ( !len( r.type ?: "" ) || !len( r.id ?: "" ) ) continue;
             for ( var i = 1; i <= tmplRows.recordCount; i++ ) {
                 if ( tmplRows.recipient_type[ i ] != r.type ) continue;
-                // Phase 5c-1 only delivers inapp; the email + slack
-                // rows in the templates table can exist but we skip
-                // them until later sub-phases wire transport. Keeps
-                // the migrations stable across the rollout.
-                if ( tmplRows.channel[ i ] != "inapp" ) continue;
+                // Phase 5c-1 covered inapp; Phase 5c-2 adds email.
+                // Slack lands in 5c-3. Any other channel is silently
+                // skipped — having an unrecognized row in the
+                // templates table should not crash dispatch.
+                if ( tmplRows.channel[ i ] != "inapp" && tmplRows.channel[ i ] != "email" ) continue;
+
+                // Per-recipient opt-out check. Default is opt-in so
+                // missing rows deliver; an enabled=false row silences.
+                if ( !isChannelEnabled( r.type, r.id, arguments.eventKey, tmplRows.channel[ i ] ) ) continue;
+
                 var n = createNotification(
                     recipientType : r.type,
                     recipientId   : r.id,
@@ -79,6 +85,59 @@ class singleton=true {
             }
         }
         return created;
+    }
+
+    /**
+     * Is this channel enabled for this recipient + event? Default
+     * opt-in: the absence of a notification_preferences row means
+     * "deliver". A row with enabled=false silences this specific
+     * (event, channel) pair for the recipient.
+     */
+    public boolean function isChannelEnabled(
+        required string recipientType,
+        required string recipientId,
+        required string eventKey,
+        required string channel
+    ){
+        var rows = queryExecute(
+            "SELECT enabled
+             FROM   notification_preferences
+             WHERE  recipient_type = :rt
+             AND    recipient_id   = :rid
+             AND    event_key      = :ek
+             AND    channel        = :ch",
+            { rt : arguments.recipientType, rid : arguments.recipientId, ek : arguments.eventKey, ch : arguments.channel }
+        );
+        if ( !rows.recordCount ) return true; // no row = opt in
+        return !!rows.enabled[ 1 ];
+    }
+
+    /**
+     * Flip a (recipient, event, channel) preference. Upserts so the
+     * unsubscribe link in Phase 5c-3 can hit one entry point.
+     */
+    public void function setPreference(
+        required string recipientType,
+        required string recipientId,
+        required string eventKey,
+        required string channel,
+        required boolean enabled
+    ){
+        queryExecute(
+            "INSERT INTO notification_preferences ( id, recipient_type, recipient_id, event_key, channel, enabled, updated_at )
+             VALUES ( :id, :rt, :rid, :ek, :ch, cast( :en as boolean ), NOW() )
+             ON CONFLICT ( recipient_type, recipient_id, event_key, channel )
+             DO UPDATE SET enabled = EXCLUDED.enabled,
+                           updated_at = NOW()",
+            {
+                id  : newId(),
+                rt  : arguments.recipientType,
+                rid : arguments.recipientId,
+                ek  : arguments.eventKey,
+                ch  : arguments.channel,
+                en  : ( arguments.enabled ? "true" : "false" )
+            }
+        );
     }
 
     /**
@@ -170,14 +229,78 @@ class singleton=true {
         if ( len( arguments.link ) )           n.setLink( arguments.link );
         if ( len( arguments.ticketId ) )       n.setTicketId( arguments.ticketId );
         if ( len( arguments.organizationId ) ) n.setOrganizationId( arguments.organizationId );
-        // inapp goes straight to "sent"; the bell dropdown counts sent
-        // rows as unread until the recipient marks them read. Email +
-        // slack rows (Phase 5c-2+) start as "pending" so the transport
-        // worker can pick them up.
+        // inapp goes straight to "sent"; the bell dropdown counts
+        // sent rows as unread until the recipient marks them read.
+        // Email rows start as "pending" and flip to "sent" or
+        // "failed" after the cbmailservices send returns.
         n.setStatus( arguments.channel == "inapp" ? "sent" : "pending" );
         if ( arguments.channel == "inapp" ) n.setSentAt( now() );
         n.save();
+
+        if ( arguments.channel == "email" ) sendEmail( n );
         return n;
+    }
+
+    /**
+     * Resolve the recipient's email and send. Updates the
+     * notifications row to status=sent (with sent_at) on success or
+     * status=failed (with error_message) on transport error. We do
+     * not throw on failure because the caller fired off a fan-out
+     * and other recipients still need their notifications.
+     */
+    private void function sendEmail( required any notification ){
+        try {
+            var to = lookupRecipientEmail(
+                arguments.notification.getRecipientType(),
+                arguments.notification.getRecipientId()
+            );
+            if ( !len( to ) ) {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( "No email address on file for recipient" );
+                arguments.notification.save();
+                return;
+            }
+            var mail = mailService.newMail(
+                to      = to,
+                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                subject = arguments.notification.getTitle(),
+                type    = "text/plain",
+                body    = arguments.notification.getBody() ?: ""
+            );
+            var result = mailService.send( mail );
+            // cbmailservices returns a struct; the older convention
+            // is that `error=true` means it caught a failure rather
+            // than throwing. Trust whichever shape we get.
+            var failed = false;
+            try { if ( isStruct( result ) && structKeyExists( result, "error" ) && result.error ) failed = true; }
+            catch ( any e ) {}
+
+            if ( failed ) {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( "cbmailservices reported send error" );
+            } else {
+                arguments.notification.setStatus( "sent" );
+                arguments.notification.setSentAt( now() );
+            }
+            arguments.notification.save();
+        } catch ( any e ) {
+            arguments.notification.setStatus( "failed" );
+            arguments.notification.setErrorMessage( e.message );
+            try { arguments.notification.save(); } catch ( any inner ) {}
+            writeLog(
+                text : "NotificationsService.sendEmail [#arguments.notification.getId()#] failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private string function lookupRecipientEmail( required string recipientType, required string recipientId ){
+        var sql = arguments.recipientType == "agent"
+                ? "SELECT email FROM agents   WHERE id = :id"
+                : "SELECT email FROM contacts WHERE id = :id";
+        var rows = queryExecute( sql, { id : arguments.recipientId } );
+        return rows.recordCount ? toString( rows.email[ 1 ] ?: "" ) : "";
     }
 
     /**

@@ -42,6 +42,8 @@ class {
               .to( "#moduleMapping#.models.Notification" );
         binder.map( "NotificationTemplate@notifications" )
               .to( "#moduleMapping#.models.NotificationTemplate" );
+        binder.map( "NotificationPreference@notifications" )
+              .to( "#moduleMapping#.models.NotificationPreference" );
         binder.map( "NotificationsService@notifications" )
               .to( "#moduleMapping#.models.NotificationsService" )
               .asSingleton();
