@@ -1,0 +1,201 @@
+/**
+ * NotificationsService: fans an event out to per-recipient
+ * notification rows.
+ *
+ * Other modules announce events (onTicketCreated,
+ * onTicketMessageAdded, onTicketStatusChanged) and the interceptors
+ * call dispatchForEvent here. We resolve who to notify, look up the
+ * template per channel + recipient_type, render the strings, and
+ * either:
+ *   - inapp : create a Notification row in status=sent (the bell
+ *             dropdown reads from this table)
+ *   - email / slack : Phase 5c-2 and 5c-3; for now we create the
+ *             row in status=pending and the next sub-phase wires
+ *             the actual transport.
+ *
+ * Templates are admin-editable (Phase 5c-2 ships the UI). When a
+ * template row is missing or inactive we silently skip rather than
+ * dropping a default in-line; an unconfigured channel should not
+ * spam the bell with placeholder text.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    /**
+     * Dispatch an event to its configured templates. Returns the
+     * array of Notification entities created, mostly for the test
+     * suite.
+     *
+     * `recipients` is an array of `{ type: "agent"|"contact", id: "..." }`.
+     * The interceptor decides who should hear about each event;
+     * this service does NOT introspect ticket state.
+     *
+     * `context` is the placeholder substitution payload for the
+     * template renderer; callers should pass everything the seeded
+     * templates reference (ticketNumber, subject, status, from, to,
+     * ticketId, authorLabel, etc.).
+     */
+    public array function dispatchForEvent(
+        required string eventKey,
+        required array  recipients,
+        struct context = {}
+    ){
+        if ( !arguments.recipients.len() ) return [];
+
+        // Pull every active template for this event in one query so
+        // we do not roundtrip per recipient.
+        var tmplRows = queryExecute(
+            "SELECT id, event_key, channel, recipient_type, title_template, body_template, link_template
+             FROM   notification_templates
+             WHERE  event_key = :ek
+             AND    is_active = TRUE",
+            { ek : arguments.eventKey }
+        );
+        if ( !tmplRows.recordCount ) return [];
+
+        var created = [];
+        for ( var r in arguments.recipients ) {
+            if ( !len( r.type ?: "" ) || !len( r.id ?: "" ) ) continue;
+            for ( var i = 1; i <= tmplRows.recordCount; i++ ) {
+                if ( tmplRows.recipient_type[ i ] != r.type ) continue;
+                // Phase 5c-1 only delivers inapp; the email + slack
+                // rows in the templates table can exist but we skip
+                // them until later sub-phases wire transport. Keeps
+                // the migrations stable across the rollout.
+                if ( tmplRows.channel[ i ] != "inapp" ) continue;
+                var n = createNotification(
+                    recipientType : r.type,
+                    recipientId   : r.id,
+                    eventKey      : arguments.eventKey,
+                    channel       : tmplRows.channel[ i ],
+                    title         : render( tmplRows.title_template[ i ], arguments.context ),
+                    body          : render( tmplRows.body_template[ i ],  arguments.context ),
+                    link          : len( tmplRows.link_template[ i ] ?: "" ) ? render( tmplRows.link_template[ i ], arguments.context ) : "",
+                    ticketId      : arguments.context.ticketId       ?: "",
+                    organizationId: arguments.context.organizationId ?: ""
+                );
+                if ( !isNull( n ) ) created.append( n );
+            }
+        }
+        return created;
+    }
+
+    /**
+     * Reads for the agent / contact bell dropdown.
+     */
+    public array function listForRecipient(
+        required string recipientType,
+        required string recipientId,
+        boolean unreadOnly = false,
+        numeric limit = 30
+    ){
+        var q = wirebox.getInstance( "Notification@notifications" )
+            .where( "recipient_type", arguments.recipientType )
+            .where( "recipient_id",   arguments.recipientId )
+            .where( "channel",        "inapp" );
+        if ( arguments.unreadOnly ) q = q.where( "status", "sent" );
+        return q.orderBy( "created_at", "desc" )
+                .limit( int( arguments.limit ) )
+                .get();
+    }
+
+    public numeric function unreadCount(
+        required string recipientType,
+        required string recipientId
+    ){
+        var rows = queryExecute(
+            "SELECT COUNT(*) AS n
+             FROM   notifications
+             WHERE  recipient_type = :rt
+             AND    recipient_id   = :rid
+             AND    channel        = 'inapp'
+             AND    status         = 'sent'",
+            { rt : arguments.recipientType, rid : arguments.recipientId }
+        );
+        return val( rows.n[ 1 ] );
+    }
+
+    public void function markRead(
+        required string id,
+        required string recipientType,
+        required string recipientId
+    ){
+        queryExecute(
+            "UPDATE notifications
+             SET    status = 'read', read_at = NOW()
+             WHERE  id             = :id
+             AND    recipient_type = :rt
+             AND    recipient_id   = :rid",
+            { id : arguments.id, rt : arguments.recipientType, rid : arguments.recipientId }
+        );
+    }
+
+    public void function markAllRead(
+        required string recipientType,
+        required string recipientId
+    ){
+        queryExecute(
+            "UPDATE notifications
+             SET    status = 'read', read_at = NOW()
+             WHERE  recipient_type = :rt
+             AND    recipient_id   = :rid
+             AND    channel        = 'inapp'
+             AND    status         = 'sent'",
+            { rt : arguments.recipientType, rid : arguments.recipientId }
+        );
+    }
+
+    // ---------------- internals ----------------
+
+    private any function createNotification(
+        required string recipientType,
+        required string recipientId,
+        required string eventKey,
+        required string channel,
+        required string title,
+        required string body,
+        string link = "",
+        string ticketId = "",
+        string organizationId = ""
+    ){
+        var n = wirebox.getInstance( "Notification@notifications" );
+        n.setId( newId() );
+        n.setRecipientType( arguments.recipientType );
+        n.setRecipientId( arguments.recipientId );
+        n.setEventKey( arguments.eventKey );
+        n.setChannel( arguments.channel );
+        n.setTitle( arguments.title );
+        n.setBody( arguments.body );
+        if ( len( arguments.link ) )           n.setLink( arguments.link );
+        if ( len( arguments.ticketId ) )       n.setTicketId( arguments.ticketId );
+        if ( len( arguments.organizationId ) ) n.setOrganizationId( arguments.organizationId );
+        // inapp goes straight to "sent"; the bell dropdown counts sent
+        // rows as unread until the recipient marks them read. Email +
+        // slack rows (Phase 5c-2+) start as "pending" so the transport
+        // worker can pick them up.
+        n.setStatus( arguments.channel == "inapp" ? "sent" : "pending" );
+        if ( arguments.channel == "inapp" ) n.setSentAt( now() );
+        n.save();
+        return n;
+    }
+
+    /**
+     * Substitute `{{token}}` against the context struct. Unknown
+     * tokens are left in place rather than blanked, so a typo in a
+     * template surfaces in the resulting notification rather than
+     * silently disappearing.
+     */
+    private string function render( required string template, required struct context ){
+        var out = arguments.template;
+        for ( var key in arguments.context ) {
+            out = replaceNoCase( out, "{{" & key & "}}", toString( arguments.context[ key ] ?: "" ), "all" );
+        }
+        return out;
+    }
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}

@@ -12,10 +12,12 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( modules ).toHaveKey( "notifications" );
             } );
 
-            it( "exposes its entry point", function(){
+            it( "is service-only (no HTTP entry point of its own)", function(){
+                // The agent surface mounts /agent/notifications; the
+                // notifications module itself is service-only.
                 var cache = getController().getModuleService().getModuleConfigCache();
                 expect( cache ).toHaveKey( "notifications" );
-                expect( cache[ "notifications" ].entryPoint ).notToBeEmpty();
+                expect( cache[ "notifications" ].entryPoint ).toBe( "" );
             } );
         } );
     }

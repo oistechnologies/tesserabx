@@ -1,0 +1,67 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <p class="mb-0 text-body-secondary">Bell-icon notifications for the current agent. Click an entry to mark it read and open the linked record.</p>
+    <bx:if ( prc.unreadCount ?: 0 ) gt 0>
+        <form method="post" action="/agent/notifications/mark-all-read" class="m-0">
+            <button class="btn btn-outline-secondary btn-sm" type="submit">
+                <i class="bi bi-check-all"></i> Mark all read
+            </button>
+        </form>
+    </bx:if>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Notification</th>
+                    <th>Received</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.notifications )>
+                    <tr><td colspan="4" class="text-center text-body-secondary py-4">No notifications yet.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.notifications#" item="local.n">
+                    <bx:set local.unread = ( local.n.getStatus() ?: "" ) eq "sent" >
+                    <tr class="#local.unread ? 'table-active' : ''#">
+                        <td class="ps-3" style="width:1.5rem">
+                            <bx:if local.unread>
+                                <span class="badge text-bg-primary">&nbsp;</span>
+                            </bx:if>
+                        </td>
+                        <td>
+                            <div class="#local.unread ? 'fw-semibold' : ''#">#encodeForHTML( local.n.getTitle() )#</div>
+                            <bx:if len( local.n.getBody() ?: "" )>
+                                <div class="small text-body-secondary">#encodeForHTML( local.n.getBody() )#</div>
+                            </bx:if>
+                        </td>
+                        <td class="small text-body-secondary">
+                            #encodeForHTML( dateTimeFormat( local.n.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#
+                        </td>
+                        <td class="text-end pe-3">
+                            <bx:if len( local.n.getLink() ?: "" )>
+                                <form method="post" action="/agent/notifications/#encodeForHTMLAttribute( local.n.getId() )#/read" class="d-inline">
+                                    <input type="hidden" name="link" value="#encodeForHTMLAttribute( local.n.getLink() )#">
+                                    <button class="btn btn-outline-primary btn-sm" type="submit" title="Open and mark read">
+                                        <i class="bi bi-arrow-right"></i>
+                                    </button>
+                                </form>
+                            <bx:elseif local.unread>
+                                <form method="post" action="/agent/notifications/#encodeForHTMLAttribute( local.n.getId() )#/read" class="d-inline">
+                                    <button class="btn btn-outline-secondary btn-sm" type="submit" title="Mark read">
+                                        <i class="bi bi-check"></i>
+                                    </button>
+                                </form>
+                            </bx:if>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

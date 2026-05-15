@@ -1,0 +1,31 @@
+/**
+ * Notification: one delivered (or pending) notification row.
+ *
+ * Recipient_type + recipient_id disambiguate agent vs contact
+ * accounts. The bell-icon dropdown queries unread inapp rows for
+ * the current viewer; the audit trail for email / Slack deliveries
+ * (Phase 5c-2+) lives in the same table.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="notifications"
+    accessors="true"
+{
+
+    property name="id";
+    property name="recipientType"  column="recipient_type";
+    property name="recipientId"    column="recipient_id";
+    property name="eventKey"       column="event_key";
+    property name="channel";
+    property name="title";
+    property name="body";
+    property name="link";
+    property name="status";
+    property name="errorMessage"   column="error_message";
+    property name="ticketId"       column="ticket_id";
+    property name="organizationId" column="organization_id";
+    property name="createdAt"      column="created_at"  sqltype="timestamp";
+    property name="sentAt"         column="sent_at"     sqltype="timestamp";
+    property name="readAt"         column="read_at"     sqltype="timestamp";
+
+}

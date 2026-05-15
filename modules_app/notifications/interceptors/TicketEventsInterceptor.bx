@@ -1,0 +1,153 @@
+/**
+ * TicketEventsInterceptor: translates tickets module announces into
+ * notification rows for the agent + contact bell dropdowns.
+ *
+ * Hooks:
+ *   onTicketCreated       -> assigned agent + requester contact
+ *   onTicketMessageAdded  -> the OTHER party (agent if the customer
+ *                            wrote, requester if an agent wrote);
+ *                            internal notes never fan out
+ *   onTicketStatusChanged -> both sides
+ *
+ * Per-listener try/catch keeps a notification miss from breaking
+ * the underlying ticket lifecycle.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onTicketCreated( event, interceptData, rc, prc ){
+        try {
+            if ( !structKeyExists( arguments.interceptData, "ticket" ) ) return;
+            var ticket = arguments.interceptData.ticket;
+            var recipients = [];
+
+            // Assigned agent gets the notification directly; an
+            // unassigned ticket (the common path for inbound contact-
+            // form submissions and inbound email) broadcasts to every
+            // active agent so someone picks it up. Phase 5d's team /
+            // routing work narrows this to "team members only" once
+            // teams exist.
+            if ( len( ticket.getAssignedToAgentId() ?: "" ) ) {
+                recipients.append( { "type" : "agent", "id" : ticket.getAssignedToAgentId() } );
+            } else {
+                for ( var aid in listActiveAgentIds() ) {
+                    recipients.append( { "type" : "agent", "id" : aid } );
+                }
+            }
+            if ( len( ticket.getRequesterContactId() ?: "" ) ) {
+                recipients.append( { "type" : "contact", "id" : ticket.getRequesterContactId() } );
+            }
+            if ( !recipients.len() ) return;
+            wirebox.getInstance( "NotificationsService@notifications" ).dispatchForEvent(
+                eventKey  : "ticket.created",
+                recipients: recipients,
+                context   : contextForTicket( ticket )
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TicketEventsInterceptor.onTicketCreated failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private array function listActiveAgentIds(){
+        var rows = queryExecute( "SELECT id FROM agents WHERE is_active = TRUE" );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.id[ i ] );
+        return out;
+    }
+
+    function onTicketMessageAdded( event, interceptData, rc, prc ){
+        try {
+            if ( !structKeyExists( arguments.interceptData, "ticket" ) ) return;
+            var ticket  = arguments.interceptData.ticket;
+            var message = arguments.interceptData.message ?: javaCast( "null", "" );
+            if ( isNull( message ) ) return;
+            // Internal notes never leave the agent side. CLAUDE.md is
+            // explicit about this for visibility; the same rule means
+            // they should not generate a contact-side notification.
+            if ( message.getIsInternal() ?: false ) return;
+
+            var fromAgent = len( message.getAuthorAgentId() ?: "" ) > 0;
+            var recipients = [];
+            if ( fromAgent ) {
+                if ( len( ticket.getRequesterContactId() ?: "" ) ) {
+                    recipients.append( { "type" : "contact", "id" : ticket.getRequesterContactId() } );
+                }
+            } else {
+                // Customer or accountless sender replied. The
+                // assigned agent gets it; otherwise every active
+                // agent does, so an unassigned thread does not go
+                // silent the moment the customer pings back.
+                if ( len( ticket.getAssignedToAgentId() ?: "" ) ) {
+                    recipients.append( { "type" : "agent", "id" : ticket.getAssignedToAgentId() } );
+                } else {
+                    for ( var aid in listActiveAgentIds() ) {
+                        recipients.append( { "type" : "agent", "id" : aid } );
+                    }
+                }
+            }
+            if ( !recipients.len() ) return;
+
+            var ctx = contextForTicket( ticket );
+            ctx.authorLabel = fromAgent ? "Agent" : "Customer";
+            wirebox.getInstance( "NotificationsService@notifications" ).dispatchForEvent(
+                eventKey  : "ticket.message_added",
+                recipients: recipients,
+                context   : ctx
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TicketEventsInterceptor.onTicketMessageAdded failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    function onTicketStatusChanged( event, interceptData, rc, prc ){
+        try {
+            if ( !structKeyExists( arguments.interceptData, "ticket" ) ) return;
+            var ticket = arguments.interceptData.ticket;
+            var recipients = [];
+            if ( len( ticket.getAssignedToAgentId() ?: "" ) ) {
+                recipients.append( { "type" : "agent", "id" : ticket.getAssignedToAgentId() } );
+            }
+            if ( len( ticket.getRequesterContactId() ?: "" ) ) {
+                recipients.append( { "type" : "contact", "id" : ticket.getRequesterContactId() } );
+            }
+            if ( !recipients.len() ) return;
+            var ctx = contextForTicket( ticket );
+            ctx.from = arguments.interceptData.from ?: "";
+            ctx.to   = arguments.interceptData.to   ?: ticket.getStatus();
+            wirebox.getInstance( "NotificationsService@notifications" ).dispatchForEvent(
+                eventKey  : "ticket.status_changed",
+                recipients: recipients,
+                context   : ctx
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TicketEventsInterceptor.onTicketStatusChanged failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private struct function contextForTicket( required any ticket ){
+        return {
+            "ticketId"       : arguments.ticket.getId(),
+            "ticketNumber"   : arguments.ticket.getTicketNumber(),
+            "subject"        : arguments.ticket.getSubject(),
+            "status"         : arguments.ticket.getStatus(),
+            "priority"       : arguments.ticket.getPriority(),
+            "organizationId" : arguments.ticket.getOrganizationId() ?: ""
+        };
+    }
+
+}

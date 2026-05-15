@@ -1,0 +1,25 @@
+/**
+ * NotificationTemplate: one (event_key, channel, recipient_type)
+ * triple holding title/body/link templates.
+ *
+ * Phase 5c-1 has no admin UI for editing; templates are seeded by
+ * migration and operators tweak via SQL until 5c-2 adds the UI.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="notification_templates"
+    accessors="true"
+{
+
+    property name="id";
+    property name="eventKey"      column="event_key";
+    property name="channel";
+    property name="recipientType" column="recipient_type";
+    property name="titleTemplate" column="title_template";
+    property name="bodyTemplate"  column="body_template";
+    property name="linkTemplate"  column="link_template";
+    property name="isActive"      column="is_active";
+    property name="createdAt"     column="created_at" sqltype="timestamp";
+    property name="updatedAt"     column="updated_at" sqltype="timestamp";
+
+}

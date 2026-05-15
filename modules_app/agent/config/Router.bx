@@ -66,6 +66,15 @@ class {
         // route is local and ColdBox doesn't try to cross modules.
         route( "reports/export/tickets.csv" ).to( "Reports.exportTickets" );
         route( "reports" ).to( "Reports.index" );
+
+        // Notifications. Mark-read posts redirect to the
+        // notification's stored link when present (the row carries
+        // /agent/tickets/:id or similar) so the dropdown's click
+        // flow is a single submit.
+        route( "notifications/poll"          ).to( "Notifications.poll" );
+        route( "notifications/mark-all-read" ).withVerbs( "POST" ).to( "Notifications.markAllRead" );
+        route( "notifications/:id/read"      ).withVerbs( "POST" ).to( "Notifications.markRead" );
+        route( "notifications"               ).to( "Notifications.index" );
     }
 
 }

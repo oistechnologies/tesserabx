@@ -1,0 +1,125 @@
+/**
+ * NotificationsServiceSpec: dispatch + read-state covers.
+ *
+ * Live UI verification happens in the dev stack; this suite asserts
+ * the contract callers (interceptors, handlers, the bell partial)
+ * rely on.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "NotificationsService@notifications" );
+    }
+
+    function run(){
+        describe( "NotificationsService", function(){
+
+            it( "dispatches a ticket.created inapp notification per recipient", function(){
+                var agentId   = createUUID();
+                var contactId = createUUID();
+                var created = variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.created",
+                    recipients : [
+                        { "type" : "agent",   "id" : agentId },
+                        { "type" : "contact", "id" : contactId }
+                    ],
+                    context    : {
+                        "ticketId"     : "spec-ticket",
+                        "ticketNumber" : 1234,
+                        "subject"      : "test subject",
+                        "status"       : "new"
+                    }
+                );
+                expect( created.len() ).toBeGTE( 2 );
+                // Each notification carries the rendered title with
+                // placeholders substituted.
+                var agentRow = created[ 1 ];
+                expect( agentRow.getStatus() ).toBe( "sent" );
+                expect( agentRow.getTitle() ).toInclude( "1234" );
+
+                cleanup( agentId, contactId );
+            } );
+
+            it( "renders placeholders from the context struct", function(){
+                var agentId = createUUID();
+                variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.status_changed",
+                    recipients : [ { "type" : "agent", "id" : agentId } ],
+                    context    : {
+                        "ticketId"     : "x",
+                        "ticketNumber" : 99,
+                        "subject"      : "s",
+                        "from"         : "open",
+                        "to"           : "resolved"
+                    }
+                );
+                var notes = variables.svc.listForRecipient( "agent", agentId );
+                expect( notes.len() ).toBe( 1 );
+                expect( notes[ 1 ].getTitle() ).toInclude( "resolved" );
+                expect( notes[ 1 ].getBody() ).toInclude( "open" );
+                cleanup( agentId, "" );
+            } );
+
+            it( "skips channels other than inapp in Phase 5c-1", function(){
+                // Insert an email template manually and verify the
+                // dispatch path does NOT create a row for it yet.
+                queryExecute(
+                    "INSERT INTO notification_templates
+                        ( id, event_key, channel, recipient_type, title_template, body_template, is_active )
+                     VALUES
+                        ( :id, 'spec.email_only', 'email', 'agent', 'hello {{subject}}', 'body', TRUE )",
+                    { id : createUUID() }
+                );
+                var agentId = createUUID();
+                variables.svc.dispatchForEvent(
+                    eventKey   : "spec.email_only",
+                    recipients : [ { "type" : "agent", "id" : agentId } ],
+                    context    : { "subject" : "hi" }
+                );
+                var notes = variables.svc.listForRecipient( "agent", agentId );
+                expect( notes.len() ).toBe( 0 );
+                queryExecute( "DELETE FROM notification_templates WHERE event_key = 'spec.email_only'" );
+            } );
+
+            it( "unreadCount and markRead flip status correctly", function(){
+                var agentId = createUUID();
+                variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.created",
+                    recipients : [ { "type" : "agent", "id" : agentId } ],
+                    context    : { "ticketId" : "t", "ticketNumber" : 1, "subject" : "s", "status" : "new" }
+                );
+                expect( variables.svc.unreadCount( "agent", agentId ) ).toBe( 1 );
+
+                var notes = variables.svc.listForRecipient( "agent", agentId );
+                variables.svc.markRead( notes[ 1 ].getId(), "agent", agentId );
+                expect( variables.svc.unreadCount( "agent", agentId ) ).toBe( 0 );
+
+                cleanup( agentId, "" );
+            } );
+
+            it( "markAllRead clears every unread row for the recipient", function(){
+                var agentId = createUUID();
+                for ( var i = 1; i <= 3; i++ ) {
+                    variables.svc.dispatchForEvent(
+                        eventKey   : "ticket.created",
+                        recipients : [ { "type" : "agent", "id" : agentId } ],
+                        context    : { "ticketId" : "t", "ticketNumber" : i, "subject" : "s", "status" : "new" }
+                    );
+                }
+                expect( variables.svc.unreadCount( "agent", agentId ) ).toBe( 3 );
+                variables.svc.markAllRead( "agent", agentId );
+                expect( variables.svc.unreadCount( "agent", agentId ) ).toBe( 0 );
+                cleanup( agentId, "" );
+            } );
+
+        } );
+    }
+
+    private void function cleanup( required string agentId, required string contactId ){
+        if ( len( arguments.agentId ) )   queryExecute( "DELETE FROM notifications WHERE recipient_id = :id", { id : arguments.agentId } );
+        if ( len( arguments.contactId ) ) queryExecute( "DELETE FROM notifications WHERE recipient_id = :id", { id : arguments.contactId } );
+    }
+
+}

@@ -2,7 +2,12 @@
  * notifications module: outbound notification fan-out.
  *
  * Event consumer: other modules announce events, notifications
- * decides delivery across email, Slack/Teams, in-app.
+ * decides delivery across email, Slack/Teams, in-app. Phase 5c-1
+ * ships in-app only; email + slack land in 5c-2 / 5c-3 without
+ * changing the module's outward surface.
+ *
+ * Service-only: no HTTP entry point. The agent surface mounts its
+ * own /agent/notifications route that calls into NotificationsService.
  */
 class {
 
@@ -13,20 +18,35 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    this.entryPoint         = "notifications";
+    this.entryPoint         = "";
     this.modelNamespace     = "notifications";
     this.cfmapping          = "tesserabx.modules.notifications";
     this.autoMapModels      = false;
-    this.dependencies       = [ "contacts" ];
+    this.dependencies       = [ "contacts", "tickets" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings              = {};
+        variables.routes                = [];
+        variables.interceptorSettings   = { customInterceptionPoints : [] };
+        variables.interceptors          = [
+            {
+                class      : "#moduleMapping#.interceptors.TicketEventsInterceptor",
+                name       : "TicketEventsInterceptor",
+                properties : {}
+            }
+        ];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "Notification@notifications" )
+              .to( "#moduleMapping#.models.Notification" );
+        binder.map( "NotificationTemplate@notifications" )
+              .to( "#moduleMapping#.models.NotificationTemplate" );
+        binder.map( "NotificationsService@notifications" )
+              .to( "#moduleMapping#.models.NotificationsService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

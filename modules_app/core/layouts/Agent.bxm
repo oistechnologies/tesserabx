@@ -25,6 +25,124 @@
                     </li>
                 </ul>
                 <ul class="navbar-nav ms-auto">
+                    <bx:script>
+                        // Cheap once-per-request lookup. Only renders
+                        // the bell when an agent is signed in, so the
+                        // login page does not 500 looking up "current
+                        // agent" against an empty session.
+                        local.bellAuth = getInstance( "AuthenticationService@cbauth" );
+                        local.bellAgentId = "";
+                        if ( local.bellAuth.isLoggedIn() ) {
+                            local.u = local.bellAuth.getUser();
+                            if ( !isNull( local.u ) ) local.bellAgentId = local.u.getId();
+                        }
+                        local.bellUnread = 0;
+                        local.bellRecent = [];
+                        if ( len( local.bellAgentId ) ) {
+                            local.notifSvc = getInstance( "NotificationsService@notifications" );
+                            local.bellUnread = local.notifSvc.unreadCount( "agent", local.bellAgentId );
+                            local.bellRecent = local.notifSvc.listForRecipient( "agent", local.bellAgentId, false, 5 );
+                        }
+                    </bx:script>
+                    <bx:if len( local.bellAgentId )>
+                        <li class="nav-item dropdown" id="notif-bell">
+                            <a class="nav-link position-relative" href="##" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-bell"></i>
+                                <span id="notif-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill text-bg-danger"
+                                      style="font-size:0.65rem; #( local.bellUnread gt 0 ? '' : 'display:none;' )#">
+                                    #encodeForHTML( local.bellUnread )#
+                                </span>
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-end p-0" style="min-width:22rem">
+                                <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                                    <strong class="small">Notifications</strong>
+                                    <a href="/agent/notifications" class="small">View all</a>
+                                </div>
+                                <div id="notif-items">
+                                    <bx:if !arrayLen( local.bellRecent )>
+                                        <div class="px-3 py-3 small text-body-secondary">You're all caught up.</div>
+                                    </bx:if>
+                                    <bx:loop array="#local.bellRecent#" item="local.bn">
+                                        <bx:set local.bnUnread = ( local.bn.getStatus() ?: "" ) eq "sent" >
+                                        <form method="post" action="/agent/notifications/#encodeForHTMLAttribute( local.bn.getId() )#/read" class="m-0">
+                                            <input type="hidden" name="link" value="#encodeForHTMLAttribute( local.bn.getLink() ?: '/agent/notifications' )#">
+                                            <button type="submit" class="dropdown-item border-bottom py-2 #local.bnUnread ? 'fw-semibold' : 'text-body-secondary'#" style="white-space:normal">
+                                                <div class="small">#encodeForHTML( local.bn.getTitle() )#</div>
+                                                <div class="small text-body-secondary">#encodeForHTML( dateTimeFormat( local.bn.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</div>
+                                            </button>
+                                        </form>
+                                    </bx:loop>
+                                </div>
+                                <form method="post" action="/agent/notifications/mark-all-read" class="m-0" id="notif-mark-all"
+                                      style="#( local.bellUnread gt 0 ? '' : 'display:none;' )#">
+                                    <button type="submit" class="dropdown-item text-center small py-2">Mark all read</button>
+                                </form>
+                            </div>
+                        </li>
+                        <script>
+                        (function(){
+                            // Poll every 30 seconds so the bell stays
+                            // fresh without a page reload. Skips polling
+                            // while the tab is hidden; the visibility
+                            // listener catches up when the tab regains
+                            // focus.
+                            var POLL_MS = 30000;
+                            var badge   = document.getElementById( 'notif-badge' );
+                            var items   = document.getElementById( 'notif-items' );
+                            var markAll = document.getElementById( 'notif-mark-all' );
+                            if ( !badge || !items ) return;
+
+                            function esc( s ){
+                                return String( s == null ? '' : s )
+                                    .replace( /&/g, '&amp;' )
+                                    .replace( /</g, '&lt;' )
+                                    .replace( />/g, '&gt;' )
+                                    .replace( /"/g, '&quot;' )
+                                    .replace( /'/g, '&##39;' );
+                            }
+
+                            function renderItems( list ){
+                                if ( !list || !list.length ){
+                                    items.innerHTML = '<div class="px-3 py-3 small text-body-secondary">You&##39;re all caught up.</div>';
+                                    return;
+                                }
+                                items.innerHTML = list.map( function( n ){
+                                    var cls = n.unread ? 'fw-semibold' : 'text-body-secondary';
+                                    return ''
+                                        + '<form method="post" action="/agent/notifications/' + esc( n.id ) + '/read" class="m-0">'
+                                        +     '<input type="hidden" name="link" value="' + esc( n.link || '/agent/notifications' ) + '">'
+                                        +     '<button type="submit" class="dropdown-item border-bottom py-2 ' + cls + '" style="white-space:normal">'
+                                        +         '<div class="small">' + esc( n.title ) + '</div>'
+                                        +         '<div class="small text-body-secondary">' + esc( n.createdAt ) + '</div>'
+                                        +     '</button>'
+                                        + '</form>';
+                                } ).join( '' );
+                            }
+
+                            function applyState( data ){
+                                if ( !data || !data.loggedIn ) return;
+                                var n = data.unreadCount || 0;
+                                badge.textContent = n;
+                                badge.style.display = n > 0 ? '' : 'none';
+                                if ( markAll ) markAll.style.display = n > 0 ? '' : 'none';
+                                renderItems( data.items || [] );
+                            }
+
+                            function pollOnce(){
+                                if ( document.hidden ) return;
+                                fetch( '/agent/notifications/poll', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } } )
+                                    .then( function( r ){ return r.ok ? r.json() : null; } )
+                                    .then( function( d ){ if ( d ) applyState( d ); } )
+                                    .catch( function(){ /* network blip; next tick will retry */ } );
+                            }
+
+                            setInterval( pollOnce, POLL_MS );
+                            document.addEventListener( 'visibilitychange', function(){
+                                if ( !document.hidden ) pollOnce();
+                            } );
+                        })();
+                        </script>
+                    </bx:if>
                     <li class="nav-item">
                         <span class="nav-link text-body-secondary">Agent</span>
                     </li>
@@ -52,6 +170,9 @@
                         </li>
                         <li class="nav-item">
                             <a href="/agent/contacts" class="nav-link"><i class="nav-icon bi bi-people"></i><p>Contacts</p></a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="/agent/notifications" class="nav-link"><i class="nav-icon bi bi-bell"></i><p>Notifications</p></a>
                         </li>
                         <li class="nav-item">
                             <a href="/agent/reports" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>Reports</p></a>

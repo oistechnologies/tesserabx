@@ -1,0 +1,109 @@
+/**
+ * agent:Notifications handler.
+ *
+ * /agent/notifications listing + mark-read actions for the bell
+ * dropdown. The notifications module is service-only and lives
+ * behind the agent firewall via this handler.
+ */
+class {
+
+    property name="notificationsService" inject="NotificationsService@notifications";
+    property name="auth"                 inject="AuthenticationService@cbauth";
+    property name="messagebox"           inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        prc.pageTitle     = "Notifications";
+        prc.notifications = notificationsService.listForRecipient(
+            recipientType : "agent",
+            recipientId   : agentId,
+            unreadOnly    : false,
+            limit         : 100
+        );
+        prc.unreadCount = notificationsService.unreadCount( "agent", agentId );
+        event.setView( "notifications/index" );
+    }
+
+    /**
+     * Mark a single row read. Used by the bell dropdown's
+     * click-to-open flow, which posts to this endpoint and then
+     * redirects to the linked URL.
+     */
+    function markRead( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( len( agentId ) && len( rc.id ?: "" ) ) {
+            notificationsService.markRead(
+                id            : rc.id,
+                recipientType : "agent",
+                recipientId   : agentId
+            );
+        }
+        // Redirect to the notification's link if the form supplied
+        // one, otherwise the list.
+        var dest = rc.link ?: "";
+        relocate( uri = len( dest ) ? dest : "/agent/notifications" );
+    }
+
+    function markAllRead( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( len( agentId ) ) {
+            notificationsService.markAllRead( "agent", agentId );
+            messagebox.info( "All notifications marked as read." );
+        }
+        relocate( uri = "/agent/notifications" );
+    }
+
+    /**
+     * JSON poll endpoint for the bell-icon dropdown. The agent
+     * layout's JS hits this every 30 seconds and rebuilds the
+     * badge + dropdown items in place so an agent does not have
+     * to navigate to see new notifications.
+     */
+    function poll( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            event.renderData( data = { "loggedIn" : false }, type = "json" );
+            return;
+        }
+        var recent = notificationsService.listForRecipient(
+            recipientType : "agent",
+            recipientId   : agentId,
+            unreadOnly    : false,
+            limit         : 5
+        );
+        var items = [];
+        for ( var n in recent ) {
+            items.append( {
+                "id"        : n.getId(),
+                "title"     : n.getTitle() ?: "",
+                "link"      : n.getLink() ?: "/agent/notifications",
+                "unread"    : ( ( n.getStatus() ?: "" ) == "sent" ),
+                "createdAt" : dateTimeFormat( n.getCreatedAt(), "yyyy-mm-dd HH:nn" )
+            } );
+        }
+        event.renderData(
+            data = {
+                "loggedIn"    : true,
+                "unreadCount" : notificationsService.unreadCount( "agent", agentId ),
+                "items"       : items
+            },
+            type = "json"
+        );
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}
