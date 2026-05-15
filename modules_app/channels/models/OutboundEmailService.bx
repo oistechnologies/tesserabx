@@ -1,0 +1,216 @@
+/**
+ * OutboundEmailService: emits ticket-related email through cbmailservices.
+ *
+ * Two send paths:
+ *   - sendAutoAcknowledgement( ticket )  -> "we got your request"
+ *   - sendAgentReply( message, ticket )  -> the agent's reply text
+ *
+ * Both stamp an RFC 5322 Message-ID we generate ourselves, save it
+ * on the originating TicketMessage when one exists, and walk the
+ * thread to set In-Reply-To and References so well-behaved mail
+ * clients group replies into one conversation.
+ *
+ * In dev cbmailservices is wired to the Mailpit SMTP trap (see
+ * config/Coldbox.bx), so every send is captured at
+ * http://localhost:8025/.
+ */
+class singleton=true {
+
+    property name="wirebox"        inject="wirebox";
+    property name="mailService"    inject="MailService@cbmailservices";
+
+    public string function generateMessageId( string ticketId = "" ){
+        var host = getSystemSetting( "MAIL_FROM_DOMAIN", "tesserabx.local" );
+        var token = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        return "<" & token & ( len( arguments.ticketId ) ? "." & arguments.ticketId : "" ) & "@" & host & ">";
+    }
+
+    /**
+     * Auto-acknowledgement on ticket creation. Skipped when:
+     *   - the requester address is empty
+     *   - AUTO_ACK_ENABLED is anything but "true"
+     *   - the ticket source isn't an inbound channel
+     *     (we only ack mail, portal, widget, and contact-form; not
+     *     tickets an agent created from the dashboard, which already
+     *     have direct contact with the requester).
+     */
+    public any function sendAutoAcknowledgement( required any ticket ){
+        if ( !isEnabled() ) return javaCast( "null", "" );
+
+        var recipient = recipientAddress( arguments.ticket );
+        if ( !len( recipient ) ) return javaCast( "null", "" );
+
+        var ackSources = [ "email", "portal", "widget" ];
+        if ( !arrayFindNoCase( ackSources, arguments.ticket.getSource() ) ) {
+            return javaCast( "null", "" );
+        }
+
+        var msgId   = generateMessageId( arguments.ticket.getId() );
+        var subject = "[##" & arguments.ticket.getTicketNumber() & "] " & arguments.ticket.getSubject();
+        var body    = autoAckBody( arguments.ticket );
+
+        sendThreaded(
+            recipient : recipient,
+            subject   : subject,
+            body      : body,
+            messageId : msgId
+        );
+
+        // Save the ack as a TicketMessage so the conversation thread
+        // reflects what the client received, and so a later inbound
+        // reply that quotes our Message-ID can match back to this
+        // ticket via In-Reply-To.
+        wirebox.getInstance( "TicketsService@tickets" ).addMessage( {
+            ticketId    : arguments.ticket.getId(),
+            body        : body,
+            authorEmail : fromAddress(),
+            isInternal  : false,
+            messageId   : stripBrackets( msgId )
+        } );
+
+        return msgId;
+    }
+
+    /**
+     * Outbound on agent reply. The agent's public TicketMessage that
+     * has just been saved (and whose announce triggered this) is
+     * passed in so we can stamp it with the Message-ID we send.
+     *
+     * Internal notes and contact-authored messages are ignored;
+     * those never become outbound mail.
+     */
+    public any function sendAgentReply( required any message, required any ticket ){
+        if ( !isEnabled() ) return javaCast( "null", "" );
+        if ( arguments.message.getIsInternal() ) return javaCast( "null", "" );
+        if ( !arguments.message.isFromAgent() ) return javaCast( "null", "" );
+
+        var recipient = recipientAddress( arguments.ticket );
+        if ( !len( recipient ) ) return javaCast( "null", "" );
+
+        var msgId   = generateMessageId( arguments.ticket.getId() );
+        var subject = "[##" & arguments.ticket.getTicketNumber() & "] " & arguments.ticket.getSubject();
+
+        var thread = threadForTicket( arguments.ticket.getId(), arguments.message.getId() );
+
+        sendThreaded(
+            recipient    : recipient,
+            subject      : subject,
+            body         : arguments.message.getBody(),
+            messageId    : msgId,
+            inReplyTo    : thread.inReplyTo,
+            references   : thread.references
+        );
+
+        // Persist our Message-ID on the just-saved TicketMessage so a
+        // later inbound's In-Reply-To header can match against it.
+        arguments.message.setMessageId( stripBrackets( msgId ) );
+        arguments.message.save();
+
+        return msgId;
+    }
+
+    // ---------- helpers ----------
+
+    private boolean function isEnabled(){
+        return lCase( getSystemSetting( "OUTBOUND_EMAIL_ENABLED", "true" ) ) == "true";
+    }
+
+    private string function fromAddress(){
+        return getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" );
+    }
+
+    private string function recipientAddress( required any ticket ){
+        // Prefer the linked Contact's email when present (the
+        // canonical address), otherwise fall back to the raw
+        // originating email for accountless tickets.
+        if ( len( arguments.ticket.getRequesterContactId() ?: "" ) ) {
+            var contact = wirebox.getInstance( "ContactsService@contacts" )
+                .getContactById( arguments.ticket.getRequesterContactId() );
+            if ( !isNull( contact ) && len( contact.getEmail() ?: "" ) ) {
+                return contact.getEmail();
+            }
+        }
+        return arguments.ticket.getOriginatingEmail() ?: "";
+    }
+
+    private string function autoAckBody( required any ticket ){
+        return "Thanks for getting in touch."
+            & char( 10 ) & char( 10 )
+            & "We have opened ticket ##" & arguments.ticket.getTicketNumber()
+            & " for your request and a member of the support team will respond as soon as possible."
+            & char( 10 ) & char( 10 )
+            & "Subject: " & arguments.ticket.getSubject()
+            & char( 10 ) & char( 10 )
+            & "Please keep this thread intact when replying so we can track your conversation.";
+    }
+
+    /**
+     * Walk the existing ticket thread to assemble In-Reply-To and
+     * References. In-Reply-To is the most recent message in the
+     * thread (excluding the one we're currently sending);
+     * References is the chain of every message_id we have on file
+     * for the ticket, oldest first.
+     */
+    private struct function threadForTicket( required string ticketId, string excludeMessageId = "" ){
+        var rows = queryExecute(
+            "SELECT message_id, created_at
+               FROM ticket_messages
+              WHERE ticket_id = :tid
+                AND message_id IS NOT NULL
+                AND ( :exclude = '' OR id <> :exclude )
+              ORDER BY created_at ASC",
+            { tid : arguments.ticketId, exclude : arguments.excludeMessageId },
+            { returntype : "array" }
+        );
+
+        var references = [];
+        var inReplyTo  = "";
+        for ( var row in rows ) {
+            references.append( bracketed( row.message_id ) );
+            inReplyTo = bracketed( row.message_id );
+        }
+        return {
+            "inReplyTo"  : inReplyTo,
+            "references" : arrayToList( references, " " )
+        };
+    }
+
+    private void function sendThreaded(
+        required string recipient,
+        required string subject,
+        required string body,
+        required string messageId,
+        string inReplyTo  = "",
+        string references = ""
+    ){
+        var mail = mailService.newMail(
+            to      = arguments.recipient,
+            from    = fromAddress(),
+            subject = arguments.subject,
+            type    = "text",
+            body    = arguments.body
+        );
+
+        mail.addMailParam( name = "Message-ID", value = arguments.messageId );
+        if ( len( arguments.inReplyTo ) ) {
+            mail.addMailParam( name = "In-Reply-To", value = arguments.inReplyTo );
+        }
+        if ( len( arguments.references ) ) {
+            mail.addMailParam( name = "References", value = arguments.references );
+        }
+
+        mailService.send( mail );
+    }
+
+    private string function bracketed( required string value ){
+        var v = trim( arguments.value );
+        if ( !len( v ) ) return "";
+        if ( left( v, 1 ) == "<" ) return v;
+        return "<" & v & ">";
+    }
+
+    private string function stripBrackets( required string value ){
+        return reReplace( trim( arguments.value ), "[<>]", "", "all" );
+    }
+
+}

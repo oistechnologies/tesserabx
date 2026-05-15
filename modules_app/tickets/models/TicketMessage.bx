@@ -21,6 +21,7 @@ class
     property name="authorContactId"   column="author_contact_id";
     property name="authorAgentId"     column="author_agent_id";
     property name="authorEmail"       column="author_email";
+    property name="messageId"         column="message_id";
     property name="body";
     property name="isInternal"        column="is_internal";
     property name="createdAt"         column="created_at" sqltype="timestamp";
@@ -43,10 +44,14 @@ class
 
     /**
      * Convenience: was the message authored by a provider agent?
+     *
+     * The elvis coalesce normalises null vs empty-string so both
+     * Quick's "unset property" representations behave the same; len
+     * then gives a clean boolean.
      */
     public boolean function isFromAgent(){
-        var id = getAuthorAgentId();
-        return !isNull( id ) && len( id );
+        var id = getAuthorAgentId() ?: "";
+        return len( id ) > 0;
     }
 
 }

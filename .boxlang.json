@@ -1,8 +1,30 @@
 {
-    "debugMode":false,
-    "defaultTimezone":"UTC",
-    "defaultLocale":"en_US",
-    "executors":{
-        "defaultTimeout":30
-    }
+    "debugMode": false,
+    "defaultTimezone": "UTC",
+    "defaultLocale": "en_US",
+    "executors": {
+        "defaultTimeout": 30
+    },
+    // bx-mail (the runtime's mail subsystem) reads its server list
+    // from this top-level mailServers array. Without it, cfmail and
+    // cbmailservices both fail with "No mail servers have been
+    // defined" because cbmailservices' CFMailProtocol passes the
+    // Mail object's config (to/from/subject/body) but not its own
+    // configured properties (server/port) through to cfmail.
+    //
+    // Dev maps these env vars at mailpit; production overrides them
+    // in the deploy host's .env. spoolEnable is off so sends are
+    // synchronous and visible in Mailpit immediately rather than
+    // sitting in /mail/unsent waiting for the spool ticker.
+    "mailServers": [
+        {
+            "host": "${env.MAIL_HOST:mailpit}",
+            "port": "${env.MAIL_PORT:1025}",
+            "username": "${env.MAIL_USERNAME:}",
+            "password": "${env.MAIL_PASSWORD:}",
+            "tls": "${env.MAIL_TLS:false}",
+            "ssl": "${env.MAIL_SSL:false}"
+        }
+    ],
+    "spoolEnable": false
 }

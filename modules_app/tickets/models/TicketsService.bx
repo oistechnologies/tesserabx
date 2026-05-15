@@ -12,10 +12,11 @@
  */
 class singleton=true {
 
-    property name="wirebox"         inject="wirebox";
-    property name="contactsService" inject="ContactsService@contacts";
-    property name="auditService"    inject="AuditService@audit";
-    property name="cbfs"            inject="DiskService@cbfs";
+    property name="wirebox"            inject="wirebox";
+    property name="contactsService"    inject="ContactsService@contacts";
+    property name="auditService"       inject="AuditService@audit";
+    property name="cbfs"               inject="DiskService@cbfs";
+    property name="interceptorService" inject="coldbox:interceptorService";
 
     // ---------- Status workflow ----------
 
@@ -173,6 +174,9 @@ class singleton=true {
             actorId        : arguments.data.actorId ?: "",
             metadata       : { "requesterContactId" : t.getRequesterContactId(), "subject" : t.getSubject() }
         );
+
+        interceptorService.announce( "onTicketCreated", { "ticket" : t, "accountless" : false } );
+
         return t;
     }
 
@@ -206,6 +210,9 @@ class singleton=true {
             actorId    : arguments.data.actorId ?: "",
             metadata   : { "originatingEmail" : t.getOriginatingEmail() }
         );
+
+        interceptorService.announce( "onTicketCreated", { "ticket" : t, "accountless" : true } );
+
         return t;
     }
 
@@ -229,6 +236,7 @@ class singleton=true {
         if ( len( arguments.data.authorAgentId ?: "" ) ) m.setAuthorAgentId( arguments.data.authorAgentId );
         if ( len( arguments.data.authorContactId ?: "" ) ) m.setAuthorContactId( arguments.data.authorContactId );
         if ( len( arguments.data.authorEmail ?: "" ) ) m.setAuthorEmail( arguments.data.authorEmail );
+        if ( len( arguments.data.messageId ?: "" ) ) m.setMessageId( arguments.data.messageId );
         m.save();
 
         touchTicket( t );
@@ -240,6 +248,15 @@ class singleton=true {
             actorId   : arguments.data.authorAgentId ?: arguments.data.authorContactId ?: "",
             metadata  : { "messageId" : m.getId(), "isInternal" : m.getIsInternal() }
         );
+
+        // Cross-module hook: channels listens for outbound dispatch.
+        // Tickets does not depend on channels (cycle); the interceptor
+        // service is the back-channel.
+        interceptorService.announce( "onTicketMessageAdded", {
+            "message" : m,
+            "ticket"  : t
+        } );
+
         return m;
     }
 

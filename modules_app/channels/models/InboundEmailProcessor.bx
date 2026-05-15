@@ -106,7 +106,7 @@ class singleton=true {
         }
 
         // 4. Reply matching
-        var replyTicketId = findReplyTicketId( inReplyTo, refs );
+        var replyTicketId = findReplyTicketId( inReplyTo, refs, subject );
         if ( len( replyTicketId ) ) {
             var t = ticketsService.getTicket( replyTicketId );
             if ( !isNull( t ) ) {
@@ -116,7 +116,8 @@ class singleton=true {
                     body            : arguments.message.body ?: "",
                     authorContactId : isNull( contact ) ? "" : contact.getId(),
                     authorEmail     : sender,
-                    isInternal      : false
+                    isInternal      : false,
+                    messageId       : messageId
                 } );
                 return logInbound(
                     sender, subject, messageId, inReplyTo, refs,
@@ -151,7 +152,8 @@ class singleton=true {
             body            : arguments.message.body ?: "",
             authorContactId : isNull( contact ) ? "" : contact.getId(),
             authorEmail     : sender,
-            isInternal      : false
+            isInternal      : false,
+            messageId       : messageId
         } );
         return logInbound(
             sender, subject, messageId, inReplyTo, refs,
@@ -234,12 +236,29 @@ class singleton=true {
     }
 
     /**
-     * Look for a ticket whose prior inbound message-id matches the
-     * In-Reply-To or any of the References. Phase 2b extends this to
-     * also match outbound message-ids generated when an agent replied
-     * from inside the system.
+     * Look for a ticket the new inbound is a reply to.
+     *
+     * Tries, in order:
+     *   1. In-Reply-To / References against inbound_emails.message_id
+     *      (prior inbound we processed).
+     *   2. Same candidates against ticket_messages.message_id (our
+     *      own outbounds that the recipient is now replying to).
+     *   3. `[##NNN]` subject pattern matched against tickets.ticket
+     *      _number. This is the canonical helpdesk fallback because
+     *      Java's mail subsystem rewrites the Message-ID on send;
+     *      every outbound we sent through cbmailservices reaches the
+     *      recipient with a Message-ID we never see, so any "Re:"
+     *      reply's In-Reply-To header points at an ID we don't have
+     *      stored. The agent's outbound subject is prefixed with the
+     *      ticket number for exactly this reason.
+     *
+     * Returns "" when nothing matches.
      */
-    private string function findReplyTicketId( required string inReplyTo, required string references ){
+    private string function findReplyTicketId(
+        required string inReplyTo,
+        required string references,
+        required string subject
+    ){
         var candidates = [];
         if ( len( arguments.inReplyTo ) ) candidates.append( arguments.inReplyTo );
         for ( var ref in listToArray( arguments.references, " " ) ) {
@@ -250,6 +269,31 @@ class singleton=true {
             var prior = channelsService.findInboundEmailByMessageId( mid );
             if ( !isNull( prior ) && len( prior.getTicketId() ?: "" ) ) {
                 return prior.getTicketId();
+            }
+            var outboundHit = queryExecute(
+                "SELECT ticket_id FROM ticket_messages WHERE message_id = :mid LIMIT 1",
+                { mid : mid },
+                { returntype : "array" }
+            );
+            if ( arrayLen( outboundHit ) ) {
+                return outboundHit[ 1 ].ticket_id;
+            }
+        }
+
+        // Subject fallback: agent outbound subjects are always
+        // "[#NNN] ..." where NNN is the ticket_number.
+        var m = reMatchNoCase( "\[##([0-9]+)\]", arguments.subject );
+        if ( arrayLen( m ) ) {
+            var number = reReplace( m[ 1 ], "[^0-9]", "", "all" );
+            if ( len( number ) ) {
+                var hit = queryExecute(
+                    "SELECT id FROM tickets WHERE ticket_number = :n LIMIT 1",
+                    { n : { value : number, cfsqltype : "cf_sql_bigint" } },
+                    { returntype : "array" }
+                );
+                if ( arrayLen( hit ) ) {
+                    return hit[ 1 ].id;
+                }
             }
         }
         return "";

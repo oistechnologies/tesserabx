@@ -26,10 +26,18 @@ class {
     this.dependencies       = [ "contacts", "audit" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings = {};
+        variables.routes   = [];
+        // Custom interception points the tickets service fires. Other
+        // modules (notably channels) register listeners on these to
+        // dispatch outbound notifications without creating a circular
+        // module dependency. ColdBox reads this from variables scope
+        // via getPropertyMixin.
+        variables.interceptorSettings = { customInterceptionPoints : [
+            "onTicketCreated",
+            "onTicketMessageAdded"
+        ] };
+        variables.interceptors = [];
     }
 
     function onLoad(){

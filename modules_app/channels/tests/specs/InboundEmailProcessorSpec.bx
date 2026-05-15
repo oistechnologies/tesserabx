@@ -157,8 +157,41 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( second.getOutcome() ).toBe( "message_appended" );
                 expect( second.getTicketId() ).toBe( first.getTicketId() );
 
+                // One inbound + the auto-ack OutboundEmailService now
+                // persists on ticket creation + the follow-up inbound.
                 var messages = variables.tickets.listMessagesForTicket( first.getTicketId(), true );
-                expect( arrayLen( messages ) ).toBe( 2 );
+                expect( arrayLen( messages ) ).toBe( 3 );
+
+                cleanupInbound( first.getId() );
+                cleanupInbound( second.getId() );
+                cleanupTicket( first.getTicketId() );
+            } );
+
+            it( "falls back to subject [##NNN] matching when no message-id chain exists", function(){
+                var sender = "subject-thread-" & createUUID() & "@example.com";
+                var first  = variables.processor.process( {
+                    messageId : "msg-A-" & createUUID() & "@example.com",
+                    from      : sender,
+                    subject   : "Cannot log in",
+                    body      : "Original.",
+                    headers   : {}
+                } );
+                expect( first.getOutcome() ).toBe( "ticket_created" );
+                var ticket = variables.tickets.getTicket( first.getTicketId() );
+                var tn = ticket.getTicketNumber();
+
+                // Simulate a reply with no In-Reply-To header (an
+                // email client that stripped threading on forward),
+                // only the [##NNN] subject prefix.
+                var second = variables.processor.process( {
+                    messageId : "msg-B-" & createUUID() & "@example.com",
+                    from      : sender,
+                    subject   : "Re: [##" & tn & "] Cannot log in",
+                    body      : "More info.",
+                    headers   : {}
+                } );
+                expect( second.getOutcome() ).toBe( "message_appended" );
+                expect( second.getTicketId() ).toBe( first.getTicketId() );
 
                 cleanupInbound( first.getId() );
                 cleanupInbound( second.getId() );

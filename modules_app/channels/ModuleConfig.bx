@@ -25,10 +25,24 @@ class {
     this.dependencies       = [ "tickets", "contacts", "audit" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings            = {};
+        variables.routes              = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        // Bridges tickets' onTicketCreated / onTicketMessageAdded
+        // announces over to OutboundEmailService so channels owns
+        // every outbound mail decision in one place. ColdBox reads
+        // module interceptors from variables scope via
+        // getPropertyMixin( "interceptors", "variables", [] ), so the
+        // assignment is explicit. Each entry needs class, name, and
+        // properties keys; registerInterceptor blows up on a missing
+        // .name.
+        variables.interceptors        = [
+            {
+                class      : "#moduleMapping#.interceptors.OutboundEmailInterceptor",
+                name       : "OutboundEmailInterceptor",
+                properties : {}
+            }
+        ];
     }
 
     function onLoad(){
@@ -44,6 +58,9 @@ class {
               .asSingleton();
         binder.map( "IMAPPoller@channels" )
               .to( "#moduleMapping#.models.IMAPPoller" )
+              .asSingleton();
+        binder.map( "OutboundEmailService@channels" )
+              .to( "#moduleMapping#.models.OutboundEmailService" )
               .asSingleton();
     }
 

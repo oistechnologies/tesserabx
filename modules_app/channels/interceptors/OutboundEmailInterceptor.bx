@@ -1,0 +1,55 @@
+/**
+ * OutboundEmailInterceptor: bridges the tickets module's announces
+ * to the channels module's outbound dispatch.
+ *
+ * Listens for:
+ *   onTicketCreated      -> dispatch auto-acknowledgement
+ *   onTicketMessageAdded -> dispatch agent reply
+ *
+ * Both listeners are best-effort: a send failure logs and continues
+ * so the ticket lifecycle itself never fails because the mail server
+ * blinked. cbmailservices in dev points at Mailpit, so a real
+ * outbound failure only happens when production mail config is bad.
+ *
+ * Resolves OutboundEmailService through wirebox on each invocation
+ * rather than via property injection. The interceptor is constructed
+ * during the module's configure() phase, which runs before its
+ * onLoad's binder.map for the service. A direct property injection
+ * here would fail to resolve.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onTicketCreated( event, interceptData, rc, prc ){
+        try {
+            wirebox.getInstance( "OutboundEmailService@channels" )
+                .sendAutoAcknowledgement( arguments.interceptData.ticket );
+        } catch ( any e ) {
+            writeLog(
+                text : "OutboundEmail auto-ack failed: " & e.message,
+                log  : "tesserabx",
+                type : "error"
+            );
+        }
+    }
+
+    function onTicketMessageAdded( event, interceptData, rc, prc ){
+        try {
+            wirebox.getInstance( "OutboundEmailService@channels" )
+                .sendAgentReply(
+                    message = arguments.interceptData.message,
+                    ticket  = arguments.interceptData.ticket
+                );
+        } catch ( any e ) {
+            writeLog(
+                text : "OutboundEmail agent reply failed: " & e.message,
+                log  : "tesserabx",
+                type : "error"
+            );
+        }
+    }
+
+}

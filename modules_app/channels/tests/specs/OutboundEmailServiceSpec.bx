@@ -1,0 +1,170 @@
+/**
+ * OutboundEmailServiceSpec: behavioural specs for outbound dispatch.
+ *
+ * The interceptor wired in ChannelsModuleConfig fires
+ * OutboundEmailService.sendAutoAcknowledgement on ticket creation
+ * and OutboundEmailService.sendAgentReply on every non-internal
+ * agent message. These specs exercise the gating logic (which kinds
+ * of source / author should produce an outbound) by inspecting the
+ * TicketMessage rows the service writes for traceability.
+ *
+ * The actual SMTP send goes through cbmailservices to the configured
+ * mailServer (mailpit in dev, nothing in CI). cbmailservices swallows
+ * send errors into the Mail object's results; from the spec's
+ * perspective the outbound is judged by whether the auto-ack /
+ * reply TicketMessage rows materialise, not by Mailpit content.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.tickets  = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "OutboundEmailService", function(){
+
+            it( "writes an auto-ack TicketMessage for an email-sourced ticket", function(){
+                var ticket = variables.tickets.createAccountlessTicket( {
+                    originatingEmail : "ack-" & createUUID() & "@example.com",
+                    subject          : "Auto-ack me",
+                    source           : "email"
+                } );
+
+                var messages = variables.tickets.listMessagesForTicket( ticket.getId(), true );
+                // The interceptor's sendAutoAcknowledgement adds the
+                // ack as a TicketMessage for traceability.
+                var acks = filterByBodyContains( messages, "Thanks for getting in touch" );
+                expect( arrayLen( acks ) ).toBe( 1 );
+
+                cleanupTicket( ticket.getId() );
+            } );
+
+            it( "does NOT auto-ack a ticket the agent created from the dashboard", function(){
+                var ticket = variables.tickets.createAccountlessTicket( {
+                    originatingEmail : "no-ack-" & createUUID() & "@example.com",
+                    subject          : "No ack here",
+                    source           : "agent"
+                } );
+
+                var messages = variables.tickets.listMessagesForTicket( ticket.getId(), true );
+                expect( arrayLen( filterByBodyContains( messages, "Thanks for getting in touch" ) ) ).toBe( 0 );
+
+                cleanupTicket( ticket.getId() );
+            } );
+
+            it( "stamps a Message-ID on an agent reply", function(){
+                var org = variables.contacts.createOrganization( {
+                    name : "Spec Org " & createUUID(),
+                    slug : "obs-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                var contact = variables.contacts.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "spec-" & createUUID() & "@example.com",
+                    password       : "spec-password"
+                } );
+                var agentId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+                queryExecute(
+                    "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+                     VALUES ( :id, :email, :hash, false, true )",
+                    {
+                        id    : agentId,
+                        email : "agent-" & createUUID() & "@example.com",
+                        hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+                    }
+                );
+
+                var ticket = variables.tickets.createTicket( {
+                    requesterContactId : contact.getId(),
+                    subject            : "Spec",
+                    source             : "agent"
+                } );
+                var reply = variables.tickets.addMessage( {
+                    ticketId      : ticket.getId(),
+                    body          : "Agent response",
+                    authorAgentId : agentId,
+                    isInternal    : false
+                } );
+                var refreshed = queryExecute(
+                    "SELECT message_id FROM ticket_messages WHERE id = :id",
+                    { id : reply.getId() },
+                    { returntype : "array" }
+                )[ 1 ];
+                expect( len( refreshed.message_id ?: "" ) ).toBeGT( 0 );
+
+                cleanupTicket( ticket.getId() );
+                queryExecute( "DELETE FROM agents WHERE id = :id", { id : agentId } );
+                queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : contact.getId() } );
+                queryExecute( "DELETE FROM contacts WHERE id = :id", { id : contact.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+            } );
+
+            it( "does NOT stamp Message-ID on a contact's reply to an agent-source ticket", function(){
+                // Use source="agent" to suppress the auto-ack: this
+                // spec is isolating the contact-reply path, so we
+                // don't want the auto-ack TicketMessage row landing
+                // in the ticket and confusing the assertion. The
+                // agent-source + contact-reply combo is unusual but
+                // legitimate (an agent opened the ticket on behalf
+                // of the contact, then the contact replied).
+                var org = variables.contacts.createOrganization( {
+                    name : "Spec Org " & createUUID(),
+                    slug : "obs-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                var contact = variables.contacts.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "spec-" & createUUID() & "@example.com",
+                    password       : "spec-password"
+                } );
+
+                var ticket = variables.tickets.createTicket( {
+                    requesterContactId : contact.getId(),
+                    subject            : "From client",
+                    source             : "agent"
+                } );
+                var reply = variables.tickets.addMessage( {
+                    ticketId        : ticket.getId(),
+                    body            : "More info from me",
+                    authorContactId : contact.getId(),
+                    isInternal      : false
+                } );
+                var refreshed = queryExecute(
+                    "SELECT COALESCE( message_id, '' ) AS mid FROM ticket_messages WHERE id = :id",
+                    { id : reply.getId() },
+                    { returntype : "array" }
+                )[ 1 ];
+                expect( refreshed.mid ).toBe( "" );
+
+                cleanupTicket( ticket.getId() );
+                queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : contact.getId() } );
+                queryExecute( "DELETE FROM contacts WHERE id = :id", { id : contact.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private array function filterByBodyContains( required array messages, required string needle ){
+        var out = [];
+        for ( var m in arguments.messages ) {
+            if ( ( m.getBody() ?: "" ) contains arguments.needle ) {
+                out.append( m );
+            }
+        }
+        return out;
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets WHERE id = :id", { id : arguments.id } );
+    }
+
+}
