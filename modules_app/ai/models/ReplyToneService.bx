@@ -1,0 +1,110 @@
+/**
+ * ReplyToneService: review an agent's draft reply for tone, clarity,
+ * and customer fit. Returns a numeric score, a human label, and a
+ * short list of specific improvements.
+ *
+ * On-demand only; the agent UI calls review(ticketId, draft) when
+ * the agent presses "Check tone". Latency is non-blocking because
+ * the agent has already typed their draft.
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="promptService"  inject="AiSystemPromptService@ai";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    variables.FEATURE_KEY = "reply-tone";
+    variables.FALLBACK_SYSTEM_PROMPT = "Review the draft as JSON {""score"":0-100,""label"":""excellent|good|ok|needs-work"",""suggestions"":[]}";
+
+    /**
+     * Returns:
+     *   {
+     *     available   : bool,
+     *     outcome     : string,
+     *     score       : numeric (0-100),
+     *     label       : string,
+     *     suggestions : array<string>,
+     *     error       : string
+     *   }
+     */
+    public struct function review( required string ticketId, required string draft ){
+        var off = { "available" : false, "outcome" : "disabled", "score" : 0, "label" : "", "suggestions" : [], "error" : "" };
+        if ( !capability.isFeatureEnabled( variables.FEATURE_KEY ) ) return off;
+
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) return { "available" : true, "outcome" : "error", "score" : 0, "label" : "", "suggestions" : [], "error" : "Ticket not found" };
+
+        var template = promptService.getForFeature( variables.FEATURE_KEY );
+        if ( !len( template ) ) template = variables.FALLBACK_SYSTEM_PROMPT;
+        var systemPrompt = promptService.renderTemplate( template, {} );
+
+        var userPrompt = buildUserPrompt( ticket, arguments.draft );
+        var result = middleware.complete(
+            feature : variables.FEATURE_KEY,
+            prompt  : userPrompt,
+            options : {
+                systemPrompt   : systemPrompt,
+                organizationId : ticket.getOrganizationId() ?: "",
+                ticketId       : ticket.getId(),
+                temperature    : 0.3,
+                maxTokens      : 400
+            }
+        );
+
+        if ( result.outcome != "ok" ) {
+            return { "available" : true, "outcome" : result.outcome, "score" : 0, "label" : "", "suggestions" : [], "error" : result.error ?: "" };
+        }
+        var parsed = parseModelJson( result.text );
+        return {
+            "available"   : true,
+            "outcome"     : "ok",
+            "score"       : parsed.score,
+            "label"       : parsed.label,
+            "suggestions" : parsed.suggestions,
+            "error"       : ""
+        };
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function parseModelJson( required string raw ){
+        var jsonStr = middleware.extractJsonObject( arguments.raw );
+        var fallback = { "score" : 0, "label" : "", "suggestions" : [] };
+        if ( !len( jsonStr ) ) return fallback;
+        try {
+            var data = jsonDeserialize( jsonStr );
+            if ( !isStruct( data ) ) return fallback;
+            return {
+                "score"       : isNumeric( data.score ?: 0 ) ? int( data.score ) : 0,
+                "label"       : toString( data.label ?: "" ),
+                "suggestions" : isArray( data.suggestions ?: [] ) ? data.suggestions : []
+            };
+        } catch ( any e ) {
+            return fallback;
+        }
+    }
+
+    private string function buildUserPrompt( required any ticket, required string draft ){
+        var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        var lines = [
+            "Ticket subject: " & arguments.ticket.getSubject(),
+            "Priority: "  & ( arguments.ticket.getPriority() ?: "normal" ),
+            ""
+        ];
+        if ( messages.len() ) {
+            lines.append( "Conversation so far (oldest first):" );
+            var slice = messages.len() <= 8 ? messages : messages.slice( messages.len() - 7, 8 );
+            for ( var m in slice ) {
+                if ( m.getIsInternal() ?: false ) continue;
+                var who = len( m.getAuthorAgentId() ?: "" ) ? "Agent" : "Customer";
+                lines.append( who & ": " & ( m.getBody() ?: "" ) );
+            }
+        }
+        lines.append( "" );
+        lines.append( "Draft to review:" );
+        lines.append( arguments.draft );
+        return lines.toList( char( 10 ) );
+    }
+
+}

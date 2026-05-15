@@ -71,6 +71,12 @@ class {
         binder.map( "KbSuggestionService@ai" )
               .to( "#moduleMapping#.models.KbSuggestionService" )
               .asSingleton();
+        binder.map( "KbDraftService@ai" )
+              .to( "#moduleMapping#.models.KbDraftService" )
+              .asSingleton();
+        binder.map( "ReplyToneService@ai" )
+              .to( "#moduleMapping#.models.ReplyToneService" )
+              .asSingleton();
     }
 
     function onUnload(){}

@@ -1,0 +1,25 @@
+/**
+ * ReplyToneServiceSpec: disabled-path coverage. Live tone-check
+ * output is exercised by the agent UI.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "ReplyToneService@ai" );
+    }
+
+    function run(){
+        describe( "ReplyToneService", function(){
+            it( "returns available=false when AI is off", function(){
+                var r = variables.svc.review( ticketId : "nonexistent", draft : "Hi there." );
+                expect( r.available ).toBeFalse();
+                expect( r.outcome ).toBe( "disabled" );
+                expect( r.score ).toBe( 0 );
+                expect( r.suggestions.len() ).toBe( 0 );
+            } );
+        } );
+    }
+
+}

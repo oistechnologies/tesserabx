@@ -1,0 +1,156 @@
+/**
+ * KbDraftService: turn a resolved-ticket conversation into a draft
+ * knowledge-base article.
+ *
+ * Two entry points:
+ *   - draft( ticketId ) returns the parsed model output without
+ *     persisting anything. Useful when the admin wants to preview
+ *     before creating.
+ *   - draftAndCreate( ticketId, agentId ) creates a new Article row
+ *     (status=draft, visibility=internal per CLAUDE.md / build plan)
+ *     and returns the new article id. The agent then opens
+ *     /agent/admin/kb/:id to refine and publish.
+ *
+ * Per CLAUDE.md: "The draft defaults to internal and unpublished,
+ * so a human must explicitly choose any broader exposure."
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="promptService"  inject="AiSystemPromptService@ai";
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="kbService"      inject="KnowledgebaseService@knowledgebase";
+
+    variables.FEATURE_KEY = "kb-draft";
+    variables.FALLBACK_SYSTEM_PROMPT = "Draft a KB article as JSON {""title"": ""..."", ""body"": ""..."", ""summary"": ""..."", ""warnings"": []}";
+
+    /**
+     * Returns:
+     *   {
+     *     available : bool,
+     *     outcome   : string,
+     *     title     : string,
+     *     body      : string,
+     *     summary   : string,
+     *     warnings  : array<string>,
+     *     error     : string
+     *   }
+     */
+    public struct function draft( required string ticketId, string actorAgentId = "" ){
+        var off = { "available" : false, "outcome" : "disabled", "title" : "", "body" : "", "summary" : "", "warnings" : [], "error" : "" };
+        if ( !capability.isFeatureEnabled( variables.FEATURE_KEY ) ) return off;
+
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) return { "available" : true, "outcome" : "error", "title" : "", "body" : "", "summary" : "", "warnings" : [], "error" : "Ticket not found" };
+
+        var template = promptService.getForFeature( variables.FEATURE_KEY );
+        if ( !len( template ) ) template = variables.FALLBACK_SYSTEM_PROMPT;
+        var systemPrompt = promptService.renderTemplate( template, {} );
+
+        var userPrompt = buildUserPrompt( ticket );
+        var result = middleware.complete(
+            feature : variables.FEATURE_KEY,
+            prompt  : userPrompt,
+            options : {
+                systemPrompt   : systemPrompt,
+                organizationId : ticket.getOrganizationId() ?: "",
+                ticketId       : ticket.getId(),
+                agentId        : arguments.actorAgentId,
+                temperature    : 0.4,
+                maxTokens      : 1500
+            }
+        );
+
+        if ( result.outcome != "ok" ) {
+            return { "available" : true, "outcome" : result.outcome, "title" : "", "body" : "", "summary" : "", "warnings" : [], "error" : result.error ?: "" };
+        }
+
+        var parsed = parseModelJson( result.text );
+        return {
+            "available" : true,
+            "outcome"   : "ok",
+            "title"     : parsed.title,
+            "body"      : parsed.body,
+            "summary"   : parsed.summary,
+            "warnings"  : parsed.warnings,
+            "error"     : ""
+        };
+    }
+
+    /**
+     * Generate a draft and create the Article row. Returns:
+     *   { available, outcome, articleId, warnings, error }
+     */
+    public struct function draftAndCreate( required string ticketId, string actorAgentId = "" ){
+        var result = draft( ticketId : arguments.ticketId, actorAgentId : arguments.actorAgentId );
+        if ( result.outcome != "ok" ) {
+            return { "available" : result.available, "outcome" : result.outcome, "articleId" : "", "warnings" : [], "error" : result.error };
+        }
+        if ( !len( trim( result.title ) ) || !len( trim( result.body ) ) ) {
+            return { "available" : true, "outcome" : "error", "articleId" : "", "warnings" : result.warnings, "error" : "Model produced an empty title or body." };
+        }
+
+        // Internal + unpublished by default. The agent must explicitly
+        // change visibility and publish, which is the build plan's
+        // hard constraint on this feature.
+        var article = kbService.createArticle( {
+            "title"      : result.title,
+            "body"       : result.body,
+            "visibility" : "internal"
+        }, arguments.actorAgentId );
+
+        return {
+            "available" : true,
+            "outcome"   : "ok",
+            "articleId" : article.getId(),
+            "warnings"  : result.warnings,
+            "error"     : ""
+        };
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function parseModelJson( required string raw ){
+        var jsonStr = middleware.extractJsonObject( arguments.raw );
+        var fallback = { "title" : "", "body" : "", "summary" : "", "warnings" : [] };
+        if ( !len( jsonStr ) ) return fallback;
+        try {
+            var data = jsonDeserialize( jsonStr );
+            if ( !isStruct( data ) ) return fallback;
+            return {
+                "title"    : toString( data.title    ?: "" ),
+                "body"     : toString( data.body     ?: "" ),
+                "summary"  : toString( data.summary  ?: "" ),
+                "warnings" : isArray( data.warnings ?: [] ) ? data.warnings : []
+            };
+        } catch ( any e ) {
+            return fallback;
+        }
+    }
+
+    private string function buildUserPrompt( required any ticket ){
+        var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        var lines = [
+            "Ticket subject: " & arguments.ticket.getSubject(),
+            "Status: "    & ( arguments.ticket.getStatus() ?: "" ),
+            "Priority: "  & ( arguments.ticket.getPriority() ?: "" ),
+            "Type: "      & ( arguments.ticket.getTicketType() ?: "" ),
+            ""
+        ];
+        if ( !messages.len() ) {
+            lines.append( "(No messages on this ticket; the ticket subject is the only context.)" );
+            return lines.toList( char( 10 ) );
+        }
+        lines.append( "Conversation (oldest first):" );
+        for ( var m in messages ) {
+            if ( m.getIsInternal() ?: false ) continue;
+            var who = len( m.getAuthorAgentId() ?: "" ) ? "Agent" : "Customer";
+            lines.append( who & ": " & ( m.getBody() ?: "" ) );
+        }
+        lines.append( "" );
+        lines.append( "Draft a knowledge-base article that captures the resolution so future agents and customers can find it." );
+        return lines.toList( char( 10 ) );
+    }
+
+}

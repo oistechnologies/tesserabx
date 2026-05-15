@@ -49,17 +49,24 @@ class singleton=true {
 
     /**
      * Top-N articles for an arbitrary text context. The portal's
-     * contact form will use this in Phase 4f to surface "is this
-     * already answered?" hints before the customer submits.
+     * contact form uses this to surface "is this already answered?"
+     * hints before the customer submits.
+     *
+     * `useSemantic` lets a caller force the keyword fallback even
+     * when the AI capability is on. The anonymous contact form
+     * passes false so unauthenticated visitors do not generate
+     * embedding API calls (cost, abuse, PII surface). Authenticated
+     * callers (agents, logged-in contacts) leave it true.
      */
     public array function suggestForText(
         required string text,
         required struct viewer,
-        numeric limit = 5
+        numeric limit = 5,
+        boolean useSemantic = true
     ){
         if ( !len( trim( arguments.text ) ) ) return [];
 
-        if ( capability.isFeatureEnabled( variables.FEATURE_KEY ) ) {
+        if ( arguments.useSemantic && capability.isFeatureEnabled( variables.FEATURE_KEY ) ) {
             var result = middleware.embed(
                 feature : variables.FEATURE_KEY,
                 text    : arguments.text,

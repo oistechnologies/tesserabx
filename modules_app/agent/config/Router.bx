@@ -53,6 +53,8 @@ class {
         route( "tickets/:id/block-sender" ).withVerbs( "POST" ).to( "Tickets.blockSender" );
         route( "tickets/:id/suggest-reply" ).withVerbs( "POST" ).to( "Tickets.suggestReply" );
         route( "tickets/:id/summarize" ).withVerbs( "POST" ).to( "Tickets.summarize" );
+        route( "tickets/:id/draft-kb-article" ).withVerbs( "POST" ).to( "Tickets.draftKbArticle" );
+        route( "tickets/:id/check-tone" ).withVerbs( "POST" ).to( "Tickets.checkTone" );
         route( "tickets/:id" ).to( "Tickets.show" );
         route( "tickets" ).withHandler( "Tickets" ).toAction( {
             "GET"  : "index",

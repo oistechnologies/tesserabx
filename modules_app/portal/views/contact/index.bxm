@@ -1,18 +1,38 @@
 <bx:output>
+<bx:set local.profile = prc.viewerProfile ?: { loggedIn : false } >
 <div class="row">
     <div class="col-12 col-lg-8">
         <p class="lead">Have a question or a request? Drop us a note and we will get back to you.</p>
         <form method="post" action="/contact" class="card">
             <div class="card-body">
+                <bx:if local.profile.loggedIn>
+                    <div class="alert alert-light border mb-3" role="note">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>#encodeForHTML( local.profile.displayName )#</strong>
+                                <div class="small text-body-secondary">#encodeForHTML( local.profile.email )#</div>
+                                <bx:if len( local.profile.organizationName ?: "" )>
+                                    <div class="small text-body-secondary">
+                                        <i class="bi bi-building"></i>
+                                        #encodeForHTML( local.profile.organizationName )#
+                                    </div>
+                                </bx:if>
+                            </div>
+                            <span class="badge text-bg-success">Signed in</span>
+                        </div>
+                    </div>
+                </bx:if>
                 <div class="row g-3">
-                    <div class="col-12 col-md-6">
-                        <label class="form-label" for="name">Your name</label>
-                        <input type="text" class="form-control" id="name" name="name" value="#encodeForHTMLAttribute( prc.formData.name ?: "" )#">
-                    </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
-                        <input type="email" class="form-control" id="email" name="email" required value="#encodeForHTMLAttribute( prc.formData.email ?: "" )#">
-                    </div>
+                    <bx:if !local.profile.loggedIn>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="name">Your name</label>
+                            <input type="text" class="form-control" id="name" name="name" value="#encodeForHTMLAttribute( prc.formData.name ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
+                            <input type="email" class="form-control" id="email" name="email" required value="#encodeForHTMLAttribute( prc.formData.email ?: "" )#">
+                        </div>
+                    </bx:if>
                     <div class="col-12">
                         <label class="form-label" for="subject">Subject</label>
                         <input type="text" class="form-control" id="subject" name="subject" value="#encodeForHTMLAttribute( prc.formData.subject ?: "" )#">
@@ -22,11 +42,43 @@
                         <textarea class="form-control" id="body" name="body" rows="6" required maxlength="10000">#encodeForHTML( prc.formData.body ?: "" )#</textarea>
                     </div>
                 </div>
-                <div class="d-flex justify-content-end gap-2 mt-4">
+                <div class="d-flex justify-content-between gap-2 mt-4">
+                    <button class="btn btn-outline-secondary" type="submit" formaction="/contact/find-help">
+                        <i class="bi bi-search"></i> Find existing answers
+                    </button>
                     <button class="btn btn-primary" type="submit">Send</button>
                 </div>
             </div>
         </form>
+    </div>
+    <div class="col-12 col-lg-4 mt-3 mt-lg-0">
+        <bx:if arrayLen( prc.relatedArticles ?: [] )>
+            <div class="card">
+                <div class="card-header">
+                    Possibly related articles
+                    <bx:if structKeyExists( prc.relatedArticles[ 1 ], "source" ) && prc.relatedArticles[ 1 ].source eq "semantic">
+                        <span class="badge text-bg-info ms-1" title="Ranked by AI similarity">AI</span>
+                    </bx:if>
+                </div>
+                <div class="card-body small">
+                    <p class="text-body-secondary mb-2">If one of these solves your problem, give it a read before you send.</p>
+                    <bx:loop array="#prc.relatedArticles#" item="local.article">
+                        <div class="mb-2 pb-2 border-bottom">
+                            <a href="/kb/#encodeForHTMLAttribute( local.article.slug )#" target="_blank">
+                                #encodeForHTML( local.article.title )#
+                            </a>
+                            <bx:if len( local.article.snippet ?: "" )>
+                                <div class="text-body-secondary">#encodeForHTML( local.article.snippet )#</div>
+                            </bx:if>
+                        </div>
+                    </bx:loop>
+                </div>
+            </div>
+        <bx:elseif structKeyExists( prc, "relatedArticles" )>
+            <div class="alert alert-light small mb-0">
+                We could not find an existing article that matches what you described. Send the message and an agent will get back to you.
+            </div>
+        </bx:if>
     </div>
 </div>
 </bx:output>

@@ -12,13 +12,25 @@
  */
 class {
 
-    property name="ticketsService" inject="TicketsService@tickets";
-    property name="rateLimiter"    inject="RateLimiter@core";
-    property name="messagebox"     inject="messagebox@cbmessagebox";
+    property name="ticketsService"      inject="TicketsService@tickets";
+    property name="contactsService"     inject="ContactsService@contacts";
+    property name="rateLimiter"         inject="RateLimiter@core";
+    property name="kbSuggestionService" inject="KbSuggestionService@ai";
+    property name="aiCapability"        inject="AiCapability@ai";
+    property name="auth"                inject="AuthenticationService@cbauth";
+    property name="messagebox"          inject="messagebox@cbmessagebox";
+
+    // Minimum trimmed query length before we hit the KB. Anything
+    // shorter is almost always a stray click or a one-keystroke
+    // typo and gets a clean "no matches" rather than a DB roundtrip.
+    variables.MIN_QUERY_LEN = 10;
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Portal", module = "core" );
-        if ( arguments.action == "create" ) {
+        // Anonymous-only rate limit on the submission path. Logged-in
+        // contacts have an authenticated account so we skip the IP
+        // bucket and lean on cbSecurity for accountability.
+        if ( arguments.action == "create" && !auth.isLoggedIn() ) {
             var check = rateLimiter.check(
                 bucket        = "portal:contact",
                 key           = remoteAddr( event ),
@@ -32,6 +44,10 @@ class {
                 relocate( uri = "/contact" );
             }
         }
+        // Expose the viewer profile for the view so it can render the
+        // identity card instead of asking a logged-in contact to
+        // retype their name and email.
+        arguments.prc.viewerProfile = readViewerProfile();
     }
 
     function index( event, rc, prc ){
@@ -42,7 +58,75 @@ class {
             subject : rc.subject ?: "",
             body    : rc.body    ?: ""
         };
+        prc.relatedArticles = [];
         event.setView( "contact/index" );
+    }
+
+    /**
+     * Look up KB articles related to whatever the visitor has typed
+     * into the subject + body so far, before they submit.
+     *
+     * Anonymous callers (the public contact form) get the keyword
+     * fallback only and a per-IP rate limit. Logged-in contacts get
+     * the AI semantic path and bypass the rate limit because there
+     * is an authenticated account behind the request. Both paths
+     * require at least a few characters of input so a stray click
+     * does not fire DB work.
+     */
+    function findHelp( event, rc, prc ){
+        param rc.subject = "";
+        param rc.body    = "";
+        prc.formData = {
+            name    : rc.name    ?: "",
+            email   : rc.email   ?: "",
+            subject : rc.subject ?: "",
+            body    : rc.body    ?: ""
+        };
+        prc.pageTitle = "Contact support";
+        prc.relatedArticles = [];
+
+        var loggedIn = auth.isLoggedIn();
+        var query    = trim( rc.subject & " " & rc.body );
+
+        if ( !loggedIn ) {
+            var check = rateLimiter.check(
+                bucket        = "portal:contact-find-help",
+                key           = remoteAddr( event ),
+                limit         = 10,
+                windowSeconds = 3600
+            );
+            if ( !check.allowed ) {
+                messagebox.warn( "Too many searches from this connection. Please wait a few minutes and try again." );
+                event.setView( "contact/index" );
+                return;
+            }
+        }
+
+        if ( len( query ) < variables.MIN_QUERY_LEN ) {
+            messagebox.warn( "Type a bit more detail about your issue, then try again." );
+            event.setView( "contact/index" );
+            return;
+        }
+
+        prc.relatedArticles = kbSuggestionService.suggestForText(
+            text        : query,
+            viewer      : loggedIn ? viewerForLoggedInUser() : { "kind" : "anonymous" },
+            limit       : 5,
+            useSemantic : loggedIn
+        );
+        event.setView( "contact/index" );
+    }
+
+    private struct function viewerForLoggedInUser(){
+        var u = auth.getUser();
+        if ( isNull( u ) ) return { "kind" : "anonymous" };
+        var orgId = "";
+        try { orgId = u.getOrganizationId() ?: ""; } catch ( any e ) {}
+        return {
+            "kind"                  : "contact",
+            "contactId"             : u.getId(),
+            "contactOrganizationId" : orgId
+        };
     }
 
     function create( event, rc, prc ){
@@ -51,31 +135,57 @@ class {
         param rc.subject = "";
         param rc.body    = "";
 
-        var errors = validateInput( rc );
+        var profile = prc.viewerProfile ?: readViewerProfile();
+        var loggedIn = profile.loggedIn ?: false;
+
+        var errors = validateInput( rc, loggedIn );
         if ( arrayLen( errors ) ) {
             messagebox.error( errors.toList( "<br>" ) );
             return index( event, rc, prc );
         }
 
-        var fullName = trim( rc.name );
         var subject  = len( trim( rc.subject ) ) ? rc.subject : "(no subject)";
 
-        var ticket = ticketsService.createAccountlessTicket( {
-            originatingEmail : lCase( trim( rc.email ) ),
-            subject          : subject,
-            source           : "contact-form",
-            actorType        : "system"
-        } );
-
-        var firstMessage = len( fullName )
-            ? "From: " & fullName & " <" & rc.email & ">" & char( 10 ) & char( 10 ) & rc.body
-            : rc.body;
-        ticketsService.addMessage( {
-            ticketId    : ticket.getId(),
-            body        : firstMessage,
-            authorEmail : lCase( trim( rc.email ) ),
-            isInternal  : false
-        } );
+        var ticket = "";
+        var firstMessage = rc.body;
+        if ( loggedIn ) {
+            // Authenticated contact: tie the ticket to their account
+            // so it shows up in their /tickets list and inherits the
+            // tenant scope from their organization.
+            ticket = ticketsService.createTicket( {
+                requesterContactId : profile.contactId,
+                subject            : subject,
+                source             : "contact-form",
+                actorType          : "contact",
+                actorId            : profile.contactId
+            } );
+            ticketsService.addMessage( {
+                ticketId        : ticket.getId(),
+                body            : firstMessage,
+                authorContactId : profile.contactId,
+                isInternal      : false
+            } );
+        } else {
+            // Anonymous submission: accountless ticket; the agent
+            // promotes the sender later if the address is worth
+            // converting into a Contact.
+            var fullName = trim( rc.name );
+            ticket = ticketsService.createAccountlessTicket( {
+                originatingEmail : lCase( trim( rc.email ) ),
+                subject          : subject,
+                source           : "contact-form",
+                actorType        : "system"
+            } );
+            if ( len( fullName ) ) {
+                firstMessage = "From: " & fullName & " <" & rc.email & ">" & char( 10 ) & char( 10 ) & rc.body;
+            }
+            ticketsService.addMessage( {
+                ticketId    : ticket.getId(),
+                body        : firstMessage,
+                authorEmail : lCase( trim( rc.email ) ),
+                isInternal  : false
+            } );
+        }
 
         prc.pageTitle  = "Thanks for getting in touch";
         prc.ticketNumber = ticket.getTicketNumber();
@@ -84,12 +194,45 @@ class {
 
     // ---------- internals ----------
 
-    private array function validateInput( required struct rc ){
+    /**
+     * Build a small struct describing who is on the other side of
+     * the request. The view branches on `loggedIn` to render the
+     * identity card vs. the name/email fields.
+     */
+    private struct function readViewerProfile(){
+        if ( !auth.isLoggedIn() ) return { "loggedIn" : false };
+        var u = auth.getUser();
+        if ( isNull( u ) ) return { "loggedIn" : false };
+        var first = u.getFirstName() ?: "";
+        var last  = u.getLastName() ?: "";
+        var name  = trim( first & " " & last );
+        var orgId   = "";
+        var orgName = "";
+        try {
+            orgId = u.getOrganizationId() ?: "";
+            if ( len( orgId ) ) {
+                var org = contactsService.getOrganizationById( orgId );
+                if ( !isNull( org ) ) orgName = org.getName() ?: "";
+            }
+        } catch ( any e ) { /* swallow; org info is presentational */ }
+        return {
+            "loggedIn"       : true,
+            "contactId"      : u.getId(),
+            "displayName"    : len( name ) ? name : ( u.getEmail() ?: "" ),
+            "email"          : u.getEmail() ?: "",
+            "organizationId" : orgId,
+            "organizationName" : orgName
+        };
+    }
+
+    private array function validateInput( required struct rc, boolean loggedIn = false ){
         var errors = [];
-        if ( !len( trim( arguments.rc.email ?: "" ) ) ) {
-            errors.append( "Email is required." );
-        } else if ( !isValid( "email", arguments.rc.email ) ) {
-            errors.append( "Please enter a valid email address." );
+        if ( !arguments.loggedIn ) {
+            if ( !len( trim( arguments.rc.email ?: "" ) ) ) {
+                errors.append( "Email is required." );
+            } else if ( !isValid( "email", arguments.rc.email ) ) {
+                errors.append( "Please enter a valid email address." );
+            }
         }
         if ( !len( trim( arguments.rc.body ?: "" ) ) ) {
             errors.append( "Please describe what you need help with." );

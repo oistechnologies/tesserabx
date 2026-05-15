@@ -17,7 +17,7 @@ class {
     this.modelNamespace     = "portal";
     this.cfmapping          = "tesserabx.modules.portal";
     this.autoMapModels      = false;
-    this.dependencies       = [ "contacts", "tickets", "knowledgebase" ];
+    this.dependencies       = [ "contacts", "tickets", "knowledgebase", "ai" ];
 
     function configure(){
         settings = {};

@@ -20,6 +20,8 @@ class {
     property name="suggestedReplyService" inject="SuggestedReplyService@ai";
     property name="summarizationService"  inject="SummarizationService@ai";
     property name="kbSuggestionService"   inject="KbSuggestionService@ai";
+    property name="kbDraftService"        inject="KbDraftService@ai";
+    property name="replyToneService"      inject="ReplyToneService@ai";
     property name="messagebox"            inject="messagebox@cbmessagebox";
     property name="auth"                  inject="AuthenticationService@cbauth";
 
@@ -218,6 +220,86 @@ class {
             messagebox.error( "AI summary failed: " & result.error );
         } else {
             messagebox.warn( "AI summary not available (outcome: " & result.outcome & ")." );
+        }
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    /**
+     * Draft a knowledge-base article from this ticket. Creates the
+     * article internal + unpublished per CLAUDE.md and the build
+     * plan, then redirects to the KB admin edit page where the
+     * agent can refine and publish. Warnings the model flagged
+     * (customer names, ticket-specific identifiers) are stashed in
+     * flash so the edit screen can surface them.
+     */
+    function draftKbArticle( event, rc, prc ){
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !aiCapability.isFeatureEnabled( "kb-draft" ) ) {
+            messagebox.warn( "AI KB drafting is not enabled." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        var result = kbDraftService.draftAndCreate(
+            ticketId     : t.getId(),
+            actorAgentId : currentAgentId()
+        );
+        if ( result.outcome == "ok" && len( result.articleId ) ) {
+            if ( isArray( result.warnings ) && result.warnings.len() ) {
+                flash.put( "kbDraftWarnings", result.warnings );
+            }
+            messagebox.info( "Draft article created. Review and publish when ready." );
+            relocate( uri = "/agent/admin/kb/" & result.articleId );
+            return;
+        }
+        if ( result.outcome == "error" ) messagebox.error( "AI draft failed: " & result.error );
+        else                              messagebox.warn( "AI draft not available (outcome: " & result.outcome & ")." );
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    /**
+     * Run the agent's in-progress reply through a tone / quality
+     * check. The result lives in flash for the next page render so
+     * the textarea is not blown away if the textarea is full.
+     */
+    function checkTone( event, rc, prc ){
+        param rc.body = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !aiCapability.isFeatureEnabled( "reply-tone" ) ) {
+            messagebox.warn( "AI tone check is not enabled." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        if ( !len( trim( rc.body ) ) ) {
+            messagebox.warn( "Type the reply first, then check tone." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        var result = replyToneService.review(
+            ticketId : t.getId(),
+            draft    : rc.body
+        );
+        if ( result.outcome == "ok" ) {
+            flash.put( "toneReview", {
+                "score"       : result.score,
+                "label"       : result.label,
+                "suggestions" : result.suggestions,
+                "draft"       : rc.body
+            } );
+            messagebox.info( "Tone reviewed." );
+        } else if ( result.outcome == "error" ) {
+            messagebox.error( "AI tone check failed: " & result.error );
+        } else {
+            messagebox.warn( "AI tone check not available (outcome: " & result.outcome & ")." );
         }
         relocate( uri = "/agent/tickets/" & t.getId() );
     }
@@ -456,6 +538,18 @@ class {
             viewer   : { "kind" : "agent" },
             limit    : 5
         );
+
+        // The KB-draft button only makes sense once the ticket has a
+        // resolution to draft FROM; we surface it on resolved or
+        // closed tickets.
+        var status = arguments.ticket.getStatus() ?: "";
+        arguments.prc.canDraftKbArticle = arguments.prc.aiEnabled
+            && ( status == "resolved" || status == "closed" );
+
+        // Tone-check results survive the post-redirect-get via flash.
+        // The draft field carries the textarea contents back so the
+        // agent does not lose what they typed when running a check.
+        arguments.prc.toneReview = flash.get( "toneReview", {} );
     }
 
     private string function currentAgentId(){

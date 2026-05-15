@@ -117,9 +117,43 @@
                                 <div style="white-space:pre-wrap">#encodeForHTML( prc.suggestedNotes )#</div>
                             </div>
                         </bx:if>
+
+                        <bx:set local.tone = prc.toneReview ?: {} >
+                        <bx:if isStruct( local.tone ) && structKeyExists( local.tone, "label" ) && len( local.tone.label ?: "" )>
+                            <bx:set local.toneClass = local.tone.label eq "excellent" ? "success"
+                                                  : ( local.tone.label eq "good"      ? "success"
+                                                  : ( local.tone.label eq "ok"        ? "warning"
+                                                  :                                     "danger" ) ) >
+                            <div class="alert alert-#local.toneClass# py-2 px-3 small mb-2" role="note">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <strong><i class="bi bi-pencil-square"></i> Tone review</strong>
+                                    <span class="badge text-bg-#local.toneClass#">#encodeForHTML( local.tone.label )# &middot; #encodeForHTML( local.tone.score )#/100</span>
+                                </div>
+                                <bx:if arrayLen( local.tone.suggestions ?: [] )>
+                                    <ul class="mb-0 ps-3 mt-1">
+                                        <bx:loop array="#local.tone.suggestions#" item="local.sug">
+                                            <li>#encodeForHTML( local.sug )#</li>
+                                        </bx:loop>
+                                    </ul>
+                                </bx:if>
+                            </div>
+                        </bx:if>
+
+                        <bx:set local.replyBody = prc.suggestedReply ?: "" >
+                        <bx:if !len( local.replyBody ) && isStruct( prc.toneReview ?: {} ) && structKeyExists( prc.toneReview ?: {}, "draft" )>
+                            <bx:set local.replyBody = prc.toneReview.draft >
+                        </bx:if>
+
                         <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
-                            <textarea class="form-control mb-2" name="body" rows="4" placeholder="Reply visible to the requester...">#encodeForHTML( prc.suggestedReply ?: "" )#</textarea>
-                            <div class="d-flex justify-content-end">
+                            <textarea class="form-control mb-2" name="body" id="reply-body-#encodeForHTMLAttribute( local.t.getId() )#" rows="4" placeholder="Reply visible to the requester...">#encodeForHTML( local.replyBody )#</textarea>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <bx:if prc.aiEnabled ?: false>
+                                    <button class="btn btn-outline-secondary btn-sm" type="submit" formaction="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/check-tone">
+                                        <i class="bi bi-pencil-square"></i> Check tone
+                                    </button>
+                                <bx:else>
+                                    <span></span>
+                                </bx:if>
                                 <button class="btn btn-primary" type="submit">Send reply</button>
                             </div>
                         </form>
@@ -190,6 +224,32 @@
                             <button class="btn btn-outline-info btn-sm w-100" type="submit">
                                 <i class="bi bi-stars"></i>
                                 <bx:if local.hasSummary>Refresh summary<bx:else>Generate summary</bx:if>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </bx:if>
+
+        <bx:if prc.canDraftKbArticle ?: false>
+            <div class="card mb-3">
+                <div class="card-header p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                       data-bs-toggle="collapse"
+                       href="##kb-draft-card"
+                       role="button"
+                       aria-expanded="false"
+                       aria-controls="kb-draft-card">
+                        <span>Draft KB article <span class="badge text-bg-info ms-2">AI</span></span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="kb-draft-card" class="collapse">
+                    <div class="card-body small">
+                        <p class="mb-2 text-body-secondary">Generate an internal-only draft KB article from this resolved ticket. You will review and publish before customers see it.</p>
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/draft-kb-article">
+                            <button class="btn btn-outline-info btn-sm w-100" type="submit">
+                                <i class="bi bi-journal-plus"></i> Draft KB article
                             </button>
                         </form>
                     </div>

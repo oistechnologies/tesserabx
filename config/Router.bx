@@ -46,6 +46,7 @@ class extends="coldbox.system.web.routing.Router" {
         // Public contact form. Unauthenticated visitors land here to
         // submit a ticket without an account; the form creates an
         // accountless ticket through TicketsService.
+        route( "/contact/find-help" ).withVerbs( "POST" ).to( "portal:Contact.findHelp" );
         route( "/contact" ).withHandler( "portal:Contact" ).toAction( {
             "GET"  : "index",
             "POST" : "create"
