@@ -1,0 +1,31 @@
+/**
+ * AiInteraction: one row per AI provider call.
+ *
+ * Written by AiMiddleware around every call so cost, latency, and
+ * outcome are observable without depending on a separate metrics
+ * sink. The raw prompt is hashed, not stored; PII redaction runs
+ * before the hash so the same redacted text always hashes the same.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="ai_interactions"
+    accessors="true"
+{
+
+    property name="id";
+    property name="feature";
+    property name="provider";
+    property name="model";
+    property name="promptHash"     column="prompt_hash";
+    property name="tokensIn"       column="tokens_in";
+    property name="tokensOut"      column="tokens_out";
+    property name="latencyMs"      column="latency_ms";
+    property name="outcome";
+    property name="errorMessage"   column="error_message";
+    property name="organizationId" column="organization_id";
+    property name="ticketId"       column="ticket_id";
+    property name="contactId"      column="contact_id";
+    property name="agentId"        column="agent_id";
+    property name="createdAt"      column="created_at" sqltype="timestamp";
+
+}

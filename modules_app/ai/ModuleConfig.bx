@@ -3,10 +3,11 @@
  *
  * This is the ONLY module that imports bx-ai. Every AI feature in
  * other modules calls the facade exposed here, never the provider
- * directly.
+ * directly. Owns AiInteraction. Optional at runtime; when the
+ * capability flag is off, no AI UI renders anywhere.
  *
- * Owns AiInteraction. Optional at runtime; when the capability flag
- * is off, no AI UI renders anywhere.
+ * Service-only module: no HTTP surface. Phase 5 mounts AI configuration
+ * under /agent/admin.
  */
 class {
 
@@ -17,22 +18,30 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    this.entryPoint         = "ai";
+    this.entryPoint         = "";
     this.modelNamespace     = "ai";
     this.cfmapping          = "tesserabx.modules.ai";
     this.autoMapModels      = false;
-    this.dependencies       = [ "audit" ];
+    this.dependencies       = [ "contacts", "audit" ];
 
     function configure(){
-        settings = {
-            enabled : controller.getSetting( name = "aiEnabled", defaultValue = false )
-        };
-        routes = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings = {};
+        variables.routes   = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "AiInteraction@ai" )
+              .to( "#moduleMapping#.models.AiInteraction" );
+        binder.map( "AiCapability@ai" )
+              .to( "#moduleMapping#.models.AiCapability" )
+              .asSingleton();
+        binder.map( "AiMiddleware@ai" )
+              .to( "#moduleMapping#.models.AiMiddleware" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

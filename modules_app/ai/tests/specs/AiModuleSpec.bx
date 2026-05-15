@@ -12,10 +12,12 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( modules ).toHaveKey( "ai" );
             } );
 
-            it( "exposes its entry point", function(){
+            it( "is service-only (no HTTP entry point)", function(){
+                // The AI layer is a service facade; Phase 5 surfaces
+                // configuration through /agent/admin, not /ai.
                 var cache = getController().getModuleService().getModuleConfigCache();
                 expect( cache ).toHaveKey( "ai" );
-                expect( cache[ "ai" ].entryPoint ).notToBeEmpty();
+                expect( cache[ "ai" ].entryPoint ).toBe( "" );
             } );
         } );
     }

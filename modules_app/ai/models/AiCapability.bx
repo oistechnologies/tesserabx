@@ -1,0 +1,80 @@
+/**
+ * AiCapability: the single source of truth for whether AI is on.
+ *
+ * Every feature module (handlers, CBWire components, view partials,
+ * automation hooks) keys off `isEnabled()`. When that returns false,
+ * no AI UI is rendered and no cbq job is enqueued. The middleware
+ * facade also short-circuits, returning a "disabled" outcome rather
+ * than attempting a provider call.
+ *
+ * Per-feature gating (Phase 4c+) layers on top of this: a feature is
+ * only "on" when the global capability is on AND its own feature
+ * flag is on. For Phase 4a only the global capability exists; the
+ * helpers for per-feature lookups are placeholders that return the
+ * global value so callers can already wire against them.
+ */
+class singleton=true {
+
+    // Each AI setting is a top-level ColdBox setting written by
+    // config/Coldbox.bx from the AI_* env vars. We inject them one
+    // by one rather than the whole `settings` struct because ColdBox
+    // does not expose the struct under a `settings` key.
+    property name="aiEnabledRaw"        inject="coldbox:setting:aiEnabled";
+    property name="aiProviderRaw"       inject="coldbox:setting:aiProvider";
+    property name="aiModelRaw"          inject="coldbox:setting:aiModel";
+    property name="aiApiKeyRaw"         inject="coldbox:setting:aiApiKey";
+    property name="aiBaseUrlRaw"        inject="coldbox:setting:aiBaseUrl";
+    property name="aiTimeoutSecondsRaw" inject="coldbox:setting:aiTimeoutSeconds";
+    property name="aiPiiRedactionRaw"   inject="coldbox:setting:aiPiiRedaction";
+
+    public boolean function isEnabled(){
+        return asBool( variables.aiEnabledRaw );
+    }
+
+    /**
+     * Per-feature gating placeholder. Phase 4c+ will read an
+     * AI_FEATURE_<NAME>_ENABLED env var (or admin-config row) for
+     * each feature key. For 4a we just collapse to the global flag
+     * so callers can already write `if ( aiCapability.isFeatureEnabled( "triage" ) )`.
+     */
+    public boolean function isFeatureEnabled( required string feature ){
+        return isEnabled();
+    }
+
+    public string function getProvider() { return toString( variables.aiProviderRaw ?: "" ); }
+    public string function getModel()    { return toString( variables.aiModelRaw ?: "" ); }
+    public string function getApiKey()   { return toString( variables.aiApiKeyRaw ?: "" ); }
+    public string function getBaseUrl()  { return toString( variables.aiBaseUrlRaw ?: "" ); }
+    public numeric function getTimeoutSeconds(){
+        var raw = variables.aiTimeoutSecondsRaw ?: 60;
+        return isNumeric( raw ) ? int( raw ) : 60;
+    }
+    public boolean function isPiiRedactionEnabled(){
+        return asBool( variables.aiPiiRedactionRaw );
+    }
+
+    /**
+     * Convenience for diagnostics + admin UI in Phase 5. The
+     * apiKey is intentionally masked.
+     */
+    public struct function summary(){
+        var key = getApiKey();
+        return {
+            "enabled"        : isEnabled(),
+            "provider"       : getProvider(),
+            "model"          : getModel(),
+            "baseUrl"        : getBaseUrl(),
+            "timeoutSeconds" : getTimeoutSeconds(),
+            "piiRedaction"   : isPiiRedactionEnabled(),
+            "apiKeyPresent"  : len( key ) > 0,
+            "apiKeyMasked"   : len( key ) > 8 ? ( left( key, 4 ) & "..." & right( key, 4 ) ) : ""
+        };
+    }
+
+    private boolean function asBool( required any value ){
+        if ( isBoolean( arguments.value ) ) return arguments.value;
+        var s = lCase( toString( arguments.value ) );
+        return ( s == "true" || s == "1" || s == "yes" );
+    }
+
+}

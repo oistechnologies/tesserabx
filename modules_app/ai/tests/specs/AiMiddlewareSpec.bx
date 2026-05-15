@@ -1,0 +1,88 @@
+/**
+ * AiMiddlewareSpec: scaffold behaviour for Phase 4a.
+ *
+ * Verifies:
+ *   - complete() short-circuits with outcome "disabled" when the
+ *     capability flag is off and writes the row.
+ *   - redactPrompt strips email addresses when redaction is on.
+ *   - recordInteraction writes the columns callers expect.
+ *
+ * Phase 4b replaces the "not_implemented" branch with a real provider
+ * call; this spec stays accurate because it only asserts the disabled
+ * path + observability surface.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.ai = getController().getWireBox().getInstance( "AiMiddleware@ai" );
+    }
+
+    function run(){
+        describe( "AiMiddleware", function(){
+
+            it( "returns a 'disabled' outcome when the capability flag is off", function(){
+                var r = variables.ai.complete(
+                    feature : "spec-disabled",
+                    prompt  : "Hello there."
+                );
+                expect( r.outcome ).toBe( "disabled" );
+                expect( r.text ).toBe( "" );
+            } );
+
+            it( "writes an ai_interactions row for the disabled call", function(){
+                var feature = "spec-row-" & createUUID();
+                variables.ai.complete( feature : feature, prompt : "anything" );
+                var row = queryExecute(
+                    "SELECT feature, outcome FROM ai_interactions WHERE feature = :f",
+                    { f : feature }
+                );
+                expect( row.recordCount ).toBe( 1 );
+                expect( row.outcome[ 1 ] ).toBe( "disabled" );
+                queryExecute( "DELETE FROM ai_interactions WHERE feature = :f", { f : feature } );
+            } );
+
+            it( "redacts email addresses out of the prompt", function(){
+                var raw    = "Customer alice@example.com wants help and bob+filter@acme.io is on the thread.";
+                var masked = variables.ai.redactPrompt( raw );
+                expect( masked ).notToInclude( "alice@example.com" );
+                expect( masked ).notToInclude( "bob+filter@acme.io" );
+                expect( masked ).toInclude( "[redacted-email]" );
+            } );
+
+            it( "recordInteraction captures the supplied subject ids", function(){
+                var feature = "spec-subject-" & createUUID();
+                variables.ai.recordInteraction(
+                    feature : feature,
+                    outcome : "ok",
+                    options : {
+                        organizationId : "00000000-0000-0000-0000-000000000001",
+                        ticketId       : "00000000-0000-0000-0000-000000000002",
+                        agentId        : "00000000-0000-0000-0000-000000000003"
+                    },
+                    latency   : 250,
+                    tokensIn  : 42,
+                    tokensOut : 17
+                );
+                var row = queryExecute(
+                    "SELECT organization_id, ticket_id, agent_id, tokens_in, tokens_out, latency_ms, outcome
+                     FROM   ai_interactions
+                     WHERE  feature = :f",
+                    { f : feature }
+                );
+                expect( row.recordCount ).toBe( 1 );
+                expect( row.organization_id[ 1 ] ).toBe( "00000000-0000-0000-0000-000000000001" );
+                expect( row.ticket_id[ 1 ] ).toBe( "00000000-0000-0000-0000-000000000002" );
+                expect( row.agent_id[ 1 ] ).toBe( "00000000-0000-0000-0000-000000000003" );
+                expect( row.tokens_in[ 1 ] ).toBe( 42 );
+                expect( row.tokens_out[ 1 ] ).toBe( 17 );
+                expect( row.latency_ms[ 1 ] ).toBe( 250 );
+                expect( row.outcome[ 1 ] ).toBe( "ok" );
+                queryExecute( "DELETE FROM ai_interactions WHERE feature = :f", { f : feature } );
+            } );
+
+        } );
+    }
+
+}

@@ -1,0 +1,164 @@
+/**
+ * AiMiddleware: the single facade every AI feature talks to.
+ *
+ * Per CLAUDE.md this is the ONLY code that touches bx-ai. Feature
+ * modules call complete( feature, prompt, options ) and never reach
+ * past the facade to a provider directly.
+ *
+ * Phase 4a scope (no provider yet):
+ *   - Short-circuit on disabled capability ("disabled" outcome).
+ *   - PII redaction + prompt hashing (so the contract is stable
+ *     before Phase 4b plugs in a real provider).
+ *   - Log every call to ai_interactions through recordInteraction.
+ *   - When enabled but no provider hookup exists, return an
+ *     explicit "not implemented" outcome so callers learn early
+ *     in dev that a provider config is missing.
+ *
+ * Phase 4b replaces the "not implemented" branch with the actual
+ * bx-ai call.
+ *
+ * Returned struct shape:
+ *   {
+ *     outcome    : "ok" | "disabled" | "redacted_only" | "error" | "not_implemented",
+ *     text       : "..."           // empty unless outcome is "ok"
+ *     tokensIn   : 0,
+ *     tokensOut  : 0,
+ *     latencyMs  : 0,
+ *     error      : ""              // populated on "error"
+ *   }
+ */
+class singleton=true {
+
+    property name="wirebox"     inject="wirebox";
+    property name="capability"  inject="AiCapability@ai";
+
+    /**
+     * complete: the one-shot completion entry point.
+     *
+     * Required:
+     *   feature  - short key for this call (e.g., "suggested-reply")
+     *   prompt   - the full text to send the provider
+     * Optional in `options`:
+     *   model           - override the configured model
+     *   organizationId  - subject org for logging
+     *   ticketId        - subject ticket for logging
+     *   contactId       - subject contact for logging
+     *   agentId         - acting agent for logging
+     *   maxTokens       - provider hint
+     *   temperature     - provider hint
+     */
+    public struct function complete(
+        required string feature,
+        required string prompt,
+        struct options = {}
+    ){
+        var startMs = getTickCount();
+
+        if ( !capability.isEnabled() ) {
+            recordInteraction(
+                feature : arguments.feature,
+                outcome : "disabled",
+                options : arguments.options,
+                latency : 0
+            );
+            return baseResult( outcome = "disabled" );
+        }
+
+        var redacted = redactPrompt( arguments.prompt );
+        if ( !len( trim( redacted ) ) ) {
+            recordInteraction(
+                feature : arguments.feature,
+                outcome : "redacted_only",
+                options : arguments.options,
+                latency : getTickCount() - startMs
+            );
+            return baseResult( outcome = "redacted_only" );
+        }
+
+        // Phase 4a: no provider plugged in yet. Log and return
+        // "not_implemented" so callers can detect this in dev.
+        // Phase 4b replaces this block with a real bx-ai call
+        // wrapped in the timeout + token + error capture.
+        var hash    = hash( redacted, "SHA-256" );
+        var latency = getTickCount() - startMs;
+        recordInteraction(
+            feature    : arguments.feature,
+            outcome    : "not_implemented",
+            options    : arguments.options,
+            latency    : latency,
+            promptHash : hash
+        );
+        return baseResult( outcome = "not_implemented" );
+    }
+
+    /**
+     * Redact PII before any payload leaves the system. Phase 4a
+     * masks email addresses; phone numbers and digit runs are TODOs
+     * tracked for the security review pass in Phase 6.
+     *
+     * Public so specs can exercise it without going through a full
+     * complete() call.
+     */
+    public string function redactPrompt( required string raw ){
+        if ( !capability.isPiiRedactionEnabled() ) return arguments.raw;
+        // Email pattern: catches the common forms; deliberately
+        // wider than RFC 5322 so we err on the side of redacting.
+        var out = reReplaceNoCase(
+            arguments.raw,
+            "[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+            "[redacted-email]",
+            "all"
+        );
+        return out;
+    }
+
+    /**
+     * Log one interaction. Public so callers in 4b+ that bypass
+     * complete() (streaming, batch) can still record consistently.
+     */
+    public void function recordInteraction(
+        required string feature,
+        required string outcome,
+        struct options = {},
+        numeric latency = 0,
+        string promptHash = "",
+        numeric tokensIn = 0,
+        numeric tokensOut = 0,
+        string errorMessage = ""
+    ){
+        var row = wirebox.getInstance( "AiInteraction@ai" );
+        row.setId( createObject( "java", "java.util.UUID" ).randomUUID().toString() );
+        row.setFeature( arguments.feature );
+        // provider + model are NOT NULL columns; fall back to empty
+        // string when nothing has been configured so the row still
+        // logs (an unconfigured AI is itself a story to capture).
+        row.setProvider( capability.getProvider() );
+        var modelToLog = arguments.options.model ?: capability.getModel();
+        row.setModel( len( modelToLog ) ? modelToLog : "" );
+        if ( len( arguments.promptHash ) ) row.setPromptHash( arguments.promptHash );
+        row.setTokensIn(  int( arguments.tokensIn ) );
+        row.setTokensOut( int( arguments.tokensOut ) );
+        row.setLatencyMs( int( arguments.latency ) );
+        row.setOutcome( arguments.outcome );
+        if ( len( arguments.errorMessage ) ) row.setErrorMessage( arguments.errorMessage );
+        if ( len( arguments.options.organizationId ?: "" ) ) row.setOrganizationId( arguments.options.organizationId );
+        if ( len( arguments.options.ticketId ?: "" ) )       row.setTicketId( arguments.options.ticketId );
+        if ( len( arguments.options.contactId ?: "" ) )      row.setContactId( arguments.options.contactId );
+        if ( len( arguments.options.agentId ?: "" ) )        row.setAgentId( arguments.options.agentId );
+        row.save();
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function baseResult( required string outcome ){
+        return {
+            "outcome"   : arguments.outcome,
+            "text"      : "",
+            "tokensIn"  : 0,
+            "tokensOut" : 0,
+            "latencyMs" : 0,
+            "error"     : ""
+        };
+    }
+
+}

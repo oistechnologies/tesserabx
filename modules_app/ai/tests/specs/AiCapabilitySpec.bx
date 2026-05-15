@@ -1,0 +1,45 @@
+/**
+ * AiCapabilitySpec: verifies the capability flag default and the
+ * summary the admin UI in Phase 5 will rely on.
+ *
+ * The dev / CI environment has AI_ENABLED=false out of the box, so
+ * the default-off invariant is checked through the real wired
+ * settings.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.capability = getController().getWireBox().getInstance( "AiCapability@ai" );
+    }
+
+    function run(){
+        describe( "AiCapability", function(){
+
+            it( "defaults to disabled when AI_ENABLED is not set to true", function(){
+                expect( variables.capability.isEnabled() ).toBeFalse();
+            } );
+
+            it( "isFeatureEnabled collapses to the global flag in Phase 4a", function(){
+                // Per-feature gating lands in 4c+; until then every
+                // feature key returns the global capability.
+                expect( variables.capability.isFeatureEnabled( "suggested-reply" ) ).toBe( variables.capability.isEnabled() );
+            } );
+
+            it( "exposes a summary that does not leak the API key", function(){
+                var s = variables.capability.summary();
+                expect( s ).toHaveKey( "enabled" );
+                expect( s ).toHaveKey( "provider" );
+                expect( s ).toHaveKey( "model" );
+                expect( s ).toHaveKey( "apiKeyPresent" );
+                // Masked or empty, never the raw secret.
+                if ( s.apiKeyPresent ) {
+                    expect( s.apiKeyMasked ).toMatch( "\.\.\." );
+                }
+            } );
+
+        } );
+    }
+
+}
