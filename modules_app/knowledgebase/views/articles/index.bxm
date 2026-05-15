@@ -1,4 +1,20 @@
 <bx:output>
+<form method="get" action="/kb" class="mb-3">
+    <div class="input-group">
+        <input type="search" class="form-control" name="q" placeholder="Search the knowledge base..." value="#encodeForHTMLAttribute( prc.searchTerm ?: "" )#">
+        <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Search</button>
+        <bx:if len( prc.searchTerm ?: "" )>
+            <a class="btn btn-outline-secondary" href="/kb">Clear</a>
+        </bx:if>
+    </div>
+</form>
+
+<bx:if len( prc.searchTerm ?: "" )>
+    <p class="small text-body-secondary mb-3">
+        #arrayLen( prc.articles )# result<bx:if arrayLen( prc.articles ) neq 1>s</bx:if> for &ldquo;#encodeForHTML( prc.searchTerm )#&rdquo;
+    </p>
+</bx:if>
+
 <div class="row g-3">
     <div class="col-12 col-lg-9">
         <bx:if !arrayLen( prc.articles )>

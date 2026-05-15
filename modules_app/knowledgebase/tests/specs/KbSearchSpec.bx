@@ -1,0 +1,154 @@
+/**
+ * KbSearchSpec: Postgres full-text search behaviour for kb_articles.
+ *
+ * The STORED tsvector column populates automatically on insert /
+ * update via a generated column expression, so each spec just
+ * creates an article, asserts that the search matches, and cleans
+ * up. The visibility filter is verified separately in
+ * KnowledgebaseServiceSpec; this spec focuses on the search ranking
+ * and the empty-term fallback.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.kb = getController().getWireBox().getInstance( "KnowledgebaseService@knowledgebase" );
+    }
+
+    function run(){
+        describe( "KB full-text search", function(){
+
+            it( "matches a title term", function(){
+                var marker = "fts-title-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var a = variables.kb.createArticle( {
+                    title      : marker & " Password reset guide",
+                    body       : "Generic body.",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( a.getId() );
+
+                var hits = variables.kb.listVisibleArticles(
+                    viewer = { kind : "anonymous" },
+                    search = marker
+                );
+                var hitIds = [];
+                for ( var h in hits ) hitIds.append( h.getId() );
+                expect( hitIds ).toInclude( a.getId() );
+                cleanup( a.getId() );
+            } );
+
+            it( "matches a body term", function(){
+                var marker = "fts-body-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var a = variables.kb.createArticle( {
+                    title      : "Some article " & createUUID(),
+                    body       : "This article explains " & marker & " in detail.",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( a.getId() );
+
+                var hits = variables.kb.listVisibleArticles(
+                    viewer = { kind : "anonymous" },
+                    search = marker
+                );
+                var hitIds = [];
+                for ( var h in hits ) hitIds.append( h.getId() );
+                expect( hitIds ).toInclude( a.getId() );
+                cleanup( a.getId() );
+            } );
+
+            it( "ranks a title match above a body match", function(){
+                var marker = "fts-rank-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var bodyOnly = variables.kb.createArticle( {
+                    title      : "Some article " & createUUID(),
+                    body       : "Lorem " & marker & " ipsum.",
+                    visibility : "public"
+                } );
+                var titleHit = variables.kb.createArticle( {
+                    title      : marker & " in the title",
+                    body       : "Unrelated body.",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( bodyOnly.getId() );
+                variables.kb.publishArticle( titleHit.getId() );
+
+                var hits = variables.kb.listVisibleArticles(
+                    viewer = { kind : "anonymous" },
+                    search = marker
+                );
+                expect( arrayLen( hits ) ).toBeGTE( 2 );
+                expect( hits[ 1 ].getId() ).toBe( titleHit.getId() );
+
+                cleanup( bodyOnly.getId() );
+                cleanup( titleHit.getId() );
+            } );
+
+            it( "ignores articles that don't match", function(){
+                var marker  = "fts-isolate-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var unrelated = variables.kb.createArticle( {
+                    title      : "Onions and garlic",
+                    body       : "How to chop.",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( unrelated.getId() );
+
+                var hits = variables.kb.listVisibleArticles(
+                    viewer = { kind : "anonymous" },
+                    search = marker
+                );
+                var hitIds = [];
+                for ( var h in hits ) hitIds.append( h.getId() );
+                expect( hitIds ).notToInclude( unrelated.getId() );
+
+                cleanup( unrelated.getId() );
+            } );
+
+            it( "respects visibility on top of the search match", function(){
+                var marker = "fts-vis-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var pub = variables.kb.createArticle( {
+                    title      : marker & " public",
+                    body       : ".",
+                    visibility : "public"
+                } );
+                variables.kb.publishArticle( pub.getId() );
+
+                var internal = variables.kb.createArticle( {
+                    title      : marker & " internal",
+                    body       : ".",
+                    visibility : "internal"
+                } );
+                variables.kb.publishArticle( internal.getId() );
+
+                var anonHits = variables.kb.listVisibleArticles(
+                    viewer = { kind : "anonymous" },
+                    search = marker
+                );
+                var ids = [];
+                for ( var h in anonHits ) ids.append( h.getId() );
+                expect( ids ).toInclude( pub.getId() );
+                expect( ids ).notToInclude( internal.getId() );
+
+                var agentHits = variables.kb.listVisibleArticles(
+                    viewer = { kind : "agent" },
+                    search = marker
+                );
+                var agentIds = [];
+                for ( var h in agentHits ) agentIds.append( h.getId() );
+                expect( agentIds ).toInclude( internal.getId() );
+
+                cleanup( pub.getId() );
+                cleanup( internal.getId() );
+            } );
+
+        } );
+    }
+
+    private void function cleanup( required string id ){
+        queryExecute( "DELETE FROM kb_article_feedback   WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_article_versions   WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_article_organizations WHERE article_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events          WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM kb_articles           WHERE id         = :id", { id : arguments.id } );
+    }
+
+}

@@ -30,6 +30,7 @@ class {
         param rc.organizationId    = "";
         param rc.assignedToAgentId = "";
         param rc.accountlessOnly   = false;
+        param rc.q                 = "";
 
         prc.pageTitle     = "Tickets";
         prc.statuses      = ticketsService.listStatuses();
@@ -40,6 +41,7 @@ class {
             priority          : rc.priority,
             organizationId    : rc.organizationId,
             assignedToAgentId : rc.assignedToAgentId,
+            search            : rc.q,
             accountlessOnly   : ( rc.accountlessOnly == "true" || rc.accountlessOnly == "1" || rc.accountlessOnly == true ),
             limit             : 200
         );

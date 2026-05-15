@@ -234,8 +234,9 @@ class singleton=true {
      */
     public array function listVisibleArticles(
         required struct viewer,
-        string categoryId = "",
-        string statusFilter = ""
+        string categoryId   = "",
+        string statusFilter = "",
+        string search       = ""
     ){
         var q = wirebox.getInstance( "Article@knowledgebase" );
 
@@ -275,7 +276,24 @@ class singleton=true {
         if ( len( arguments.categoryId ) ) {
             q = q.where( "category_id", arguments.categoryId );
         }
-        return q.orderBy( "title" ).get();
+
+        // Full-text search: Postgres tsquery against the STORED
+        // search_vector column. plainto_tsquery accepts the raw user
+        // input safely (no FTS-operator injection). When no search
+        // term is supplied we order alphabetically; with a search
+        // term we order by relevance rank.
+        if ( len( trim( arguments.search ) ) ) {
+            q = q.whereRaw(
+                "search_vector @@ plainto_tsquery( 'english', ? )",
+                [ trim( arguments.search ) ]
+            ).orderByRaw(
+                "ts_rank_cd( search_vector, plainto_tsquery( 'english', ? ) ) DESC",
+                [ trim( arguments.search ) ]
+            );
+        } else {
+            q = q.orderBy( "title" );
+        }
+        return q.get();
     }
 
     /**

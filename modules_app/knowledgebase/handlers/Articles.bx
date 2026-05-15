@@ -31,10 +31,13 @@ class {
 
     function index( event, rc, prc ){
         param rc.categoryId = "";
+        param rc.q          = "";
         prc.pageTitle  = "Knowledge Base";
+        prc.searchTerm = rc.q;
         prc.articles   = kb.listVisibleArticles(
             viewer     = prc.viewer,
-            categoryId = rc.categoryId
+            categoryId = rc.categoryId,
+            search     = rc.q
         );
         prc.categories = kb.listCategories();
         event.setView( "articles/index" );

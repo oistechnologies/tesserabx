@@ -66,6 +66,7 @@ class singleton=true {
         string priority,
         string organizationId,
         string assignedToAgentId,
+        string search,
         boolean accountlessOnly = false,
         numeric limit = 100,
         numeric offset = 0
@@ -76,7 +77,22 @@ class singleton=true {
         if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) q = q.where( "organization_id", arguments.organizationId );
         if ( structKeyExists( arguments, "assignedToAgentId" ) && len( arguments.assignedToAgentId ?: "" ) ) q = q.where( "assigned_to_agent_id", arguments.assignedToAgentId );
         if ( arguments.accountlessOnly ) q = q.whereNull( "organization_id" );
-        return q.orderBy( "created_at", "desc" ).limit( arguments.limit ).offset( arguments.offset ).get();
+
+        // Postgres full-text search on subject + originating_email.
+        // plainto_tsquery accepts raw user input safely; ts_rank_cd
+        // sorts results by relevance.
+        if ( structKeyExists( arguments, "search" ) && len( trim( arguments.search ?: "" ) ) ) {
+            q = q.whereRaw(
+                "search_vector @@ plainto_tsquery( 'english', ? )",
+                [ trim( arguments.search ) ]
+            ).orderByRaw(
+                "ts_rank_cd( search_vector, plainto_tsquery( 'english', ? ) ) DESC",
+                [ trim( arguments.search ) ]
+            );
+        } else {
+            q = q.orderBy( "created_at", "desc" );
+        }
+        return q.limit( arguments.limit ).offset( arguments.offset ).get();
     }
 
     /**
