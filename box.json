@@ -73,7 +73,7 @@
         "cbq":"modules/cbq/"
     },
     "testbox":{
-        "runner":"http://localhost:${PORT:-8080}/tests/runner.bxm",
+        "runner":"http://localhost:8080/tests/runner.bxm",
         "verbose":false,
         "watchDelay":500,
         "watchPaths":"**.bx"

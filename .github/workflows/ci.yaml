@@ -67,19 +67,50 @@ jobs:
           box migrate install
           box migrate up --force
 
-      - name: Run TestBox specs
+      - name: Start CommandBox server
         env:
+          PORT: 8080
           DB_HOST: 127.0.0.1
           DB_PORT: 5432
           DB_NAME: tesserabx_test
           DB_USER: tesserabx
           DB_PASSWORD: tesserabx
+          DB_SSL: "false"
+          DB_SCHEMA: public
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
           ENVIRONMENT: ci
+          BOX_SERVER_PROFILE: production
           AI_ENABLED: "false"
           CBFS_DEFAULT_PROVIDER: local
+        run: |
+          # console=false keeps `box server start` from blocking on CI.
+          # First start triggers server.json's onServerInitialInstall,
+          # which lays the bx-* server modules into .engine/boxlang/.
+          box server start console=false openBrowser=false
+          # Wait for /health to come up before running specs.
+          # 90 attempts * 2s = up to 3 min. First-run includes a cold
+          # Forgebox pull of the bx-* modules; later runs are fast
+          # because the runner has the artifact cached.
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "App is healthy."
+              break
+            fi
+            if [ "$i" = "90" ]; then
+              echo "App failed to come up. Dumping server log."
+              box server log || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Run TestBox specs
         run: box testbox run reporter=text outputFile=tests/results/testbox-report.txt
+
+      - name: Stop CommandBox server
+        if: always()
+        run: box server stop || true
 
       - name: Upload test report
         if: always()
