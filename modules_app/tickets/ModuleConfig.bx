@@ -23,7 +23,7 @@ class {
     this.modelNamespace     = "tickets";
     this.cfmapping          = "tesserabx.modules.tickets";
     this.autoMapModels      = false;
-    this.dependencies       = [ "contacts", "audit" ];
+    this.dependencies       = [ "contacts", "audit", "sla" ];
 
     function configure(){
         variables.settings = {};

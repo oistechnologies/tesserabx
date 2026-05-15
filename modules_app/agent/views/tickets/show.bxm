@@ -119,28 +119,127 @@
     <div class="col-12 col-lg-4">
 
         <div class="card mb-3">
-            <div class="card-header">Status</div>
-            <div class="card-body">
-                <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/status" class="d-flex gap-2">
-                    <select class="form-select" name="status">
-                        <bx:loop array="#prc.statuses#" item="local.s">
-                            <option value="#encodeForHTMLAttribute( local.s )#"<bx:if local.t.getStatus() eq local.s> selected</bx:if>>#encodeForHTML( local.s )#</option>
-                        </bx:loop>
-                    </select>
-                    <button class="btn btn-outline-primary" type="submit">Set</button>
-                </form>
+            <div class="card-header p-0">
+                <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                   data-bs-toggle="collapse"
+                   href="##status-card"
+                   role="button"
+                   aria-expanded="false"
+                   aria-controls="status-card">
+                    <span>Status <span class="badge text-bg-primary ms-2">#encodeForHTML( local.t.getStatus() )#</span></span>
+                    <i class="bi bi-chevron-down"></i>
+                </a>
+            </div>
+            <div id="status-card" class="collapse">
+                <div class="card-body">
+                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/status" class="d-flex gap-2">
+                        <select class="form-select" name="status">
+                            <bx:loop array="#prc.statuses#" item="local.s">
+                                <option value="#encodeForHTMLAttribute( local.s )#"<bx:if local.t.getStatus() eq local.s> selected</bx:if>>#encodeForHTML( local.s )#</option>
+                            </bx:loop>
+                        </select>
+                        <button class="btn btn-outline-primary" type="submit">Set</button>
+                    </form>
+                </div>
             </div>
         </div>
 
-        <div class="card mb-3">
-            <div class="card-header">Assignment</div>
-            <div class="card-body">
-                <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/assign">
-                    <input type="text" class="form-control mb-2" name="agentId" placeholder="Agent UUID (leave blank to unassign)" value="#encodeForHTMLAttribute( local.t.getAssignedToAgentId() ?: "" )#">
-                    <div class="d-flex justify-content-end">
-                        <button class="btn btn-outline-primary" type="submit">Save</button>
+        <bx:if prc.sla.hasSla>
+            <bx:set local.sla = prc.sla >
+            <div class="card mb-3">
+                <div class="card-header p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                       data-bs-toggle="collapse"
+                       href="##sla-card"
+                       role="button"
+                       aria-expanded="false"
+                       aria-controls="sla-card">
+                        <span>
+                            SLA
+                            <bx:switch expression="#local.sla.status#">
+                                <bx:case value="breached"><span class="badge text-bg-danger ms-2">Breached</span></bx:case>
+                                <bx:case value="approaching"><span class="badge text-bg-warning ms-2">Approaching</span></bx:case>
+                                <bx:case value="paused"><span class="badge text-bg-info ms-2">Paused</span></bx:case>
+                                <bx:case value="met"><span class="badge text-bg-success ms-2">Met</span></bx:case>
+                                <bx:case value="ok"><span class="badge text-bg-secondary ms-2">On track</span></bx:case>
+                                <bx:defaultcase><span class="badge text-bg-light text-black ms-2">No SLA</span></bx:defaultcase>
+                            </bx:switch>
+                        </span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="sla-card" class="collapse">
+                    <div class="card-body small">
+                        <bx:if !isNull( prc.slaPolicy )>
+                            <div class="text-body-secondary mb-2">Policy: #encodeForHTML( prc.slaPolicy.getName() )#</div>
+                        </bx:if>
+                        <dl class="row mb-0">
+                            <dt class="col-5">First response</dt>
+                            <dd class="col-7">
+                                <bx:if local.sla.firstResponse eq "met">
+                                    <span class="text-success">Met</span> #encodeForHTML( dateTimeFormat( local.sla.firstResponseAt, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:elseif local.sla.firstResponse eq "breached">
+                                    <span class="text-danger">Breached</span> at #encodeForHTML( dateTimeFormat( local.sla.firstResponseDue, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:elseif local.sla.firstResponse eq "approaching">
+                                    <span class="text-warning">Due</span> #encodeForHTML( dateTimeFormat( local.sla.firstResponseDue, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:elseif local.sla.firstResponse eq "ok">
+                                    Due #encodeForHTML( dateTimeFormat( local.sla.firstResponseDue, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:else>
+                                    -
+                                </bx:if>
+                            </dd>
+                            <dt class="col-5">Resolution</dt>
+                            <dd class="col-7">
+                                <bx:if local.sla.resolution eq "met">
+                                    <span class="text-success">Met</span>
+                                <bx:elseif local.sla.resolution eq "breached">
+                                    <span class="text-danger">Breached</span> at #encodeForHTML( dateTimeFormat( local.sla.resolutionDue, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:elseif local.sla.resolution eq "approaching">
+                                    <span class="text-warning">Due</span> #encodeForHTML( dateTimeFormat( local.sla.resolutionDue, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:elseif local.sla.resolution eq "ok">
+                                    Due #encodeForHTML( dateTimeFormat( local.sla.resolutionDue, "yyyy-mm-dd HH:nn" ) )#
+                                <bx:else>
+                                    -
+                                </bx:if>
+                            </dd>
+                            <bx:if local.sla.paused>
+                                <dt class="col-5">Paused since</dt>
+                                <dd class="col-7">#encodeForHTML( dateTimeFormat( local.t.getSlaPausedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+                            </bx:if>
+                        </dl>
                     </div>
-                </form>
+                </div>
+            </div>
+        </bx:if>
+
+        <div class="card mb-3">
+            <div class="card-header p-0">
+                <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                   data-bs-toggle="collapse"
+                   href="##assignment-card"
+                   role="button"
+                   aria-expanded="false"
+                   aria-controls="assignment-card">
+                    <span>
+                        Assignment
+                        <bx:if len( local.t.getAssignedToAgentId() ?: "" )>
+                            <span class="badge text-bg-secondary ms-2">Assigned</span>
+                        <bx:else>
+                            <span class="badge text-bg-light text-black ms-2">Unassigned</span>
+                        </bx:if>
+                    </span>
+                    <i class="bi bi-chevron-down"></i>
+                </a>
+            </div>
+            <div id="assignment-card" class="collapse">
+                <div class="card-body">
+                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/assign">
+                        <input type="text" class="form-control mb-2" name="agentId" placeholder="Agent UUID (leave blank to unassign)" value="#encodeForHTMLAttribute( local.t.getAssignedToAgentId() ?: "" )#">
+                        <div class="d-flex justify-content-end">
+                            <button class="btn btn-outline-primary" type="submit">Save</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
 

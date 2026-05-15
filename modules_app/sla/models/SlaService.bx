@@ -244,7 +244,10 @@ class singleton=true {
         var durationClass = createObject( "java", "java.time.Duration" );
 
         var zone = zoneIdClass.of( arguments.calendar.getTimezone() ?: "UTC" );
-        var zdt  = arguments.startInstant.atZone( zone );
+        // Coerce strings / CFML dates / java.sql.Timestamps from
+        // ticket reloads into a java.time.Instant before zone-shifting.
+        var startAsInstant = toInstant( arguments.startInstant );
+        var zdt  = startAsInstant.atZone( zone );
         var remaining = arguments.minutes;
 
         // Safety bound: refuse to scan more than a year of calendar
@@ -289,6 +292,73 @@ class singleton=true {
     }
 
     /**
+     * Count business minutes that fall between two instants on the
+     * given calendar. Used by the ticket pause/resume math to figure
+     * out how far to shift a deadline forward after an unpause.
+     *
+     * Returns a non-negative long. If `to` is at or before `from`,
+     * returns 0.
+     */
+    public any function businessMinutesBetween(
+        required any fromInstant,
+        required any untilInstant,
+        required any calendar
+    ){
+        var from = toInstant( arguments.fromInstant );
+        var to   = toInstant( arguments.untilInstant );
+        if ( !to.isAfter( from ) ) return 0;
+
+        var weeklyHours = getWeeklyHoursFor( arguments.calendar );
+        var holidayList = getHolidaysFor( arguments.calendar );
+        var holidays = {};
+        for ( var h in holidayList ) holidays[ h ] = true;
+
+        var zoneIdClass   = createObject( "java", "java.time.ZoneId" );
+        var localTimeCls  = createObject( "java", "java.time.LocalTime" );
+        var durationClass = createObject( "java", "java.time.Duration" );
+
+        var zone = zoneIdClass.of( arguments.calendar.getTimezone() ?: "UTC" );
+        var zdt  = from.atZone( zone );
+        var endZ = to.atZone( zone );
+
+        var total = 0;
+        var dayBudget = 366;
+
+        while ( zdt.isBefore( endZ ) ) {
+            if ( --dayBudget < 0 ) {
+                throw(
+                    type    = "SlaCountUnreachable",
+                    message = "Could not span the requested window within a year on calendar " & ( arguments.calendar.getName() ?: "(unnamed)" )
+                );
+            }
+            var dayKey  = left( lCase( zdt.getDayOfWeek().toString() ), 3 );
+            var dateKey = zdt.toLocalDate().toString();
+            var windows = ( structKeyExists( holidays, dateKey ) || !structKeyExists( weeklyHours, dayKey ) )
+                          ? []
+                          : weeklyHours[ dayKey ];
+
+            for ( var w in windows ) {
+                var winStart = zdt.with( localTimeCls.parse( w.start ) );
+                var winEnd   = zdt.with( localTimeCls.parse( w.end   ) );
+                if ( zdt.isAfter( winEnd ) || zdt.isEqual( winEnd ) ) continue;
+                if ( zdt.isBefore( winStart ) ) zdt = winStart;
+
+                var capEnd = winEnd.isBefore( endZ ) ? winEnd : endZ;
+                if ( zdt.isBefore( capEnd ) ) {
+                    total += durationClass.between( zdt, capEnd ).toMinutes();
+                    zdt = capEnd;
+                }
+                if ( !zdt.isBefore( endZ ) ) return total;
+            }
+
+            zdt = zdt.toLocalDate()
+                     .plusDays( javaCast( "long", 1 ) )
+                     .atStartOfDay( zone );
+        }
+        return total;
+    }
+
+    /**
      * Convert a UTC-ish input (string, CFML date, java.time.Instant,
      * java.util.Date) into a java.time.Instant.
      */
@@ -317,6 +387,86 @@ class singleton=true {
         }
         throw( type = "SlaToInstant.UnsupportedType",
                message = "Cannot convert value to Instant: " & arguments.when.toString() );
+    }
+
+    /**
+     * Summarize a ticket's SLA state for view rendering. Pure read; no
+     * persistence side effects. Returns a struct the agent UI consumes
+     * for badges and the SLA card.
+     *
+     * Buckets:
+     *   firstResponse: "none" | "met" | "breached" | "approaching" | "ok"
+     *   resolution:    "none" | "met" | "breached" | "approaching" | "ok"
+     * Overall `status` collapses the two:
+     *   "none"   no SLA attached
+     *   "paused" sla_paused_at is set
+     *   "met"    both deadlines met or resolved/closed and FR met
+     *   "breached" / "approaching" / "ok" otherwise (worst of the two)
+     */
+    public struct function slaSummaryForTicket( required any ticket, numeric approachingMinutes = 30 ){
+        var t = arguments.ticket;
+        var out = {
+            "hasSla"           : false,
+            "paused"           : false,
+            "firstResponse"    : "none",
+            "resolution"       : "none",
+            "status"           : "none",
+            "firstResponseAt"  : "",
+            "firstResponseDue" : "",
+            "resolutionDue"    : "",
+            "minutesToFirst"   : javaCast( "null", "" ),
+            "minutesToRes"     : javaCast( "null", "" )
+        };
+        var policyId = t.getSlaPolicyId() ?: "";
+        if ( !len( policyId ) ) return out;
+        out.hasSla = true;
+        out.firstResponseAt  = t.getFirstResponseAt()    ?: "";
+        out.firstResponseDue = t.getFirstResponseDueAt() ?: "";
+        out.resolutionDue    = t.getResolutionDueAt()    ?: "";
+
+        var pausedAt = t.getSlaPausedAt() ?: "";
+        if ( len( pausedAt ) ) {
+            out.paused = true;
+            out.status = "paused";
+            return out;
+        }
+
+        var ticketStatus = t.getStatus();
+        var ticketClosed = ( ticketStatus == "resolved" || ticketStatus == "closed" );
+        var nowInstant   = createObject( "java", "java.time.Instant" ).now();
+
+        // First response
+        if ( len( out.firstResponseAt ) ) {
+            out.firstResponse = "met";
+        } else if ( len( out.firstResponseDue ) ) {
+            var fr = toInstant( out.firstResponseDue );
+            var diffMin = createObject( "java", "java.time.Duration" ).between( nowInstant, fr ).toMinutes();
+            out.minutesToFirst = diffMin;
+            out.firstResponse = diffMin < 0
+                ? "breached"
+                : ( diffMin <= int( arguments.approachingMinutes ) ? "approaching" : "ok" );
+        }
+
+        // Resolution
+        if ( ticketClosed ) {
+            out.resolution = "met";
+        } else if ( len( out.resolutionDue ) ) {
+            var res = toInstant( out.resolutionDue );
+            var diffMinR = createObject( "java", "java.time.Duration" ).between( nowInstant, res ).toMinutes();
+            out.minutesToRes = diffMinR;
+            out.resolution = diffMinR < 0
+                ? "breached"
+                : ( diffMinR <= int( arguments.approachingMinutes ) ? "approaching" : "ok" );
+        }
+
+        // Roll-up: worst case across the two facets.
+        var ranking = { "breached" : 4, "approaching" : 3, "ok" : 2, "met" : 1, "none" : 0 };
+        var fScore = ranking[ out.firstResponse ];
+        var rScore = ranking[ out.resolution    ];
+        var top    = fScore >= rScore ? out.firstResponse : out.resolution;
+        if ( top == "none" && ( out.firstResponse == "met" || out.resolution == "met" ) ) top = "met";
+        out.status = top;
+        return out;
     }
 
     /**

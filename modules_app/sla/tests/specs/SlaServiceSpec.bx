@@ -81,10 +81,13 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "falls back to a policy with no scoping (catch-all) when nothing better matches", function(){
+                // High precedence so this catch-all beats any pre-existing
+                // default catch-all in the dev DB (the seeder installs one).
                 var catchAll = variables.sla.createPolicy( {
                     name                  : "spec-catchall-" & createUUID(),
                     firstResponseMinutes  : 480,
-                    resolutionMinutes     : 2880
+                    resolutionMinutes     : 2880,
+                    precedence            : 999
                 } );
 
                 var ticket = stubTicket( priority = "urgent", tier = "Bronze" );

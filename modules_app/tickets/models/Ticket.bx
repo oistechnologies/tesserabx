@@ -32,6 +32,17 @@ class
     property name="createdAt"           column="created_at"    sqltype="timestamp";
     property name="updatedAt"           column="updated_at"    sqltype="timestamp";
 
+    // SLA tracking (Phase 3b). The service stamps sla_policy_id +
+    // first_response_due_at + resolution_due_at on create and shifts
+    // the due_at columns when the ticket pauses and resumes. The two
+    // due_at instants always reflect the most recent unpaused
+    // calculation.
+    property name="slaPolicyId"         column="sla_policy_id";
+    property name="firstResponseDueAt"  column="first_response_due_at" sqltype="timestamp";
+    property name="resolutionDueAt"     column="resolution_due_at"     sqltype="timestamp";
+    property name="firstResponseAt"     column="first_response_at"     sqltype="timestamp";
+    property name="slaPausedAt"         column="sla_paused_at"         sqltype="timestamp";
+
     function applyGlobalScopes( builder ){
         variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
         return this;

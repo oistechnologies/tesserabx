@@ -15,6 +15,7 @@ class {
     property name="ticketsService"  inject="TicketsService@tickets";
     property name="contactsService" inject="ContactsService@contacts";
     property name="channelsService" inject="ChannelsService@channels";
+    property name="slaService"      inject="SlaService@sla";
     property name="messagebox"      inject="messagebox@cbmessagebox";
     property name="auth"            inject="AuthenticationService@cbauth";
 
@@ -48,6 +49,10 @@ class {
         prc.orgNamesById = {};
         for ( var o in prc.organizations ) {
             prc.orgNamesById[ o.getId() ] = o.getName();
+        }
+        prc.slaByTicketId = {};
+        for ( var tk in prc.tickets ) {
+            prc.slaByTicketId[ tk.getId() ] = slaService.slaSummaryForTicket( tk );
         }
         prc.filters = rc;
         event.setView( "tickets/index" );
@@ -345,6 +350,11 @@ class {
         arguments.prc.isSenderBlocked  = len( sender )
             ? channelsService.isBlocked( sender )
             : false;
+
+        arguments.prc.sla = slaService.slaSummaryForTicket( arguments.ticket );
+        arguments.prc.slaPolicy = len( arguments.ticket.getSlaPolicyId() ?: "" )
+            ? slaService.getPolicyById( arguments.ticket.getSlaPolicyId() )
+            : javaCast( "null", "" );
     }
 
     private string function currentAgentId(){

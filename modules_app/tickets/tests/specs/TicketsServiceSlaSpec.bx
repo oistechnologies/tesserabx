@@ -1,0 +1,316 @@
+/**
+ * TicketsServiceSlaSpec: ticket-side SLA behaviour.
+ *
+ * Covers:
+ *   - matched policy + deadlines stamped on create (contact-backed
+ *     and accountless)
+ *   - first agent public reply captures first_response_at, internal
+ *     notes do not
+ *   - status transition into pending/on-hold stamps sla_paused_at,
+ *     transition out shifts the deadlines forward by the pause's
+ *     business-minutes and clears sla_paused_at
+ *   - findBreachedTickets / findApproachingBreachTickets read the
+ *     right rows for the scheduler in Phase 3e
+ *
+ * Each spec creates its own catch-all SlaPolicy with unique name and
+ * is_default=false so concurrent specs do not stomp each other. The
+ * suite leaves a 24/7 calendar in place for the entire run so pause /
+ * resume math is deterministic regardless of when the spec runs.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.tickets  = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.sla      = getController().getWireBox().getInstance( "SlaService@sla" );
+
+        // A 24/7 calendar makes business-minute math trivial: real
+        // elapsed minutes equal business minutes. Specs that need a
+        // narrower window create their own calendars inline.
+        variables.calendar = variables.sla.createCalendar( {
+            name        : "tickets-sla-spec-" & createUUID(),
+            timezone    : "UTC",
+            weeklyHours : {
+                "mon" : [ { "start" : "00:00", "end" : "23:59" } ],
+                "tue" : [ { "start" : "00:00", "end" : "23:59" } ],
+                "wed" : [ { "start" : "00:00", "end" : "23:59" } ],
+                "thu" : [ { "start" : "00:00", "end" : "23:59" } ],
+                "fri" : [ { "start" : "00:00", "end" : "23:59" } ],
+                "sat" : [ { "start" : "00:00", "end" : "23:59" } ],
+                "sun" : [ { "start" : "00:00", "end" : "23:59" } ]
+            },
+            holidays    : []
+        } );
+    }
+
+    function afterAll(){
+        queryExecute( "DELETE FROM sla_policies WHERE business_hours_calendar_id = :id", { id : variables.calendar.getId() } );
+        queryExecute( "DELETE FROM business_hours_calendars WHERE id = :id", { id : variables.calendar.getId() } );
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "TicketsService SLA lifecycle", function(){
+
+            it( "stamps the matched policy and both deadlines on a contact-backed ticket", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+                var t      = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "SLA stamp"
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getSlaPolicyId() ).toBe( policy.getId() );
+                expect( refreshed.getFirstResponseDueAt() ).notToBeNull();
+                expect( refreshed.getResolutionDueAt() ).notToBeNull();
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "stamps the policy on an accountless ticket too", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var t = variables.tickets.createAccountlessTicket( {
+                    originatingEmail : "sla-acct-" & createUUID() & "@example.com",
+                    subject          : "Accountless SLA"
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getSlaPolicyId() ).toBe( policy.getId() );
+                cleanupTicket( t.getId() );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "records first_response_at on the first agent public reply", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+                var t      = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "FR test"
+                } );
+                variables.tickets.addMessage( {
+                    ticketId      : t.getId(),
+                    body          : "Working on it.",
+                    isInternal    : false,
+                    authorAgentId : f.agentId
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( isNull( refreshed.getFirstResponseAt() ) ).toBeFalse();
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "does NOT record first_response_at on an internal note", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+                var t      = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "FR internal"
+                } );
+                variables.tickets.addMessage( {
+                    ticketId      : t.getId(),
+                    body          : "Looking into this internally.",
+                    isInternal    : true,
+                    authorAgentId : f.agentId
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                // null/empty means not yet stamped, which is what we want
+                expect( len( refreshed.getFirstResponseAt() ?: "" ) ).toBe( 0 );
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "stamps sla_paused_at on transition into pending and clears it on resume", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+                var t      = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "pause/resume"
+                } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "pending" } );
+
+                var paused = variables.tickets.getTicket( t.getId() );
+                expect( isNull( paused.getSlaPausedAt() ) ).toBeFalse();
+
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+                var resumed = variables.tickets.getTicket( t.getId() );
+                expect( len( resumed.getSlaPausedAt() ?: "" ) ).toBe( 0 );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "shifts both due_at instants forward on resume by the paused business-minutes", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+                var t      = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "pause shift"
+                } );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+
+                var before = variables.tickets.getTicket( t.getId() );
+                var frBefore  = before.getFirstResponseDueAt();
+                var resBefore = before.getResolutionDueAt();
+
+                // Backdate the paused_at column to ten minutes ago so the
+                // resume math has a non-trivial delta without sleeping.
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "pending" } );
+                queryExecute(
+                    "UPDATE tickets SET sla_paused_at = NOW() - INTERVAL '10 minutes' WHERE id = :id",
+                    { id : t.getId() }
+                );
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+
+                var after = variables.tickets.getTicket( t.getId() );
+                var frBeforeInstant  = variables.sla.toInstant( frBefore );
+                var frAfterInstant   = variables.sla.toInstant( after.getFirstResponseDueAt() );
+                var resBeforeInstant = variables.sla.toInstant( resBefore );
+                var resAfterInstant  = variables.sla.toInstant( after.getResolutionDueAt() );
+
+                // Allow +/- 1 minute slack so the spec is robust to math
+                // happening across a clock-tick boundary.
+                var frShift  = createObject( "java", "java.time.Duration" ).between( frBeforeInstant,  frAfterInstant  ).toMinutes();
+                var resShift = createObject( "java", "java.time.Duration" ).between( resBeforeInstant, resAfterInstant ).toMinutes();
+                expect( frShift ).toBeBetween( 9, 11 );
+                expect( resShift ).toBeBetween( 9, 11 );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "findBreachedTickets includes overdue, excludes paused / closed", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+
+                var overdue = variables.tickets.createTicket( { requesterContactId : f.contact.getId(), subject : "overdue" } );
+                queryExecute(
+                    "UPDATE tickets SET first_response_due_at = NOW() - INTERVAL '1 hour' WHERE id = :id",
+                    { id : overdue.getId() }
+                );
+
+                var paused = variables.tickets.createTicket( { requesterContactId : f.contact.getId(), subject : "paused" } );
+                queryExecute(
+                    "UPDATE tickets SET first_response_due_at = NOW() - INTERVAL '1 hour',
+                                         sla_paused_at = NOW() - INTERVAL '30 minutes'
+                     WHERE id = :id",
+                    { id : paused.getId() }
+                );
+
+                var closed = variables.tickets.createTicket( { requesterContactId : f.contact.getId(), subject : "closed" } );
+                queryExecute(
+                    "UPDATE tickets SET first_response_due_at = NOW() - INTERVAL '1 hour',
+                                         status = 'closed', closed_at = NOW()
+                     WHERE id = :id",
+                    { id : closed.getId() }
+                );
+
+                var breached = variables.tickets.findBreachedTickets();
+                var breachedIds = [];
+                for ( var b in breached ) breachedIds.append( b.getId() );
+
+                expect( breachedIds ).toInclude( overdue.getId() );
+                expect( breachedIds ).notToInclude( paused.getId() );
+                expect( breachedIds ).notToInclude( closed.getId() );
+
+                cleanupTicket( overdue.getId() );
+                cleanupTicket( paused.getId() );
+                cleanupTicket( closed.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+            it( "findApproachingBreachTickets matches tickets whose deadline is within the window", function(){
+                var policy = makePolicy( frMinutes = 60, resMinutes = 480 );
+                var f      = makeFixture();
+
+                var soon = variables.tickets.createTicket( { requesterContactId : f.contact.getId(), subject : "soon" } );
+                queryExecute(
+                    "UPDATE tickets SET first_response_due_at = NOW() + INTERVAL '10 minutes' WHERE id = :id",
+                    { id : soon.getId() }
+                );
+
+                var farOut = variables.tickets.createTicket( { requesterContactId : f.contact.getId(), subject : "far" } );
+                queryExecute(
+                    "UPDATE tickets SET first_response_due_at = NOW() + INTERVAL '6 hours' WHERE id = :id",
+                    { id : farOut.getId() }
+                );
+
+                var approaching = variables.tickets.findApproachingBreachTickets( 30 );
+                var ids = [];
+                for ( var a in approaching ) ids.append( a.getId() );
+
+                expect( ids ).toInclude( soon.getId() );
+                expect( ids ).notToInclude( farOut.getId() );
+
+                cleanupTicket( soon.getId() );
+                cleanupTicket( farOut.getId() );
+                cleanupFixture( f );
+                cleanupPolicy( policy.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "SLA Spec Org " & createUUID(),
+            slug : "sla-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "sla-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var agentId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :hash, false, true )",
+            {
+                id    : agentId,
+                email : "sla-spec-agent-" & createUUID() & "@example.com",
+                hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
+        return { org : org, contact : contact, agentId : agentId };
+    }
+
+    private any function makePolicy( numeric frMinutes = 60, numeric resMinutes = 480 ){
+        return variables.sla.createPolicy( {
+            name                    : "sla-spec-policy-" & createUUID(),
+            firstResponseMinutes    : arguments.frMinutes,
+            resolutionMinutes       : arguments.resMinutes,
+            businessHoursCalendarId : variables.calendar.getId(),
+            precedence              : 999
+        } );
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.fixture.agentId } );
+    }
+
+    private void function cleanupPolicy( required string id ){
+        queryExecute( "DELETE FROM sla_policies WHERE id = :id", { id : arguments.id } );
+    }
+
+}

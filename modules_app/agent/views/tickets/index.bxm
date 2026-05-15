@@ -58,14 +58,16 @@
                     <th>Organization</th>
                     <th>Status</th>
                     <th>Priority</th>
+                    <th>SLA</th>
                     <th>Updated</th>
                 </tr>
             </thead>
             <tbody>
                 <bx:if !arrayLen( prc.tickets )>
-                    <tr><td colspan="6" class="text-center text-body-secondary py-4">No tickets match.</td></tr>
+                    <tr><td colspan="7" class="text-center text-body-secondary py-4">No tickets match.</td></tr>
                 </bx:if>
                 <bx:loop array="#prc.tickets#" item="t">
+                    <bx:set sla = prc.slaByTicketId[ t.getId() ] ?: { status : "none" } >
                     <tr>
                         <td class="text-body-secondary">##<a href="/agent/tickets/#encodeForURL( t.getId() )#" class="link-secondary">#t.getTicketNumber()#</a></td>
                         <td><a href="/agent/tickets/#encodeForURL( t.getId() )#">#encodeForHTML( t.getSubject() )#</a></td>
@@ -78,6 +80,16 @@
                         </td>
                         <td><span class="badge text-bg-secondary">#encodeForHTML( t.getStatus() )#</span></td>
                         <td>#encodeForHTML( t.getPriority() )#</td>
+                        <td>
+                            <bx:switch expression="#sla.status#">
+                                <bx:case value="breached"><span class="badge text-bg-danger">Breached</span></bx:case>
+                                <bx:case value="approaching"><span class="badge text-bg-warning">Approaching</span></bx:case>
+                                <bx:case value="paused"><span class="badge text-bg-info">Paused</span></bx:case>
+                                <bx:case value="met"><span class="badge text-bg-success">Met</span></bx:case>
+                                <bx:case value="ok"><span class="badge text-bg-secondary">On track</span></bx:case>
+                                <bx:defaultcase><span class="text-body-secondary">-</span></bx:defaultcase>
+                            </bx:switch>
+                        </td>
                         <td><small>#encodeForHTML( dateTimeFormat( t.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#</small></td>
                     </tr>
                 </bx:loop>

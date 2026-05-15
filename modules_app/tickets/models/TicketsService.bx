@@ -15,8 +15,14 @@ class singleton=true {
     property name="wirebox"            inject="wirebox";
     property name="contactsService"    inject="ContactsService@contacts";
     property name="auditService"       inject="AuditService@audit";
+    property name="slaService"         inject="SlaService@sla";
     property name="cbfs"               inject="DiskService@cbfs";
     property name="interceptorService" inject="coldbox:interceptorService";
+
+    // Statuses that pause the SLA clock. A transition into one of these
+    // stamps sla_paused_at; a transition out shifts the due_at columns
+    // forward by the business-minutes that elapsed during the pause.
+    variables.PAUSED_STATUSES = [ "pending", "on-hold" ];
 
     // ---------- Status workflow ----------
 
@@ -174,6 +180,7 @@ class singleton=true {
         applyCommonTicketFields( t, arguments.data );
         t.save();
         t = getTicket( t.getId() );
+        applyInitialSla( t );
 
         recordTicketEvent(
             ticketId  : t.getId(),
@@ -211,6 +218,7 @@ class singleton=true {
         applyCommonTicketFields( t, arguments.data );
         t.save();
         t = getTicket( t.getId() );
+        applyInitialSla( t );
 
         recordTicketEvent(
             ticketId  : t.getId(),
@@ -255,6 +263,7 @@ class singleton=true {
         if ( len( arguments.data.messageId ?: "" ) ) m.setMessageId( arguments.data.messageId );
         m.save();
 
+        recordFirstResponseIfPending( t, m );
         touchTicket( t );
 
         recordTicketEvent(
@@ -302,6 +311,7 @@ class singleton=true {
             t.clearAttribute( name = "closedAt", setToNull = true );
             t.clearAttribute( name = "resolvedAt", setToNull = true );
         }
+        applySlaStatusTransition( t, from, to );
         t.save();
         touchTicket( t );
 
@@ -576,6 +586,149 @@ class singleton=true {
 
     private string function newId(){
         return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+    // ---------- SLA helpers ----------
+
+    /**
+     * Stamp the matched policy and the initial first-response /
+     * resolution due_at instants on a freshly-saved ticket. A no-op
+     * when no policy matches; the rest of the lifecycle then runs
+     * unchanged and the ticket simply has no SLA.
+     */
+    private void function applyInitialSla( required any ticket ){
+        var policy = slaService.matchPolicyForTicket( arguments.ticket );
+        if ( isNull( policy ) ) return;
+
+        var fr  = slaService.computeFirstResponseDeadline( arguments.ticket, policy );
+        var res = slaService.computeResolutionDeadline(    arguments.ticket, policy );
+
+        arguments.ticket.setSlaPolicyId( policy.getId() );
+        arguments.ticket.setFirstResponseDueAt( slaService.formatInstantUtc( fr ) );
+        arguments.ticket.setResolutionDueAt(    slaService.formatInstantUtc( res ) );
+        arguments.ticket.save();
+    }
+
+    /**
+     * Capture the first agent-authored, non-internal reply as the
+     * first-response moment. Idempotent: once set, never overwritten.
+     */
+    private void function recordFirstResponseIfPending( required any ticket, required any message ){
+        if ( !len( arguments.ticket.getSlaPolicyId() ?: "" ) ) return;
+        if ( !isNull( arguments.ticket.getFirstResponseAt() ) && len( arguments.ticket.getFirstResponseAt() ?: "" ) ) return;
+        if ( arguments.message.getIsInternal() ?: false ) return;
+        if ( !len( arguments.message.getAuthorAgentId() ?: "" ) ) return;
+        arguments.ticket.setFirstResponseAt( now() );
+        // touchTicket() in the caller persists; we set the column here.
+    }
+
+    /**
+     * Pause / resume math on status change.
+     *   - Active -> paused: stamp sla_paused_at = now().
+     *   - Paused -> active: shift both due_at columns forward by the
+     *     business-minutes that elapsed during the pause, clear
+     *     sla_paused_at.
+     *   - Paused -> paused / Active -> active: no-op.
+     */
+    private void function applySlaStatusTransition( required any ticket, required string from, required string to ){
+        if ( !len( arguments.ticket.getSlaPolicyId() ?: "" ) ) return;
+        var wasPaused = arrayFindNoCase( variables.PAUSED_STATUSES, arguments.from ) > 0;
+        var isPaused  = arrayFindNoCase( variables.PAUSED_STATUSES, arguments.to   ) > 0;
+
+        if ( !wasPaused && isPaused ) {
+            arguments.ticket.setSlaPausedAt( now() );
+            return;
+        }
+        if ( wasPaused && !isPaused ) {
+            var pausedAt = arguments.ticket.getSlaPausedAt();
+            if ( isNull( pausedAt ) || !len( pausedAt ?: "" ) ) return;
+            var policy   = slaService.getPolicyById( arguments.ticket.getSlaPolicyId() );
+            if ( isNull( policy ) ) {
+                arguments.ticket.clearAttribute( name = "sla_paused_at", setToNull = true );
+                return;
+            }
+            var calendar = slaService.getDefaultCalendar();
+            var policyCalId = policy.getBusinessHoursCalendarId() ?: "";
+            if ( len( policyCalId ) ) {
+                var maybe = slaService.getCalendarById( policyCalId );
+                if ( !isNull( maybe ) ) calendar = maybe;
+            }
+            if ( isNull( calendar ) ) {
+                arguments.ticket.clearAttribute( name = "sla_paused_at", setToNull = true );
+                return;
+            }
+
+            var pausedMins = slaService.businessMinutesBetween( pausedAt, now(), calendar );
+            if ( pausedMins > 0 ) {
+                var frDue = arguments.ticket.getFirstResponseDueAt();
+                if ( !isNull( frDue ) && len( frDue ?: "" ) ) {
+                    var newFr = slaService.addBusinessMinutes( frDue, pausedMins, calendar );
+                    arguments.ticket.setFirstResponseDueAt( slaService.formatInstantUtc( newFr ) );
+                }
+                var resDue = arguments.ticket.getResolutionDueAt();
+                if ( !isNull( resDue ) && len( resDue ?: "" ) ) {
+                    var newRes = slaService.addBusinessMinutes( resDue, pausedMins, calendar );
+                    arguments.ticket.setResolutionDueAt( slaService.formatInstantUtc( newRes ) );
+                }
+            }
+            arguments.ticket.clearAttribute( name = "sla_paused_at", setToNull = true );
+        }
+    }
+
+    // ---------- SLA reads (scheduler / UI) ----------
+
+    /**
+     * Tickets whose first-response deadline has passed without a first
+     * response, or whose resolution deadline has passed without the
+     * ticket entering resolved/closed. Excludes paused tickets (their
+     * deadlines are conceptually frozen).
+     */
+    public array function findBreachedTickets(){
+        var q = wirebox.getInstance( "Ticket@tickets" )
+            .withoutGlobalScope()
+            .whereNotIn( "status", [ "resolved", "closed" ] )
+            .whereNull( "sla_paused_at" )
+            .where( function( w ){
+                w.where( function( w2 ){
+                    w2.whereNull( "first_response_at" )
+                      .whereNotNull( "first_response_due_at" )
+                      .whereRaw( "first_response_due_at < NOW()" );
+                } ).orWhere( function( w2 ){
+                    w2.whereNotNull( "resolution_due_at" )
+                      .whereRaw( "resolution_due_at < NOW()" );
+                } );
+            } );
+        return q.get();
+    }
+
+    /**
+     * Tickets where the first-response or resolution deadline is
+     * within `windowMinutes` from now but has not yet passed. Used by
+     * the Phase 3e scheduler to emit warnings.
+     */
+    public array function findApproachingBreachTickets( required numeric windowMinutes ){
+        // Bake the interval into a local SQL fragment up front. qb's
+        // nested closures don't inherit the outer `arguments` scope, so
+        // we can't reach `arguments.windowMinutes` from inside the
+        // where-builder.
+        var interval = "INTERVAL '" & int( arguments.windowMinutes ) & " minutes'";
+        var q = wirebox.getInstance( "Ticket@tickets" )
+            .withoutGlobalScope()
+            .whereNotIn( "status", [ "resolved", "closed" ] )
+            .whereNull( "sla_paused_at" )
+            .where( function( w ){
+                w.where( function( w2 ){
+                    w2.whereNull( "first_response_at" )
+                      .whereNotNull( "first_response_due_at" )
+                      .whereRaw( "first_response_due_at >  NOW()" )
+                      .whereRaw( "first_response_due_at <= NOW() + " & interval );
+                } ).orWhere( function( w2 ){
+                    w2.whereNotNull( "resolution_due_at" )
+                      .whereRaw( "resolution_due_at >  NOW()" )
+                      .whereRaw( "resolution_due_at <= NOW() + " & interval );
+                } );
+            } );
+        return q.get();
     }
 
 }

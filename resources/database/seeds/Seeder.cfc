@@ -26,6 +26,8 @@ component {
         seedOrganization( arguments.qb );
         seedContact( arguments.qb );
         seedAgent( arguments.qb );
+        seedSlaCalendar( arguments.qb );
+        seedSlaPolicy( arguments.qb );
     }
 
     private void function seedOrganization( required any qb ){
@@ -76,6 +78,56 @@ component {
             "id"         : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
             "contact_id" : arguments.contactId,
             "role_key"   : "organization-admin"
+        } );
+    }
+
+    /**
+     * Default Mon-Fri 9-5 UTC calendar with no holidays. Marked as
+     * is_default so any policy without an explicit calendar uses it.
+     */
+    private void function seedSlaCalendar( required any qb ){
+        var existing = arguments.qb.newQuery().from( "business_hours_calendars" ).where( "is_default", true ).first();
+        if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) return;
+        var weekly = serializeJSON( {
+            "mon" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "tue" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "wed" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "thu" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "fri" : [ { "start" : "09:00", "end" : "17:00" } ],
+            "sat" : [],
+            "sun" : []
+        } );
+        arguments.qb.newQuery().from( "business_hours_calendars" ).insert( {
+            "id"           : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "name"         : "Default 9-5",
+            "timezone"     : "UTC",
+            "weekly_hours" : weekly,
+            "holidays"     : "[]",
+            "is_default"   : true,
+            "is_active"    : true
+        } );
+    }
+
+    /**
+     * Default catch-all policy: 60 minutes first response, 8 hours
+     * resolution, attached to the default calendar. Tickets created
+     * without a more specific match (by priority or tier) fall onto
+     * this one.
+     */
+    private void function seedSlaPolicy( required any qb ){
+        var existing = arguments.qb.newQuery().from( "sla_policies" ).where( "is_default", true ).first();
+        if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) return;
+        var cal = arguments.qb.newQuery().from( "business_hours_calendars" ).where( "is_default", true ).first();
+        if ( isNull( cal ) || !structKeyExists( cal, "id" ) ) return;
+        arguments.qb.newQuery().from( "sla_policies" ).insert( {
+            "id"                         : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "name"                       : "Default policy",
+            "first_response_minutes"     : 60,
+            "resolution_minutes"         : 480,
+            "business_hours_calendar_id" : cal.id,
+            "precedence"                 : 0,
+            "is_default"                 : true,
+            "is_active"                  : true
         } );
     }
 
