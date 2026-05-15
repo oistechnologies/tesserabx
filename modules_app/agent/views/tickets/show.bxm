@@ -144,23 +144,34 @@
             </div>
         </div>
 
-        <bx:if len( local.t.getOriginatingEmail() ?: "" )>
+        <bx:if prc.canShowBlockCard ?: false>
             <div class="card mb-3 border-danger">
                 <div class="card-header bg-danger-subtle">Block this sender</div>
                 <div class="card-body">
-                    <p class="small mb-2">Adds <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> (or its domain) to the inbound blacklist. Future emails from a blocked sender are dropped instead of becoming tickets.</p>
-                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/block-sender">
-                        <div class="mb-2">
-                            <select class="form-select form-select-sm" name="scope">
-                                <option value="email">This address only (#encodeForHTML( local.t.getOriginatingEmail() )#)</option>
-                                <option value="domain">Entire domain (@#encodeForHTML( listLast( local.t.getOriginatingEmail(), "@" ) )#)</option>
-                            </select>
-                        </div>
-                        <div class="mb-2">
-                            <input type="text" class="form-control form-control-sm" name="reason" placeholder="Reason (optional)">
-                        </div>
-                        <button class="btn btn-danger btn-sm w-100" type="submit">Block</button>
-                    </form>
+                    <bx:if prc.isSenderBlocked ?: false>
+                        <p class="small mb-2">
+                            <i class="bi bi-shield-x"></i>
+                            Sender <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> is already on the inbound blacklist.
+                            Future emails from this sender will not become tickets.
+                        </p>
+                        <a class="btn btn-outline-secondary btn-sm w-100" href="/agent/admin/blacklist">
+                            Manage blacklist
+                        </a>
+                    <bx:else>
+                        <p class="small mb-2">Adds <code>#encodeForHTML( local.t.getOriginatingEmail() )#</code> (or its domain) to the inbound blacklist. Future emails from a blocked sender are dropped instead of becoming tickets, and this ticket will be auto-closed with an internal note.</p>
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/block-sender">
+                            <div class="mb-2">
+                                <select class="form-select form-select-sm" name="scope">
+                                    <option value="email">This address only (#encodeForHTML( local.t.getOriginatingEmail() )#)</option>
+                                    <option value="domain">Entire domain (@#encodeForHTML( listLast( local.t.getOriginatingEmail(), "@" ) )#)</option>
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <input type="text" class="form-control form-control-sm" name="reason" placeholder="Reason (optional)">
+                            </div>
+                            <button class="btn btn-danger btn-sm w-100" type="submit">Block</button>
+                        </form>
+                    </bx:if>
                 </div>
             </div>
         </bx:if>
