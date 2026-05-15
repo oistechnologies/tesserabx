@@ -57,6 +57,9 @@ class {
         binder.map( "TriageService@ai" )
               .to( "#moduleMapping#.models.TriageService" )
               .asSingleton();
+        binder.map( "SummarizationService@ai" )
+              .to( "#moduleMapping#.models.SummarizationService" )
+              .asSingleton();
     }
 
     function onUnload(){}

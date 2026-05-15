@@ -1,0 +1,44 @@
+/**
+ * SummarizationServiceSpec: disabled-path coverage and the
+ * unknown-ticket error contract. Live model output is exercised by
+ * the agent UI smoke test, not here.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc        = getController().getWireBox().getInstance( "SummarizationService@ai" );
+        variables.capability = getController().getWireBox().getInstance( "AiCapability@ai" );
+        variables.aiOff      = !variables.capability.isEnabled();
+    }
+
+    function run(){
+        describe( "SummarizationService", function(){
+
+            it( "returns available=false when AI is off", function(){
+                if ( !variables.aiOff ) return;
+                var result = variables.svc.summarize( "nonexistent" );
+                expect( result.available ).toBeFalse();
+                expect( result.outcome ).toBe( "disabled" );
+            } );
+
+            it( "reports a ticket-not-found error with the capability on", function(){
+                // Temporarily flip the test-mode flag off so we hit the
+                // ticket-lookup path. We do not actually reach a
+                // provider call because the ticket is missing.
+                application._tesserabx_test_mode = false;
+                try {
+                    var result = variables.svc.summarize( "does-not-exist" );
+                    expect( result.available ).toBeTrue();
+                    expect( result.outcome ).toBe( "error" );
+                    expect( result.error ).toBe( "Ticket not found" );
+                } finally {
+                    application._tesserabx_test_mode = true;
+                }
+            } );
+
+        } );
+    }
+
+}

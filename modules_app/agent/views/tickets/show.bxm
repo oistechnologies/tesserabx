@@ -140,6 +140,57 @@
 
     <div class="col-12 col-lg-4">
 
+        <bx:if prc.aiEnabled ?: false>
+            <bx:set local.summaryData = prc.aiSummary ?: {} >
+            <bx:set local.hasSummary = isStruct( local.summaryData ) && ( len( local.summaryData.summary ?: "" ) || arrayLen( local.summaryData.keyPoints ?: [] ) ) >
+            <div class="card mb-3">
+                <div class="card-header p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body<bx:if !local.hasSummary> collapsed</bx:if>"
+                       data-bs-toggle="collapse"
+                       href="##summary-card"
+                       role="button"
+                       aria-expanded="<bx:if local.hasSummary>true<bx:else>false</bx:if>"
+                       aria-controls="summary-card">
+                        <span>
+                            AI Summary
+                            <bx:if local.hasSummary>
+                                <span class="badge text-bg-info ms-2">Ready</span>
+                            </bx:if>
+                        </span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="summary-card" class="collapse<bx:if local.hasSummary> show</bx:if>">
+                    <div class="card-body small">
+                        <bx:if local.hasSummary>
+                            <bx:if len( local.summaryData.summary ?: "" )>
+                                <p class="mb-2">#encodeForHTML( local.summaryData.summary )#</p>
+                            </bx:if>
+                            <bx:if arrayLen( local.summaryData.keyPoints ?: [] )>
+                                <div class="text-body-secondary mb-1">Key points</div>
+                                <ul class="mb-2 ps-3">
+                                    <bx:loop array="#local.summaryData.keyPoints#" item="local.kp">
+                                        <li>#encodeForHTML( local.kp )#</li>
+                                    </bx:loop>
+                                </ul>
+                            </bx:if>
+                            <bx:if len( local.summaryData.nextStep ?: "" )>
+                                <div class="alert alert-info py-2 px-3 small mb-2" role="note">
+                                    <strong>Next step:</strong> #encodeForHTML( local.summaryData.nextStep )#
+                                </div>
+                            </bx:if>
+                        </bx:if>
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/summarize">
+                            <button class="btn btn-outline-info btn-sm w-100" type="submit">
+                                <i class="bi bi-stars"></i>
+                                <bx:if local.hasSummary>Regenerate summary<bx:else>Generate summary</bx:if>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </bx:if>
+
         <div class="card mb-3">
             <div class="card-header p-0">
                 <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"

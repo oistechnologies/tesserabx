@@ -52,6 +52,7 @@ class {
         route( "tickets/:id/promote-sender" ).withVerbs( "POST" ).to( "Tickets.promoteSender" );
         route( "tickets/:id/block-sender" ).withVerbs( "POST" ).to( "Tickets.blockSender" );
         route( "tickets/:id/suggest-reply" ).withVerbs( "POST" ).to( "Tickets.suggestReply" );
+        route( "tickets/:id/summarize" ).withVerbs( "POST" ).to( "Tickets.summarize" );
         route( "tickets/:id" ).to( "Tickets.show" );
         route( "tickets" ).withHandler( "Tickets" ).toAction( {
             "GET"  : "index",

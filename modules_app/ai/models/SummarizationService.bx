@@ -1,0 +1,141 @@
+/**
+ * SummarizationService: condenses a long ticket thread for an agent
+ * picking it up cold.
+ *
+ * On-demand only; specs and the agent UI call summarize(ticketId)
+ * and render the returned struct. We do not persist summaries
+ * because they go stale the moment the next message lands; if a
+ * caller wants caching it should layer that on top.
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="promptService"  inject="AiSystemPromptService@ai";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    variables.FEATURE_KEY = "thread-summary";
+    variables.FALLBACK_SYSTEM_PROMPT = "Summarize the ticket as JSON {""summary"": ""..."", ""keyPoints"": [], ""nextStep"": ""...""}";
+
+    /**
+     * Returns:
+     *   {
+     *     available : bool,
+     *     outcome   : string,
+     *     summary   : string,
+     *     keyPoints : array<string>,
+     *     nextStep  : string,
+     *     error     : string
+     *   }
+     */
+    public struct function summarize( required string ticketId ){
+        var off = {
+            "available" : false,
+            "outcome"   : "disabled",
+            "summary"   : "",
+            "keyPoints" : [],
+            "nextStep"  : "",
+            "error"     : ""
+        };
+        if ( !capability.isFeatureEnabled( variables.FEATURE_KEY ) ) return off;
+
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) {
+            return {
+                "available" : true,
+                "outcome"   : "error",
+                "summary"   : "",
+                "keyPoints" : [],
+                "nextStep"  : "",
+                "error"     : "Ticket not found"
+            };
+        }
+
+        var template     = promptService.getForFeature( variables.FEATURE_KEY );
+        if ( !len( template ) ) template = variables.FALLBACK_SYSTEM_PROMPT;
+        var systemPrompt = promptService.renderTemplate( template, {} );
+
+        var userPrompt = buildUserPrompt( ticket );
+        var result = middleware.complete(
+            feature : variables.FEATURE_KEY,
+            prompt  : userPrompt,
+            options : {
+                systemPrompt   : systemPrompt,
+                organizationId : ticket.getOrganizationId() ?: "",
+                ticketId       : ticket.getId(),
+                temperature    : 0.2,
+                maxTokens      : 600
+            }
+        );
+
+        if ( result.outcome != "ok" ) {
+            return {
+                "available" : true,
+                "outcome"   : result.outcome,
+                "summary"   : "",
+                "keyPoints" : [],
+                "nextStep"  : "",
+                "error"     : result.error ?: ""
+            };
+        }
+
+        var parsed = parseModelJson( result.text );
+        return {
+            "available" : true,
+            "outcome"   : "ok",
+            "summary"   : parsed.summary,
+            "keyPoints" : parsed.keyPoints,
+            "nextStep"  : parsed.nextStep,
+            "error"     : ""
+        };
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function parseModelJson( required string raw ){
+        var stripped = stripCodeFences( trim( arguments.raw ) );
+        var fallback = { "summary" : arguments.raw, "keyPoints" : [], "nextStep" : "" };
+        if ( !len( stripped ) || !isJSON( stripped ) ) return fallback;
+        try {
+            var data = jsonDeserialize( stripped );
+            if ( !isStruct( data ) ) return fallback;
+            return {
+                "summary"   : toString( data.summary  ?: "" ),
+                "keyPoints" : isArray( data.keyPoints ?: [] ) ? data.keyPoints : [],
+                "nextStep"  : toString( data.nextStep ?: "" )
+            };
+        } catch ( any e ) {
+            return fallback;
+        }
+    }
+
+    private string function stripCodeFences( required string text ){
+        var t = arguments.text;
+        if ( left( t, 7 ) == "```json" ) t = listRest( t, char( 10 ) );
+        else if ( left( t, 3 ) == "```" ) t = listRest( t, char( 10 ) );
+        if ( right( t, 3 ) == "```" ) t = left( t, len( t ) - 3 );
+        return trim( t );
+    }
+
+    private string function buildUserPrompt( required any ticket ){
+        var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        var lines = [
+            "Subject: " & arguments.ticket.getSubject(),
+            "Status: "   & ( arguments.ticket.getStatus() ?: "" ),
+            "Priority: " & ( arguments.ticket.getPriority() ?: "" ),
+            ""
+        ];
+        if ( !messages.len() ) {
+            lines.append( "(No messages on this ticket yet.)" );
+            return lines.toList( char( 10 ) );
+        }
+        lines.append( "Conversation (oldest first):" );
+        for ( var m in messages ) {
+            if ( m.getIsInternal() ?: false ) continue;
+            var who = len( m.getAuthorAgentId() ?: "" ) ? "Agent" : "Customer";
+            lines.append( who & ": " & ( m.getBody() ?: "" ) );
+        }
+        return lines.toList( char( 10 ) );
+    }
+
+}

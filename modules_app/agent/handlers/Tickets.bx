@@ -18,6 +18,7 @@ class {
     property name="slaService"            inject="SlaService@sla";
     property name="aiCapability"          inject="AiCapability@ai";
     property name="suggestedReplyService" inject="SuggestedReplyService@ai";
+    property name="summarizationService"  inject="SummarizationService@ai";
     property name="messagebox"            inject="messagebox@cbmessagebox";
     property name="auth"                  inject="AuthenticationService@cbauth";
 
@@ -187,6 +188,40 @@ class {
 
     function internalNote( event, rc, prc ){
         return postMessage( event, rc, prc, true, "Internal note added." );
+    }
+
+    /**
+     * Generate an AI thread summary and stash it in flash so the
+     * ticket detail page can render it inside the Summary card. A
+     * no-op when the AI capability is off so the route stays safe
+     * even on direct hit.
+     */
+    function summarize( event, rc, prc ){
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !aiCapability.isFeatureEnabled( "thread-summary" ) ) {
+            messagebox.warn( "AI summaries are not enabled." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        var result = summarizationService.summarize( t.getId() );
+        if ( result.outcome == "ok" && ( len( result.summary ) || result.keyPoints.len() ) ) {
+            flash.put( "aiSummary", {
+                "summary"   : result.summary,
+                "keyPoints" : result.keyPoints,
+                "nextStep"  : result.nextStep
+            } );
+            messagebox.info( "Summary generated." );
+        } else if ( result.outcome == "error" ) {
+            messagebox.error( "AI summary failed: " & result.error );
+        } else {
+            messagebox.warn( "AI summary not available (outcome: " & result.outcome & ")." );
+        }
+        relocate( uri = "/agent/tickets/" & t.getId() );
     }
 
     function changeStatus( event, rc, prc ){
@@ -404,6 +439,10 @@ class {
         // prefills the textarea itself.
         arguments.prc.suggestedReply    = flash.get( "suggestedReply", "" );
         arguments.prc.suggestedNotes    = flash.get( "suggestedNotes", "" );
+
+        // AI thread summary survives the post-redirect-get via flash;
+        // the view renders it in the Summary card when present.
+        arguments.prc.aiSummary = flash.get( "aiSummary", {} );
 
         arguments.prc.tags = ticketsService.listTagsForTicket( arguments.ticket.getId() );
     }
