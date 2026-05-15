@@ -21,7 +21,7 @@ class {
     this.modelNamespace     = "automation";
     this.cfmapping          = "tesserabx.modules.automation";
     this.autoMapModels      = false;
-    this.dependencies       = [ "tickets", "contacts" ];
+    this.dependencies       = [ "tickets", "contacts", "sla" ];
 
     function configure(){
         variables.settings            = {};
@@ -39,8 +39,16 @@ class {
     function onLoad(){
         binder.map( "AutomationRule@automation" )
               .to( "#moduleMapping#.models.AutomationRule" );
+        binder.map( "RecurringTicketTemplate@automation" )
+              .to( "#moduleMapping#.models.RecurringTicketTemplate" );
         binder.map( "AutomationService@automation" )
               .to( "#moduleMapping#.models.AutomationService" )
+              .asSingleton();
+        binder.map( "AssignmentService@automation" )
+              .to( "#moduleMapping#.models.AssignmentService" )
+              .asSingleton();
+        binder.map( "RecurringTicketService@automation" )
+              .to( "#moduleMapping#.models.RecurringTicketService" )
               .asSingleton();
     }
 

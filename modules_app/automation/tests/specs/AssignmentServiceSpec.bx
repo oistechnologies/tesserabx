@@ -1,0 +1,103 @@
+/**
+ * AssignmentServiceSpec: round-robin pointer behaviour and load-based
+ * least-open-ticket-count selection.
+ *
+ * The dev DB always has the seeded agent active, and other specs run
+ * concurrently with this one. We do not try to control the full
+ * active-agent population; instead we verify behavioural invariants
+ * that hold regardless of who else is around:
+ *   - Round-robin returns a different agent each successive call
+ *     until it eventually wraps back to the first one it returned.
+ *   - Least-loaded prefers agents with no open tickets over agents
+ *     with open tickets, when both populations include eligible
+ *     candidates.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.assignment = getController().getWireBox().getInstance( "AssignmentService@automation" );
+    }
+
+    function run(){
+        describe( "AssignmentService", function(){
+
+            it( "round-robin rotates through every active agent and wraps", function(){
+                var key      = "rr-spec-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var eligible = variables.assignment.listEligibleAgentIds();
+                expect( eligible.len() ).toBeGTE( 1 );
+
+                var seen = [];
+                for ( var i = 1; i <= eligible.len(); i++ ) {
+                    seen.append( variables.assignment.pickAgent( strategy = "roundRobin", strategyKey = key ) );
+                }
+                // Each pass visited each agent exactly once.
+                for ( var id in eligible ) expect( seen ).toInclude( id );
+
+                // One more call wraps back to one of the agents we have
+                // already seen in this rotation.
+                var wrap = variables.assignment.pickAgent( strategy = "roundRobin", strategyKey = key );
+                expect( seen ).toInclude( wrap );
+
+                queryExecute( "DELETE FROM assignment_state WHERE strategy_key = :k", { k : key } );
+            } );
+
+            it( "least-loaded picks an agent with no open tickets when one exists", function(){
+                // Add two fresh agents: one with two open tickets, one with none.
+                var heavyId = makeAgent();
+                var lightId = makeAgent();
+                var t1 = insertOpenTicket( heavyId );
+                var t2 = insertOpenTicket( heavyId );
+
+                var picked = variables.assignment.pickAgent( strategy = "leastLoaded" );
+                // Whoever is picked, they should not be the agent we
+                // loaded up with tickets. Some other zero-load agent
+                // (lightId or the dev seed agent) is a valid winner.
+                expect( picked ).notToBe( heavyId );
+
+                queryExecute( "DELETE FROM tickets WHERE id IN ( :a, :b )", { a : t1, b : t2 } );
+                queryExecute( "DELETE FROM agents WHERE id IN ( :a, :b )", { a : heavyId, b : lightId } );
+            } );
+
+            it( "rejects an unknown strategy", function(){
+                expect( function(){
+                    variables.assignment.pickAgent( strategy = "nope" );
+                } ).toThrow( "AssignmentService.UnknownStrategy" );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function makeAgent(){
+        var id = "spec-" & left( lCase( replace( createUUID(), "-", "", "all" ) ), 24 );
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :hash, false, true )",
+            {
+                id    : id,
+                email : "spec-agent-" & createUUID() & "@example.com",
+                hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
+        return id;
+    }
+
+    private string function insertOpenTicket( required string agentId ){
+        var ticketId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO tickets ( id, subject, status, priority, ticket_type, source, assigned_to_agent_id, originating_email )
+             VALUES ( :id, :subj, 'open', 'normal', 'request', 'agent', :aid, :em )",
+            {
+                id   : ticketId,
+                subj : "assignment-spec-" & createUUID(),
+                aid  : arguments.agentId,
+                em   : "spec-" & createUUID() & "@example.com"
+            }
+        );
+        return ticketId;
+    }
+
+}

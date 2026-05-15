@@ -1,0 +1,124 @@
+/**
+ * AssignmentService: agent-picking strategies.
+ *
+ * Two strategies in Phase 3d:
+ *   - roundRobin: picks the next agent in id-sorted order after the
+ *     last one used (per strategy_key, persisted in assignment_state
+ *     so the rotation survives a restart). Skips inactive agents.
+ *   - leastLoaded: picks the active agent with the fewest open
+ *     tickets ("open" = status NOT IN resolved/closed). Ties break
+ *     on agent id ascending so the choice is deterministic.
+ *
+ * Returns the chosen agent id, or "" if no eligible agent exists.
+ * The automation action `assignByStrategy` is the primary caller.
+ *
+ * `strategy_key` lets us hold separate pointers per pool. Phase 3d
+ * uses "default" for the global pool; when teams land in Phase 5 the
+ * key will be the team id.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.SUPPORTED_STRATEGIES = [ "roundRobin", "leastLoaded" ];
+
+    public array function listStrategies() { return variables.SUPPORTED_STRATEGIES; }
+
+    /**
+     * Pick an agent for the given strategy. `strategyKey` scopes the
+     * round-robin pointer; load-based ignores it.
+     */
+    public string function pickAgent(
+        required string strategy,
+        string strategyKey = "default"
+    ){
+        var eligible = listEligibleAgentIds();
+        if ( !eligible.len() ) return "";
+
+        switch ( arguments.strategy ) {
+            case "roundRobin":  return pickRoundRobin( eligible, arguments.strategyKey );
+            case "leastLoaded": return pickLeastLoaded( eligible );
+        }
+        throw(
+            type    = "AssignmentService.UnknownStrategy",
+            message = "Unknown assignment strategy [#arguments.strategy#]. Supported: " & variables.SUPPORTED_STRATEGIES.toList()
+        );
+    }
+
+    /**
+     * The set of agent ids the strategies pick from. Active agents
+     * only, sorted by id so round-robin is stable across calls.
+     */
+    public array function listEligibleAgentIds(){
+        var rows = queryExecute(
+            "SELECT id FROM agents WHERE is_active = TRUE ORDER BY id"
+        );
+        var ids = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) ids.append( rows.id[ i ] );
+        return ids;
+    }
+
+    private string function pickRoundRobin( required array eligible, required string strategyKey ){
+        var last = readLastAgentId( arguments.strategyKey );
+        var chosen = "";
+        if ( !len( last ) ) {
+            chosen = arguments.eligible[ 1 ];
+        } else {
+            // Walk past `last` and take the next id. If last is not in
+            // the eligible set (rotated out or deactivated) we start
+            // from the top.
+            var idx = arguments.eligible.findNoCase( last );
+            if ( idx == 0 ) {
+                chosen = arguments.eligible[ 1 ];
+            } else {
+                chosen = idx >= arguments.eligible.len()
+                       ? arguments.eligible[ 1 ]
+                       : arguments.eligible[ idx + 1 ];
+            }
+        }
+        writeLastAgentId( arguments.strategyKey, chosen );
+        return chosen;
+    }
+
+    private string function pickLeastLoaded( required array eligible ){
+        // One round-trip: left-join open-ticket counts per agent.
+        // Inactive agents are excluded already by listEligibleAgentIds,
+        // but we filter again here in the SQL so the count subquery
+        // matches the same population.
+        var rows = queryExecute(
+            "SELECT a.id AS agent_id,
+                    COUNT( t.id ) AS open_count
+             FROM   agents a
+             LEFT   JOIN tickets t
+                    ON t.assigned_to_agent_id = a.id
+                   AND t.status NOT IN ( 'resolved', 'closed' )
+             WHERE  a.is_active = TRUE
+             GROUP  BY a.id
+             ORDER  BY open_count ASC, a.id ASC"
+        );
+        if ( !rows.recordCount ) return "";
+        return rows.agent_id[ 1 ];
+    }
+
+    private string function readLastAgentId( required string strategyKey ){
+        var rows = queryExecute(
+            "SELECT last_agent_id FROM assignment_state WHERE strategy_key = :key",
+            { key : arguments.strategyKey }
+        );
+        return rows.recordCount ? ( rows.last_agent_id[ 1 ] ?: "" ) : "";
+    }
+
+    private void function writeLastAgentId( required string strategyKey, required string agentId ){
+        // UPSERT keeps the pointer at one row per strategy without
+        // races between the read-then-write check.
+        queryExecute(
+            "INSERT INTO assignment_state ( strategy_key, last_agent_id, updated_at )
+             VALUES ( :key, :aid, NOW() )
+             ON CONFLICT ( strategy_key )
+             DO UPDATE SET last_agent_id = EXCLUDED.last_agent_id,
+                           updated_at    = NOW()",
+            { key : arguments.strategyKey, aid : arguments.agentId }
+        );
+    }
+
+}

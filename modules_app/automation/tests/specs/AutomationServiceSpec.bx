@@ -206,6 +206,54 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupRule( rule.getId() );
             } );
 
+            it( "evaluates a time-based escalation rule against minutesSinceCreated", function(){
+                // Rule: when a ticket has been around for > 5 minutes
+                // AND still has no first response, raise its priority.
+                // We backdate created_at so the field returns > 5
+                // without actually sleeping.
+                var rule = variables.automation.createRule( {
+                    name       : "auto-spec-ee-escalation-" & createUUID(),
+                    trigger    : "ticket.escalation",
+                    conditions : [
+                        { field : "minutesSinceCreated", op : "gt", value : 5 },
+                        { field : "hasFirstResponse",    op : "eq", value : "false" }
+                    ],
+                    actions    : [ { type : "setPriority", value : "urgent" } ]
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject            : "escalation-test", priority : "normal"
+                } );
+                queryExecute(
+                    "UPDATE tickets SET created_at = NOW() - INTERVAL '10 minutes' WHERE id = :id",
+                    { id : t.getId() }
+                );
+                // Re-read so the ticket carries the backdated created_at.
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                variables.automation.evaluateForTicket( "ticket.escalation", refreshed );
+                var after = variables.tickets.getTicket( t.getId() );
+                expect( after.getPriority() ).toBe( "urgent" );
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
+            it( "assignByStrategy action picks an agent and assigns the ticket", function(){
+                var rule = variables.automation.createRule( {
+                    name       : "auto-spec-ee-strategy-" & createUUID(),
+                    trigger    : "ticket.created",
+                    conditions : [],
+                    actions    : [ { type : "assignByStrategy", value : "leastLoaded" } ]
+                } );
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject            : "auto-strategy"
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getAssignedToAgentId() ?: "" ).notToBeEmpty();
+                cleanupTicket( t.getId() );
+                cleanupRule( rule.getId() );
+            } );
+
             it( "does not loop when an action triggers another lifecycle event", function(){
                 // A rule that listens for status_changed and then sets
                 // status. Without the re-entry guard this would loop

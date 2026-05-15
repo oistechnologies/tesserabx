@@ -1,0 +1,178 @@
+/**
+ * RecurringTicketServiceSpec: template CRUD plus the materialization
+ * that turns a template into a real Ticket and advances the schedule.
+ *
+ * Specs run a template once and assert that:
+ *   - the returned ticket carries the template's subject + priority +
+ *     type + source
+ *   - last_run_at is set, last_ticket_id points at the new ticket,
+ *     and next_run_at = last_run_at + intervalMinutes
+ *   - templates that name an organization land tickets in that org;
+ *     contact-backed templates land tickets attached to that contact;
+ *     unattached templates produce accountless tickets
+ *
+ * Each spec uses a unique fixture and cleans up at the end.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.recurring = getController().getWireBox().getInstance( "RecurringTicketService@automation" );
+        variables.contacts  = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.tickets   = getController().getWireBox().getInstance( "TicketsService@tickets" );
+    }
+
+    function run(){
+        describe( "RecurringTicketService", function(){
+
+            it( "creates and reads a template", function(){
+                var tmpl = variables.recurring.createTemplate( {
+                    name             : "rec-spec-crud-" & createUUID(),
+                    subject          : "Daily smoke check",
+                    intervalMinutes  : 1440
+                } );
+                expect( tmpl.getId() ).notToBeEmpty();
+                var reloaded = variables.recurring.getTemplate( tmpl.getId() );
+                expect( reloaded.getSubject() ).toBe( "Daily smoke check" );
+                cleanupTemplate( tmpl.getId() );
+            } );
+
+            it( "runTemplate materializes a ticket and advances the schedule", function(){
+                var f = makeFixture();
+                var tmpl = variables.recurring.createTemplate( {
+                    name               : "rec-spec-run-" & createUUID(),
+                    subject            : "Weekly review for " & f.org.getName(),
+                    priority           : "high",
+                    ticketType         : "request",
+                    source             : "scheduler",
+                    requesterContactId : f.contact.getId(),
+                    bodyTemplate       : "Please complete the weekly review.",
+                    intervalMinutes    : 60
+                } );
+                var ticket = variables.recurring.runTemplate( tmpl.getId() );
+                expect( ticket.getSubject() ).toBe( tmpl.getSubject() );
+                expect( ticket.getPriority() ).toBe( "high" );
+                expect( ticket.getSource() ).toBe( "scheduler" );
+                expect( ticket.getRequesterContactId() ).toBe( f.contact.getId() );
+                expect( ticket.getOrganizationId() ).toBe( f.org.getId() );
+
+                var reloaded = variables.recurring.getTemplate( tmpl.getId() );
+                expect( isNull( reloaded.getLastRunAt() ) ).toBeFalse();
+                expect( reloaded.getLastTicketId() ).toBe( ticket.getId() );
+                expect( isNull( reloaded.getNextRunAt() ) ).toBeFalse();
+
+                // body template appended as a public message
+                var messages = variables.tickets.listMessagesForTicket( ticket.getId(), true );
+                expect( messages.len() ).toBeGTE( 1 );
+
+                cleanupTicket( ticket.getId() );
+                cleanupTemplate( tmpl.getId() );
+                cleanupFixture( f );
+            } );
+
+            it( "runTemplate on an org-only template lands the ticket in that org", function(){
+                var f = makeFixture( withContact = false );
+                var tmpl = variables.recurring.createTemplate( {
+                    name             : "rec-spec-orgonly-" & createUUID(),
+                    subject          : "Quarterly walkthrough",
+                    organizationId   : f.org.getId(),
+                    intervalMinutes  : 10080
+                } );
+                var ticket = variables.recurring.runTemplate( tmpl.getId() );
+                expect( ticket.getOrganizationId() ).toBe( f.org.getId() );
+                cleanupTicket( ticket.getId() );
+                cleanupTemplate( tmpl.getId() );
+                cleanupFixture( f );
+            } );
+
+            it( "runTemplate on an unattached template produces an accountless ticket", function(){
+                var tmpl = variables.recurring.createTemplate( {
+                    name             : "rec-spec-acct-" & createUUID(),
+                    subject          : "Unattached recurring check",
+                    intervalMinutes  : 1440
+                } );
+                var ticket = variables.recurring.runTemplate( tmpl.getId() );
+                expect( ticket.isAccountless() ).toBeTrue();
+                cleanupTicket( ticket.getId() );
+                cleanupTemplate( tmpl.getId() );
+            } );
+
+            it( "listDueTemplates picks rows with next_run_at <= NOW() or NULL", function(){
+                var due = variables.recurring.createTemplate( {
+                    name : "rec-spec-due-" & createUUID(), subject : "due", intervalMinutes : 60
+                } );
+                queryExecute(
+                    "UPDATE recurring_tickets SET next_run_at = NOW() - INTERVAL '1 hour' WHERE id = :id",
+                    { id : due.getId() }
+                );
+                var notYet = variables.recurring.createTemplate( {
+                    name : "rec-spec-notyet-" & createUUID(), subject : "later", intervalMinutes : 60
+                } );
+                queryExecute(
+                    "UPDATE recurring_tickets SET next_run_at = NOW() + INTERVAL '6 hours' WHERE id = :id",
+                    { id : notYet.getId() }
+                );
+
+                var ids = [];
+                for ( var x in variables.recurring.listDueTemplates() ) ids.append( x.getId() );
+                expect( ids ).toInclude( due.getId() );
+                expect( ids ).notToInclude( notYet.getId() );
+
+                cleanupTemplate( due.getId() );
+                cleanupTemplate( notYet.getId() );
+            } );
+
+            it( "runTemplate rejects an inactive template", function(){
+                var tmpl = variables.recurring.createTemplate( {
+                    name : "rec-spec-inactive-" & createUUID(), subject : "x", intervalMinutes : 60, isActive : false
+                } );
+                expect( function(){
+                    variables.recurring.runTemplate( tmpl.getId() );
+                } ).toThrow( "RecurringTicketService.InactiveTemplate" );
+                cleanupTemplate( tmpl.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture( boolean withContact = true ){
+        var org = variables.contacts.createOrganization( {
+            name : "Rec Spec Org " & createUUID(),
+            slug : "rec-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var f = { org : org, contact : javaCast( "null", "" ) };
+        if ( arguments.withContact ) {
+            f.contact = variables.contacts.provisionContact( {
+                organizationId : org.getId(),
+                email          : "rec-spec-" & createUUID() & "@example.com",
+                password       : "spec-password"
+            } );
+        }
+        return f;
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        if ( !isNull( arguments.fixture.contact ) ) {
+            queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        }
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+    }
+
+    private void function cleanupTemplate( required string id ){
+        queryExecute( "DELETE FROM recurring_tickets WHERE id = :id", { id : arguments.id } );
+    }
+
+}

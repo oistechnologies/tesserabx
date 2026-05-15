@@ -1,0 +1,37 @@
+/**
+ * RecurringTicketTemplate: a template the scheduler uses to create
+ * tickets on a cadence.
+ *
+ * The template carries every field needed to create the ticket; the
+ * service in this module is the only thing that writes Ticket rows
+ * from a template, so the tickets module's invariants stay enforced
+ * (CLAUDE.md forbids direct cross-module entity writes).
+ *
+ * Not tenant-scoped: provider configuration, not customer data.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="recurring_tickets"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="description";
+    property name="organizationId"      column="organization_id";
+    property name="requesterContactId"  column="requester_contact_id";
+    property name="assignedToAgentId"   column="assigned_to_agent_id";
+    property name="subject";
+    property name="bodyTemplate"        column="body_template";
+    property name="priority";
+    property name="ticketType"          column="ticket_type";
+    property name="source";
+    property name="intervalMinutes"     column="interval_minutes";
+    property name="nextRunAt"           column="next_run_at"   sqltype="timestamp";
+    property name="lastRunAt"           column="last_run_at"   sqltype="timestamp";
+    property name="lastTicketId"        column="last_ticket_id";
+    property name="isActive"            column="is_active";
+    property name="createdAt"           column="created_at"    sqltype="timestamp";
+    property name="updatedAt"           column="updated_at"    sqltype="timestamp";
+
+}

@@ -34,9 +34,9 @@ class singleton=true {
     property name="wirebox"            inject="wirebox";
     property name="ticketsService"     inject="TicketsService@tickets";
 
-    variables.SUPPORTED_TRIGGERS = [ "ticket.created", "ticket.status_changed" ];
-    variables.SUPPORTED_OPS      = [ "eq", "neq", "contains", "notContains", "in", "notIn", "isEmpty", "isNotEmpty" ];
-    variables.SUPPORTED_ACTIONS  = [ "setPriority", "setStatus", "assignToAgent" ];
+    variables.SUPPORTED_TRIGGERS = [ "ticket.created", "ticket.status_changed", "ticket.escalation" ];
+    variables.SUPPORTED_OPS      = [ "eq", "neq", "contains", "notContains", "in", "notIn", "isEmpty", "isNotEmpty", "gt", "gte", "lt", "lte" ];
+    variables.SUPPORTED_ACTIONS  = [ "setPriority", "setStatus", "assignToAgent", "assignByStrategy" ];
 
     // Per-thread re-entrancy guard. createObject().init() makes a Java
     // ThreadLocal we set/clear around every action execution; an
@@ -161,6 +161,10 @@ class singleton=true {
             case "notIn":        return !arrayContainsCi( asArray( want ), actual );
             case "isEmpty":      return ( !len( toString( actual ) ) );
             case "isNotEmpty":   return ( len( toString( actual ) ) > 0 );
+            case "gt":           return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) >  val( want ) );
+            case "gte":          return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) >= val( want ) );
+            case "lt":           return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) <  val( want ) );
+            case "lte":          return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) <= val( want ) );
             default: return false;
         }
     }
@@ -178,8 +182,24 @@ class singleton=true {
             case "isAccountless":      return arguments.ticket.isAccountless() ? "true" : "false";
             case "from":               return arguments.eventData.from ?: "";
             case "to":                 return arguments.eventData.to ?: "";
+            // Time-based fields for ticket.escalation rules. Negative
+            // values are possible (e.g., minutesSinceFirstResponseDue
+            // when the deadline is still in the future) so callers can
+            // express "due within 30 minutes" as
+            // minutesSinceFirstResponseDue >= -30.
+            case "minutesSinceCreated":            return minutesSince( arguments.ticket.getCreatedAt() );
+            case "minutesSinceFirstResponseDue":   return minutesSince( arguments.ticket.getFirstResponseDueAt() ?: "" );
+            case "minutesSinceResolutionDue":      return minutesSince( arguments.ticket.getResolutionDueAt() ?: "" );
+            case "hasFirstResponse":               return len( arguments.ticket.getFirstResponseAt() ?: "" ) ? "true" : "false";
         }
         return "";
+    }
+
+    private numeric function minutesSince( required any when ){
+        if ( isNull( arguments.when ) || !len( toString( arguments.when ) ) ) return 0;
+        var fromInstant = wirebox.getInstance( "SlaService@sla" ).toInstant( arguments.when );
+        var nowInstant  = createObject( "java", "java.time.Instant" ).now();
+        return createObject( "java", "java.time.Duration" ).between( fromInstant, nowInstant ).toMinutes();
     }
 
     private array function executeActions( required any rule, required any ticket ){
@@ -224,6 +244,19 @@ class singleton=true {
                     actorId   : arguments.rule.getId()
                 } );
                 return { "type" : type, "value" : value };
+            case "assignByStrategy":
+                var assignment = wirebox.getInstance( "AssignmentService@automation" );
+                var picked     = assignment.pickAgent( value );
+                if ( !len( picked ) ) {
+                    return { "type" : type, "value" : value, "skipped" : true, "reason" : "no eligible agent" };
+                }
+                ticketsService.assignToAgent( {
+                    ticketId  : t.getId(),
+                    agentId   : picked,
+                    actorType : "automation",
+                    actorId   : arguments.rule.getId()
+                } );
+                return { "type" : type, "value" : value, "pickedAgentId" : picked };
         }
         return { "type" : type, "skipped" : true, "reason" : "unsupported" };
     }

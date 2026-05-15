@@ -1,0 +1,171 @@
+/**
+ * RecurringTicketService: CRUD over RecurringTicketTemplate and the
+ * materialization that turns a template into a real Ticket via
+ * TicketsService.
+ *
+ * Phase 3d ships the data layer + a single-shot `runTemplate( id )`
+ * the admin UI (Phase 5) and the Phase 3e scheduler call. The
+ * scheduler picks templates whose next_run_at <= NOW() and runs them;
+ * `runTemplate` is the only thing that knows how to advance next_run_at
+ * and stamp last_run_at / last_ticket_id atomically with the new
+ * ticket's creation.
+ */
+class singleton=true {
+
+    property name="wirebox"        inject="wirebox";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    // ---------------- CRUD ----------------
+
+    public array function listTemplates(){
+        return wirebox.getInstance( "RecurringTicketTemplate@automation" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function getTemplate( required string id ){
+        var t = wirebox.getInstance( "RecurringTicketTemplate@automation" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( t ) ? javaCast( "null", "" ) : t;
+    }
+
+    public any function createTemplate( required struct data ){
+        var t = wirebox.getInstance( "RecurringTicketTemplate@automation" );
+        t.setId( newId() );
+        t.setName( arguments.data.name );
+        if ( structKeyExists( arguments.data, "description" ) ) t.setDescription( arguments.data.description );
+        if ( len( arguments.data.organizationId ?: "" ) )       t.setOrganizationId( arguments.data.organizationId );
+        if ( len( arguments.data.requesterContactId ?: "" ) )   t.setRequesterContactId( arguments.data.requesterContactId );
+        if ( len( arguments.data.assignedToAgentId ?: "" ) )    t.setAssignedToAgentId( arguments.data.assignedToAgentId );
+        t.setSubject( arguments.data.subject );
+        if ( structKeyExists( arguments.data, "bodyTemplate" ) ) t.setBodyTemplate( arguments.data.bodyTemplate );
+        if ( len( arguments.data.priority   ?: "" ) ) t.setPriority(   arguments.data.priority );
+        if ( len( arguments.data.ticketType ?: "" ) ) t.setTicketType( arguments.data.ticketType );
+        if ( len( arguments.data.source     ?: "" ) ) t.setSource(     arguments.data.source );
+        if ( structKeyExists( arguments.data, "intervalMinutes" ) ) t.setIntervalMinutes( arguments.data.intervalMinutes );
+        if ( structKeyExists( arguments.data, "nextRunAt" )       ) t.setNextRunAt( arguments.data.nextRunAt );
+        if ( structKeyExists( arguments.data, "isActive" )        ) t.setIsActive( !!arguments.data.isActive );
+        t.save();
+        return t;
+    }
+
+    public any function updateTemplate( required string id, required struct data ){
+        var t = getTemplate( arguments.id );
+        if ( isNull( t ) ) {
+            throw( type = "RecurringTicketService.TemplateNotFound", message = "No template with id [#arguments.id#]" );
+        }
+        for ( var key in arguments.data ) {
+            switch ( key ) {
+                case "name":               t.setName( arguments.data[ key ] ); break;
+                case "description":        t.setDescription( arguments.data[ key ] ); break;
+                case "organizationId":     t.setOrganizationId( arguments.data[ key ] ); break;
+                case "requesterContactId": t.setRequesterContactId( arguments.data[ key ] ); break;
+                case "assignedToAgentId":  t.setAssignedToAgentId( arguments.data[ key ] ); break;
+                case "subject":            t.setSubject( arguments.data[ key ] ); break;
+                case "bodyTemplate":       t.setBodyTemplate( arguments.data[ key ] ); break;
+                case "priority":           t.setPriority( arguments.data[ key ] ); break;
+                case "ticketType":         t.setTicketType( arguments.data[ key ] ); break;
+                case "source":             t.setSource( arguments.data[ key ] ); break;
+                case "intervalMinutes":    t.setIntervalMinutes( arguments.data[ key ] ); break;
+                case "nextRunAt":          t.setNextRunAt( arguments.data[ key ] ); break;
+                case "isActive":           t.setIsActive( !!arguments.data[ key ] ); break;
+            }
+        }
+        t.save();
+        return t;
+    }
+
+    public void function deleteTemplate( required string id ){
+        queryExecute( "DELETE FROM recurring_tickets WHERE id = :id", { id : arguments.id } );
+    }
+
+    /**
+     * Templates the scheduler should run now: active, with a
+     * next_run_at in the past (or null, treated as "due now").
+     */
+    public array function listDueTemplates(){
+        return wirebox.getInstance( "RecurringTicketTemplate@automation" )
+            .where( "is_active", true )
+            .where( function( w ){
+                w.whereNull( "next_run_at" )
+                 .orWhereRaw( "next_run_at <= NOW()" );
+            } )
+            .orderBy( "next_run_at" )
+            .get();
+    }
+
+    // ---------------- Materialization ----------------
+
+    /**
+     * Create one ticket from a template. Advances the template's
+     * next_run_at by `intervalMinutes` and records last_run_at +
+     * last_ticket_id so the scheduler does not re-fire it.
+     *
+     * Returns the new Ticket entity.
+     */
+    public any function runTemplate( required string id ){
+        var tmpl = getTemplate( arguments.id );
+        if ( isNull( tmpl ) ) {
+            throw( type = "RecurringTicketService.TemplateNotFound", message = "No template with id [#arguments.id#]" );
+        }
+        if ( !( tmpl.getIsActive() ?: false ) ) {
+            throw( type = "RecurringTicketService.InactiveTemplate", message = "Template [#arguments.id#] is inactive" );
+        }
+
+        var payload = {
+            "subject"           : tmpl.getSubject(),
+            "priority"          : tmpl.getPriority() ?: "normal",
+            "ticketType"        : tmpl.getTicketType() ?: "request",
+            "source"            : tmpl.getSource() ?: "scheduler",
+            "originatingEmail"  : "",
+            "actorType"         : "scheduler",
+            "actorId"           : tmpl.getId()
+        };
+        if ( len( tmpl.getAssignedToAgentId() ?: "" ) ) payload.assignedToAgentId = tmpl.getAssignedToAgentId();
+
+        var ticket = "";
+        if ( len( tmpl.getRequesterContactId() ?: "" ) ) {
+            payload.requesterContactId = tmpl.getRequesterContactId();
+            ticket = ticketsService.createTicket( payload );
+        } else if ( len( tmpl.getOrganizationId() ?: "" ) ) {
+            // Org-only templates: create an accountless ticket with the
+            // org explicitly stamped after creation.
+            payload.originatingEmail = "recurring+" & tmpl.getId() & "@local.invalid";
+            ticket = ticketsService.createAccountlessTicket( payload );
+            queryExecute(
+                "UPDATE tickets SET organization_id = :oid WHERE id = :id",
+                { oid : tmpl.getOrganizationId(), id : ticket.getId() }
+            );
+            ticket = ticketsService.getTicket( ticket.getId() );
+        } else {
+            payload.originatingEmail = "recurring+" & tmpl.getId() & "@local.invalid";
+            ticket = ticketsService.createAccountlessTicket( payload );
+        }
+
+        if ( len( tmpl.getBodyTemplate() ?: "" ) ) {
+            ticketsService.addMessage( {
+                ticketId   : ticket.getId(),
+                body       : tmpl.getBodyTemplate(),
+                isInternal : false,
+                actorType  : "scheduler",
+                actorId    : tmpl.getId()
+            } );
+        }
+
+        var stampNow      = now();
+        var intervalMins  = int( tmpl.getIntervalMinutes() ?: 1440 );
+        var nextRun       = dateAdd( "n", intervalMins, stampNow );
+        tmpl.setLastRunAt( stampNow );
+        tmpl.setLastTicketId( ticket.getId() );
+        tmpl.setNextRunAt( nextRun );
+        tmpl.save();
+
+        return ticket;
+    }
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+}
