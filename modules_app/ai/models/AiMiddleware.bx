@@ -37,8 +37,11 @@ class singleton=true {
      *
      * Required:
      *   feature  - short key for this call (e.g., "suggested-reply")
-     *   prompt   - the full text to send the provider
+     *   prompt   - the user message (post-redaction, hashed for logging)
      * Optional in `options`:
+     *   systemPrompt    - sent as a system message ahead of the user
+     *                     message. Features feed the
+     *                     AiSystemPromptService template through here.
      *   model           - override the configured model
      *   organizationId  - subject org for logging
      *   ticketId        - subject ticket for logging
@@ -75,7 +78,13 @@ class singleton=true {
             return baseResult( outcome = "redacted_only" );
         }
 
-        var hash       = hash( redacted, "SHA-256" );
+        // System prompt also runs through redaction. Both are folded
+        // into the same SHA-256 hash so the logged digest reflects
+        // exactly what hit the provider.
+        var systemPrompt = arguments.options.systemPrompt ?: "";
+        if ( len( systemPrompt ) ) systemPrompt = redactPrompt( systemPrompt );
+
+        var hash       = hash( ( len( systemPrompt ) ? systemPrompt & char( 30 ) : "" ) & redacted, "SHA-256" );
         var modelToUse = arguments.options.model ?: capability.getModel();
         var providerToUse = capability.getProvider();
 
@@ -92,11 +101,23 @@ class singleton=true {
             };
             if ( len( capability.getBaseUrl() ) ) providerOptions[ "baseUrl" ] = capability.getBaseUrl();
 
+            // Build the messages payload. When a systemPrompt is
+            // present we send a two-message conversation (system +
+            // user); otherwise a single user message preserves the
+            // earlier behavior for any caller that does not yet
+            // supply a template.
+            var messages = len( systemPrompt )
+                ? [
+                    { "role" : "system", "content" : systemPrompt },
+                    { "role" : "user",   "content" : redacted }
+                  ]
+                : redacted;
+
             // bx-ai BIF: aiChat( messages, params, options ). The
             // facade is the only place that calls bx-ai directly,
             // per CLAUDE.md's "ai module is the only code that
             // imports bx-ai" rule.
-            var raw = aiChat( redacted, params, providerOptions );
+            var raw = aiChat( messages, params, providerOptions );
 
             var result   = parseAiChatResponse( raw );
             var latency  = getTickCount() - startMs;

@@ -1,0 +1,24 @@
+/**
+ * AiSystemPrompt: one editable system-prompt template per AI feature.
+ *
+ * The Phase 5 admin UI lets an operator rewrite these without code
+ * changes; until then, the migration seeds sensible defaults and
+ * features fall back to a hardcoded baseline if no row exists.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="ai_system_prompts"
+    accessors="true"
+{
+
+    property name="featureKey"   column="feature_key";
+    property name="systemPrompt" column="system_prompt";
+    property name="isActive"     column="is_active";
+    property name="createdAt"    column="created_at" sqltype="timestamp";
+    property name="updatedAt"    column="updated_at" sqltype="timestamp";
+
+    private string function keyName(){
+        return "featureKey";
+    }
+
+}

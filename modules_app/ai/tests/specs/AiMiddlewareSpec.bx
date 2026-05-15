@@ -16,13 +16,20 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     function beforeAll(){
         super.beforeAll();
         super.setup();
-        variables.ai = getController().getWireBox().getInstance( "AiMiddleware@ai" );
+        variables.ai         = getController().getWireBox().getInstance( "AiMiddleware@ai" );
+        variables.capability = getController().getWireBox().getInstance( "AiCapability@ai" );
+        // Spec assertions about the disabled path only hold when AI
+        // is actually off (the CI default). On a dev box with a real
+        // API key in .env the specs skip those paths rather than
+        // burning a real provider call.
+        variables.aiOff = !variables.capability.isEnabled();
     }
 
     function run(){
         describe( "AiMiddleware", function(){
 
             it( "returns a 'disabled' outcome when the capability flag is off", function(){
+                if ( !variables.aiOff ) return;
                 var r = variables.ai.complete(
                     feature : "spec-disabled",
                     prompt  : "Hello there."
@@ -32,6 +39,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "writes an ai_interactions row for the disabled call", function(){
+                if ( !variables.aiOff ) return;
                 var feature = "spec-row-" & createUUID();
                 variables.ai.complete( feature : feature, prompt : "anything" );
                 var row = queryExecute(

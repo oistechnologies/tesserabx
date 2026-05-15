@@ -173,8 +173,9 @@ class {
             ticketId     : t.getId(),
             actorAgentId : currentAgentId()
         );
-        if ( result.outcome == "ok" && len( result.text ) ) {
-            flash.put( "suggestedReply", result.text );
+        if ( result.outcome == "ok" && len( result.reply ) ) {
+            flash.put( "suggestedReply", result.reply );
+            if ( len( result.notes ?: "" ) ) flash.put( "suggestedNotes", result.notes );
             messagebox.info( "Reply drafted." );
         } else if ( result.outcome == "error" ) {
             messagebox.error( "AI suggestion failed: " & result.error );
@@ -397,9 +398,12 @@ class {
         // any AI control. Per CLAUDE.md: AI must be invisible when
         // disabled.
         arguments.prc.aiEnabled         = aiCapability.isFeatureEnabled( "suggested-reply" );
-        // The suggestReply action stores the draft in flash so it
-        // survives the post-redirect-get cycle and ends up here.
+        // The suggestReply action stores the draft + any agent-only
+        // notes in flash so they survive the post-redirect-get cycle.
+        // Notes render in a callout above the textarea; the draft
+        // prefills the textarea itself.
         arguments.prc.suggestedReply    = flash.get( "suggestedReply", "" );
+        arguments.prc.suggestedNotes    = flash.get( "suggestedNotes", "" );
     }
 
     private string function currentAgentId(){

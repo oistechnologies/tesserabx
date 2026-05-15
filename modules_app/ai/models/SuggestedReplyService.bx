@@ -1,90 +1,161 @@
 /**
- * SuggestedReplyService: drafts an agent reply from a ticket's
- * subject and recent messages.
+ * SuggestedReplyService: drafts an agent reply for a ticket and
+ * returns it split into two channels: the customer-visible `reply`
+ * and the agent-only `notes`.
  *
- * Lives in the `ai` module rather than `tickets` so the cross-module
- * direction stays one-way: AI features import the ticket service
- * for reads, never the other direction. The build plan's dependency
- * graph keeps `tickets` below `ai` and forbids `tickets` from knowing
- * AI is on.
+ * The system prompt comes from ai_system_prompts (admin-editable
+ * via the Phase 5 UI); the migration seeds a default for
+ * `suggested-reply`. We force the model to respond with strict
+ * JSON `{ "reply": "...", "notes": "..." }` so agent-facing notes
+ * never leak into the customer reply (the failure mode we hit on
+ * the first real test run).
  *
- * Phase 4b ships the agent-facing path (synchronous call from a
- * handler action). Latency-sensitive paths get cbq-job wrapping in
- * Phase 4c+ when triage and bulk operations land.
+ * Lives in the `ai` module so the cross-module direction stays
+ * one-way (AI imports tickets, never the other direction).
  */
 class singleton=true {
 
+    property name="wirebox"        inject="wirebox";
     property name="capability"     inject="AiCapability@ai";
     property name="middleware"     inject="AiMiddleware@ai";
+    property name="promptService"  inject="AiSystemPromptService@ai";
     property name="ticketsService" inject="TicketsService@tickets";
+
+    variables.FEATURE_KEY = "suggested-reply";
+    variables.FALLBACK_SYSTEM_PROMPT = "You are an experienced customer support agent drafting a reply on behalf of {{agentName}}. Respond with strict JSON: {""reply"": ""..."", ""notes"": ""...""}. The reply is what the customer sees; notes are for the agent only.";
 
     /**
      * Suggest a reply for a ticket. Returns:
-     *   { available: bool, text: string, outcome: string, error: string }
-     * `available` is false when the AI capability is disabled OR the
-     * per-feature gate is off; callers use that to decide whether to
-     * render the UI affordance at all.
+     *   {
+     *     available : bool,
+     *     reply     : string,   // customer-visible draft
+     *     notes     : string,   // agent-only commentary; "" if none
+     *     outcome   : string,
+     *     error     : string
+     *   }
      */
     public struct function suggest( required string ticketId, string actorAgentId = "" ){
-        var off = { "available" : false, "text" : "", "outcome" : "disabled", "error" : "" };
-        if ( !capability.isFeatureEnabled( "suggested-reply" ) ) return off;
+        var off = { "available" : false, "reply" : "", "notes" : "", "outcome" : "disabled", "error" : "" };
+        if ( !capability.isFeatureEnabled( variables.FEATURE_KEY ) ) return off;
 
         var ticket = ticketsService.getTicket( arguments.ticketId );
         if ( isNull( ticket ) ) {
-            return { "available" : true, "text" : "", "outcome" : "error", "error" : "Ticket not found" };
+            return { "available" : true, "reply" : "", "notes" : "", "outcome" : "error", "error" : "Ticket not found" };
         }
 
-        var prompt = buildPrompt( ticket );
+        var agentName    = lookupAgentName( arguments.actorAgentId );
+        var template     = promptService.getForFeature( variables.FEATURE_KEY );
+        if ( !len( template ) ) template = variables.FALLBACK_SYSTEM_PROMPT;
+        var systemPrompt = promptService.renderTemplate(
+            template,
+            {
+                "agentName"      : agentName,
+                "ticketSubject"  : ticket.getSubject() ?: "",
+                "ticketPriority" : ticket.getPriority() ?: "normal"
+            }
+        );
+
+        var userPrompt = buildUserPrompt( ticket );
         var result = middleware.complete(
-            feature : "suggested-reply",
-            prompt  : prompt,
+            feature : variables.FEATURE_KEY,
+            prompt  : userPrompt,
             options : {
+                systemPrompt   : systemPrompt,
                 organizationId : ticket.getOrganizationId() ?: "",
                 ticketId       : ticket.getId(),
                 agentId        : arguments.actorAgentId,
                 temperature    : 0.4,
-                maxTokens      : 600
+                maxTokens      : 700
             }
         );
+
+        if ( result.outcome != "ok" ) {
+            return {
+                "available" : true,
+                "reply"     : "",
+                "notes"     : "",
+                "outcome"   : result.outcome,
+                "error"     : result.error ?: ""
+            };
+        }
+
+        var parsed = parseModelJson( result.text );
         return {
             "available" : true,
-            "text"      : result.text ?: "",
-            "outcome"   : result.outcome,
-            "error"     : result.error ?: ""
+            "reply"     : parsed.reply,
+            "notes"     : parsed.notes,
+            "outcome"   : "ok",
+            "error"     : ""
         };
     }
 
-    private string function buildPrompt( required any ticket ){
+    /**
+     * Parse the model's strict-JSON output into {reply, notes}.
+     * Tolerates code-fence wrapping and a missing notes field. If
+     * the response is not parseable at all, the whole text becomes
+     * the reply (with a note recording the parse failure) so the
+     * agent still sees something useful instead of an empty box.
+     */
+    private struct function parseModelJson( required string raw ){
+        var stripped = stripCodeFences( trim( arguments.raw ) );
+        var fallback = { "reply" : arguments.raw, "notes" : "" };
+
+        if ( !len( stripped ) ) return fallback;
+        if ( !isJSON( stripped ) ) return { "reply" : arguments.raw, "notes" : "(AI did not return JSON; showing raw output.)" };
+
+        try {
+            var data = jsonDeserialize( stripped );
+            if ( !isStruct( data ) ) return fallback;
+            return {
+                "reply" : toString( data.reply ?: "" ),
+                "notes" : toString( data.notes ?: "" )
+            };
+        } catch ( any e ) {
+            return { "reply" : arguments.raw, "notes" : "(AI returned malformed JSON: " & e.message & ")" };
+        }
+    }
+
+    private string function stripCodeFences( required string text ){
+        var t = arguments.text;
+        if ( left( t, 7 ) == "```json" ) t = listRest( t, char( 10 ) );
+        else if ( left( t, 3 ) == "```" ) t = listRest( t, char( 10 ) );
+        if ( right( t, 3 ) == "```" ) t = left( t, len( t ) - 3 );
+        return trim( t );
+    }
+
+    private string function buildUserPrompt( required any ticket ){
         var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
         var lines = [
-            "You are drafting a reply on behalf of a support agent for a help-desk ticket.",
-            "Respond in a clear, professional tone. Address the customer's most recent message.",
-            "Do not invent facts; if information is missing, ask a focused follow-up question.",
-            "Keep the reply concise (typically 2 to 6 sentences). Sign off with a friendly closing.",
-            "",
             "Ticket subject: " & arguments.ticket.getSubject(),
             "Ticket priority: " & ( arguments.ticket.getPriority() ?: "normal" ),
             ""
         ];
         if ( !messages.len() ) {
             lines.append( "No messages yet on this ticket. Draft an opening response acknowledging the request." );
-            return lines.toList( chr( 10 ) );
+            return lines.toList( char( 10 ) );
         }
-
-        // Walk the recent messages (oldest first) and label each so
-        // the model can tell who said what. We include up to the last
-        // 10 messages; long threads get the most recent slice.
         var slice = messages.len() <= 10 ? messages : messages.slice( messages.len() - 9, 10 );
-        lines.append( "Conversation so far:" );
+        lines.append( "Conversation so far (oldest first):" );
         for ( var m in slice ) {
-            if ( m.getIsInternal() ?: false ) continue; // never leak internal notes into the model prompt
-            var who = "Customer";
-            if ( len( m.getAuthorAgentId() ?: "" ) ) who = "Agent";
+            if ( m.getIsInternal() ?: false ) continue;
+            var who = len( m.getAuthorAgentId() ?: "" ) ? "Agent" : "Customer";
             lines.append( who & ": " & ( m.getBody() ?: "" ) );
         }
         lines.append( "" );
         lines.append( "Draft the agent's next reply." );
-        return lines.toList( chr( 10 ) );
+        return lines.toList( char( 10 ) );
+    }
+
+    private string function lookupAgentName( required string agentId ){
+        if ( !len( arguments.agentId ) ) return "the support team";
+        var agent = wirebox.getInstance( "Agent@agent" )
+            .where( "id", arguments.agentId )
+            .first();
+        if ( isNull( agent ) ) return "the support team";
+        var first = agent.getFirstName() ?: "";
+        var last  = agent.getLastName() ?: "";
+        var full  = trim( first & " " & last );
+        return len( full ) ? full : ( agent.getEmail() ?: "the support team" );
     }
 
 }

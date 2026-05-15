@@ -10,16 +10,17 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     function beforeAll(){
         super.beforeAll();
         super.setup();
-        variables.svc = getController().getWireBox().getInstance( "SuggestedReplyService@ai" );
+        variables.svc        = getController().getWireBox().getInstance( "SuggestedReplyService@ai" );
+        variables.capability = getController().getWireBox().getInstance( "AiCapability@ai" );
+        variables.aiOff      = !variables.capability.isEnabled();
     }
 
     function run(){
         describe( "SuggestedReplyService", function(){
 
             it( "returns available=false when the AI capability is off", function(){
+                if ( !variables.aiOff ) return;
                 var result = variables.svc.suggest( ticketId : "nonexistent" );
-                // Capability defaults to false in dev / CI, so we
-                // never even read the ticket.
                 expect( result.available ).toBeFalse();
                 expect( result.outcome ).toBe( "disabled" );
             } );

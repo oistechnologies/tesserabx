@@ -1,0 +1,81 @@
+/**
+ * AiSystemPromptService: read / write of ai_system_prompts rows.
+ *
+ * Features call `getForFeature( "suggested-reply" )` to obtain the
+ * raw template (with `{{placeholder}}` tokens). Substitution is the
+ * feature's job; this service is a pure config layer.
+ *
+ * `setForFeature` is what the Phase 5 admin UI will use. We avoid
+ * Quick for the read path so a missing row is a cheap "" rather
+ * than an exception.
+ */
+class singleton=true {
+
+    /**
+     * Returns the active system-prompt template for `featureKey`, or
+     * an empty string when no row exists or the row is inactive.
+     * Callers fall back to a hardcoded baseline on empty.
+     */
+    public string function getForFeature( required string featureKey ){
+        var rows = queryExecute(
+            "SELECT system_prompt
+             FROM   ai_system_prompts
+             WHERE  feature_key = :k
+             AND    is_active   = TRUE",
+            { k : arguments.featureKey }
+        );
+        return rows.recordCount ? toString( rows.system_prompt[ 1 ] ?: "" ) : "";
+    }
+
+    /**
+     * Upsert the template for `featureKey`. Empty content is a hard
+     * disable (sets is_active = false) rather than a delete, so the
+     * admin UI can re-enable without re-typing.
+     */
+    public void function setForFeature( required string featureKey, required string systemPrompt ){
+        var trimmed = trim( arguments.systemPrompt );
+        var disable = !len( trimmed );
+        queryExecute(
+            "INSERT INTO ai_system_prompts ( feature_key, system_prompt, is_active, updated_at )
+             VALUES ( :k, :p, :active, NOW() )
+             ON CONFLICT ( feature_key )
+             DO UPDATE SET system_prompt = EXCLUDED.system_prompt,
+                           is_active     = EXCLUDED.is_active,
+                           updated_at    = NOW()",
+            { k : arguments.featureKey, p : trimmed, active : !disable }
+        );
+    }
+
+    /**
+     * Substitute `{{token}}` placeholders in a template against
+     * `replacements`. Unknown tokens are left in place so a typo in
+     * the admin UI is visible in the resulting prompt rather than
+     * silently swallowed.
+     */
+    public string function renderTemplate( required string template, struct replacements = {} ){
+        var out = arguments.template;
+        for ( var key in arguments.replacements ) {
+            out = replaceNoCase( out, "{{" & key & "}}", arguments.replacements[ key ], "all" );
+        }
+        return out;
+    }
+
+    public array function listAll(){
+        var rows = queryExecute(
+            "SELECT feature_key, system_prompt, is_active, updated_at
+             FROM   ai_system_prompts
+             ORDER  BY feature_key"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "featureKey"   : rows.feature_key[ i ],
+                "systemPrompt" : rows.system_prompt[ i ],
+                "isActive"     : rows.is_active[ i ],
+                "updatedAt"    : rows.updated_at[ i ]
+            } );
+        }
+        return out;
+    }
+
+}

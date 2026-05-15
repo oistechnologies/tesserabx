@@ -34,8 +34,13 @@ class {
     function onLoad(){
         binder.map( "AiInteraction@ai" )
               .to( "#moduleMapping#.models.AiInteraction" );
+        binder.map( "AiSystemPrompt@ai" )
+              .to( "#moduleMapping#.models.AiSystemPrompt" );
         binder.map( "AiCapability@ai" )
               .to( "#moduleMapping#.models.AiCapability" )
+              .asSingleton();
+        binder.map( "AiSystemPromptService@ai" )
+              .to( "#moduleMapping#.models.AiSystemPromptService" )
               .asSingleton();
         binder.map( "AiMiddleware@ai" )
               .to( "#moduleMapping#.models.AiMiddleware" )

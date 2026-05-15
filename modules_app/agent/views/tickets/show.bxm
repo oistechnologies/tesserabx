@@ -103,6 +103,12 @@
                                 <small class="text-body-secondary ms-2">Drafts a reply from the conversation so far.</small>
                             </form>
                         </bx:if>
+                        <bx:if len( prc.suggestedNotes ?: "" )>
+                            <div class="alert alert-info py-2 px-3 small" role="note">
+                                <strong><i class="bi bi-info-circle"></i> AI note for agent:</strong>
+                                <div style="white-space:pre-wrap">#encodeForHTML( prc.suggestedNotes )#</div>
+                            </div>
+                        </bx:if>
                         <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
                             <textarea class="form-control mb-2" name="body" rows="4" placeholder="Reply visible to the requester...">#encodeForHTML( prc.suggestedReply ?: "" )#</textarea>
                             <div class="d-flex justify-content-end">
