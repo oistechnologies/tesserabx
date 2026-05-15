@@ -43,17 +43,39 @@ component {
     private void function seedContact( required any qb ){
         var existing = arguments.qb.newQuery().from( "contacts" ).where( "email", "client@example.com" ).first();
         if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) {
+            ensureOrganizationAdminRole( arguments.qb, existing.id );
             return;
         }
         var org = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
+        var contactId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
         arguments.qb.newQuery().from( "contacts" ).insert( {
-            "id"                    : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
-            "organization_id"       : org.id,
-            "email"                 : "client@example.com",
-            "password_hash"         : variables.SEED_PASSWORD_HASH,
-            "first_name"            : "Test",
-            "last_name"             : "Client",
-            "is_organization_admin" : true
+            "id"              : contactId,
+            "organization_id" : org.id,
+            "email"           : "client@example.com",
+            "password_hash"   : variables.SEED_PASSWORD_HASH,
+            "first_name"      : "Test",
+            "last_name"       : "Client"
+        } );
+        ensureOrganizationAdminRole( arguments.qb, contactId );
+    }
+
+    /**
+     * The migration 2026_05_15_000040 backfills "organization-admin"
+     * for the legacy boolean. This guarantees the seed contact has
+     * the role even on a fresh database where the migration runs
+     * before any contact exists.
+     */
+    private void function ensureOrganizationAdminRole( required any qb, required string contactId ){
+        var existing = arguments.qb.newQuery()
+            .from( "contact_roles" )
+            .where( "contact_id", arguments.contactId )
+            .where( "role_key", "organization-admin" )
+            .first();
+        if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) return;
+        arguments.qb.newQuery().from( "contact_roles" ).insert( {
+            "id"         : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "contact_id" : arguments.contactId,
+            "role_key"   : "organization-admin"
         } );
     }
 

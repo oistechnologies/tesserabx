@@ -1,0 +1,54 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <form method="get" action="/agent/contacts" class="d-flex align-items-center gap-2 mb-0">
+        <label class="form-label mb-0" for="organizationId">Organization</label>
+        <select name="organizationId" id="organizationId" class="form-select" onchange="this.form.submit()">
+            <option value="">Select organization...</option>
+            <bx:loop array="#prc.organizations#" item="org">
+                <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.activeOrgId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+            </bx:loop>
+        </select>
+    </form>
+    <a class="btn btn-primary" href="/agent/contacts/new"><i class="bi bi-plus-lg"></i> New contact</a>
+</div>
+
+<bx:if len( prc.activeOrgId ?: "" )>
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:if !arrayLen( prc.contacts )>
+                        <tr><td colspan="4" class="text-center text-body-secondary py-4">No contacts in this organization yet.</td></tr>
+                    </bx:if>
+                    <bx:loop array="#prc.contacts#" item="contact">
+                        <tr>
+                            <td><a href="/agent/contacts/#encodeForURL( contact.getId() )#">#encodeForHTML( contact.getEmail() )#</a></td>
+                            <td>#encodeForHTML( ( contact.getFirstName() ?: "" ) & " " & ( contact.getLastName() ?: "" ) )#</td>
+                            <td>
+                                <bx:if contact.getIsActive()>
+                                    <span class="badge text-bg-success">Active</span>
+                                <bx:else>
+                                    <span class="badge text-bg-secondary">Inactive</span>
+                                </bx:if>
+                            </td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-outline-secondary" href="/agent/contacts/#encodeForURL( contact.getId() )#/edit">Edit</a>
+                            </td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+    </div>
+<bx:else>
+    <div class="alert alert-info">Pick an organization above to list its contacts, or create a new contact.</div>
+</bx:if>
+</bx:output>

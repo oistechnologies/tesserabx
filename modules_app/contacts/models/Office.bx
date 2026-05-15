@@ -1,10 +1,11 @@
 /**
  * Office: optional grouping within an organization.
  *
- * Tenant-scoped. Not part of the isolation boundary itself.
+ * Tenant-scoped. The TenantScope global scope filters Office queries
+ * to the current client user's organization; agents see all offices.
  */
 class
-    extends="quick.models.BaseEntity"
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
     table="offices"
     accessors="true"
 {
@@ -12,11 +13,13 @@ class
     property name="id";
     property name="organizationId" column="organization_id";
     property name="name";
-    property name="createdAt"      column="created_at";
-    property name="updatedAt"      column="updated_at";
+    property name="createdAt"      column="created_at" sqltype="timestamp";
+    property name="updatedAt"      column="updated_at" sqltype="timestamp";
 
-    // Phase 1 wires `this.globalScopes = [ "tenant" ]` once the tenant
-    // scope service is registered with Quick.
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
 
     function organization(){
         return belongsTo( "Organization@contacts", "organization_id" );

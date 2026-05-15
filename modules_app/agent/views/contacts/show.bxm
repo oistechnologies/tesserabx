@@ -1,0 +1,55 @@
+<bx:output>
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title h4">#encodeForHTML( prc.contact.getEmail() )#</h2>
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Name</dt>
+                    <dd class="col-sm-9">#encodeForHTML( ( prc.contact.getFirstName() ?: "" ) & " " & ( prc.contact.getLastName() ?: "" ) )#</dd>
+
+                    <dt class="col-sm-3">Organization</dt>
+                    <dd class="col-sm-9">
+                        <bx:if !isNull( prc.organization )>
+                            #encodeForHTML( prc.organization.getName() )#
+                        </bx:if>
+                    </dd>
+
+                    <dt class="col-sm-3">Status</dt>
+                    <dd class="col-sm-9">
+                        <bx:if prc.contact.getIsActive()>
+                            <span class="badge text-bg-success">Active</span>
+                        <bx:else>
+                            <span class="badge text-bg-secondary">Inactive</span>
+                        </bx:if>
+                    </dd>
+
+                    <dt class="col-sm-3">Created</dt>
+                    <dd class="col-sm-9">#encodeForHTML( dateTimeFormat( prc.contact.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+                </dl>
+            </div>
+            <div class="card-footer text-end">
+                <a class="btn btn-outline-secondary" href="/agent/contacts?organizationId=#encodeForURL( prc.contact.getOrganizationId() )#">Back to list</a>
+                <a class="btn btn-primary" href="/agent/contacts/#encodeForURL( prc.contact.getId() )#/edit">Edit</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-4">
+        <div class="card">
+            <div class="card-header"><strong>Roles</strong></div>
+            <div class="card-body">
+                <bx:if !arrayLen( prc.roles )>
+                    <p class="text-body-secondary mb-0">No roles assigned.</p>
+                <bx:else>
+                    <ul class="list-unstyled mb-0">
+                        <bx:loop array="#prc.roles#" item="role">
+                            <li><span class="badge text-bg-info">#encodeForHTML( role.getRoleKey() )#</span></li>
+                        </bx:loop>
+                    </ul>
+                </bx:if>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,50 @@
+<bx:output>
+<div class="row">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="post" action="/agent/contacts">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
+                            <input type="email" class="form-control" id="email" name="email" required value="#encodeForHTMLAttribute( prc.formData.email ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="organizationId">Organization <span class="text-danger">*</span></label>
+                            <select class="form-select" id="organizationId" name="organizationId" required>
+                                <option value="">Select organization...</option>
+                                <bx:loop array="#prc.organizations#" item="org">
+                                    <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.formData.organizationId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="firstName">First name</label>
+                            <input type="text" class="form-control" id="firstName" name="firstName" value="#encodeForHTMLAttribute( prc.formData.firstName ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="lastName">Last name</label>
+                            <input type="text" class="form-control" id="lastName" name="lastName" value="#encodeForHTMLAttribute( prc.formData.lastName ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="password">Initial password <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="password" name="password" required minlength="8" value="#encodeForHTMLAttribute( prc.formData.password ?: "" )#">
+                            <div class="form-text">At least 8 characters. Share with the client out-of-band.</div>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="organizationAdmin" name="organizationAdmin" value="true"<bx:if isBoolean( prc.formData.organizationAdmin ?: false ) and ( prc.formData.organizationAdmin ?: false )> checked</bx:if>>
+                                <label class="form-check-label" for="organizationAdmin">Grant Organization Admin role</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end gap-2 mt-4">
+                        <a class="btn btn-outline-secondary" href="/agent/contacts">Cancel</a>
+                        <button class="btn btn-primary" type="submit">Create contact</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

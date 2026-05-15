@@ -1,23 +1,30 @@
 /**
  * TenantScope: the tenant isolation primitive.
  *
- * Applied to every tenant-scoped Quick entity. When the current request
- * belongs to a Contact, restricts all queries to that user's
- * organization_id. Agents bypass the scope (see TenantContextProbe).
+ * Called from every tenant-scoped entity's applyGlobalScopes() hook
+ * with the QuickBuilder. Applies a `where organization_id = ?`
+ * predicate when the current request belongs to a Contact, and is a
+ * no-op for Agents (who see across organizations).
  *
  * Lives in `contacts` because contacts owns the tenant entities and
- * defines what "current tenant" means.
+ * defines "who is the current tenant" through TenantContextProbe.
  *
  * Usage on a tenant-scoped entity:
- *   this.globalScopes = [ "tenant" ];
+ *   function applyGlobalScopes( builder ){
+ *       getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+ *       return this;
+ *   }
  */
-class {
+class singleton=true {
 
-    property name="authService"        inject="AuthenticationService@cbauth";
-    property name="tenantContextProbe" inject="TenantContextProbe@contacts";
+    // Look the probe up lazily through WireBox instead of caching it
+    // as a property. Specs swap the probe binding mid-run to simulate
+    // contact vs agent context, and a cached reference would defeat
+    // that.
+    property name="wirebox" inject="wirebox";
 
-    public any function apply( required any builder, required any quickBuilder ){
-        var ctx = tenantContextProbe.currentTenantId();
+    public any function apply( required any builder ){
+        var ctx = wirebox.getInstance( "TenantContextProbe@contacts" ).currentTenantId();
         if ( !isNull( ctx ) && len( ctx ) ) {
             arguments.builder.where( "organization_id", ctx );
         }

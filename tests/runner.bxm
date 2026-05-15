@@ -2,16 +2,47 @@
 <!---
 	TesseraBX — TestBox runner.
 
-	Executes all tests under /tests/specs/ with the simple reporter by
-	default. Override via URL query params.
+	Executes the top-level /tests/specs and every module's
+	modules_app/<module>/tests/specs directory. Module specs are
+	auto-discovered so adding a new module does not require a
+	runner edit.
+
+	Override via URL query params.
 --->
 <bx:param name="url.reporter"           default="simple">
-<bx:param name="url.directory"          default="tests.specs">
 <bx:param name="url.recurse"            default="true" type="boolean">
 <bx:param name="url.bundles"            default="">
 <bx:param name="url.labels"             default="">
 <bx:param name="url.excludes"           default="">
 <bx:param name="url.reportpath"         default="#expandPath( "/tests/results" )#">
 <bx:param name="url.bundlesPattern"     default="*Spec*.cfc|*Test*.cfc|*Spec*.bx|*Test*.bx">
+
+<bx:script>
+if ( !structKeyExists( url, "directory" ) || !len( url.directory ) ) {
+    dirs = [ "tests.specs" ];
+    modulesRoot = expandPath( "/modules_app" );
+    if ( directoryExists( modulesRoot ) ) {
+        for ( entry in directoryList( modulesRoot, false, "query" ) ) {
+            if ( entry.type != "Dir" ) continue;
+            specPath = modulesRoot & "/" & entry.name & "/tests/specs";
+            if ( directoryExists( specPath ) ) {
+                dirs.append( "modules_app." & entry.name & ".tests.specs" );
+            }
+            // Nested child modules (admin lives inside agent).
+            nestedRoot = modulesRoot & "/" & entry.name & "/modules";
+            if ( directoryExists( nestedRoot ) ) {
+                for ( nested in directoryList( nestedRoot, false, "query" ) ) {
+                    if ( nested.type != "Dir" ) continue;
+                    nestedSpecs = nestedRoot & "/" & nested.name & "/tests/specs";
+                    if ( directoryExists( nestedSpecs ) ) {
+                        dirs.append( "modules_app." & entry.name & ".modules." & nested.name & ".tests.specs" );
+                    }
+                }
+            }
+        }
+    }
+    url.directory = dirs.toList();
+}
+</bx:script>
 
 <bx:include template="/testbox/system/runners/HTMLRunner.cfm">

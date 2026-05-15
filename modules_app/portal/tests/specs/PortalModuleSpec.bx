@@ -13,8 +13,12 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "exposes its entry point", function(){
-                var registry = getController().getModuleService().getModuleRegistry();
-                expect( registry[ "portal" ] ).toHaveKey( "entryPoint" );
+                var cache = getController().getModuleService().getModuleConfigCache();
+                expect( cache ).toHaveKey( "portal" );
+                // portal serves the root surface, so its entryPoint
+                // is intentionally an empty string. The presence of
+                // the key in the cache is the meaningful signal.
+                expect( cache[ "portal" ] ).toHaveKey( "entryPoint" );
             } );
         } );
     }

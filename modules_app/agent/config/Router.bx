@@ -3,6 +3,12 @@
  *
  * All routes are auto-prefixed with /agent because of
  * `entryPoint = "agent"` in ModuleConfig.bx.
+ *
+ * Same-pattern routes must be declared once with `toAction({...})`
+ * mapping each verb to its action. Calling `route(pattern).to(event)`
+ * twice with the same pattern collapses into a single route whose
+ * event ends up empty, which silently falls through to ColdBox's
+ * default `:handler/:action` resolution.
  */
 class {
 
@@ -11,13 +17,29 @@ class {
         route( "/" ).to( "Home.index" );
 
         // Auth
-        route( "login" ).withVerbs( "GET" ).to( "Session.new" );
-        route( "login" ).withVerbs( "POST" ).to( "Session.create" );
+        route( "login" ).withHandler( "Session" ).toAction( {
+            "GET"  : "new",
+            "POST" : "create"
+        } );
         route( "logout" ).to( "Session.delete" );
 
         // Unauthorized landing (the 403 page hit by non-admin agents
         // trying to reach /agent/admin/*).
         route( "unauthorized" ).to( "Session.unauthorized" );
+
+        // Contacts: agent-created provisioning. Most-specific patterns
+        // first so /contacts/new and /contacts/:id/edit win over
+        // /contacts/:id.
+        route( "contacts/new" ).to( "Contacts.new" );
+        route( "contacts/:id/edit" ).to( "Contacts.edit" );
+        route( "contacts/:id" ).withHandler( "Contacts" ).toAction( {
+            "GET"  : "show",
+            "POST" : "update"
+        } );
+        route( "contacts" ).withHandler( "Contacts" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
     }
 
 }

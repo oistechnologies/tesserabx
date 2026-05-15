@@ -1,0 +1,26 @@
+/**
+ * TesseraBXEntity: the shared Quick base for every TesseraBX entity.
+ *
+ * Lives in `contacts` because CLAUDE.md designates contacts as the
+ * home of the tenant isolation primitive and the shared base entity
+ * pattern that other tenant-scoped entities apply.
+ *
+ * Phase 1a:
+ *   - Overrides Quick's default AutoIncrementingKeyType with
+ *     NullKeyType, because every TesseraBX table uses application-
+ *     generated UUID strings (VARCHAR(36)) rather than serial ints.
+ *     The owning service generates the UUID before calling save().
+ *
+ * Future phases extend this with shared timestamp hooks and audit
+ * announcements; for now it only owns the key strategy.
+ */
+class
+    extends="quick.models.BaseEntity"
+    accessors="true"
+{
+
+    private any function keyType(){
+        return variables._wirebox.getInstance( "NullKeyType@quick" );
+    }
+
+}

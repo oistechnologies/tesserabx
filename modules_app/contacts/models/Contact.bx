@@ -2,37 +2,38 @@
  * Contact: a client-side user account.
  *
  * Tenant-scoped: a Contact belongs to exactly one Organization and
- * never sees data from another organization.
+ * sees only data from that organization through the TenantScope
+ * global scope.
  *
- * Phase 0 ships the minimum to authenticate. Phase 1 expands with the
- * full client-side role system, merge history, tier inheritance, and
- * per-organization custom fields.
+ * This is also the cbauth user entity for the / surface. The
+ * surface-specific firewall keeps Contact accounts away from /agent.
  *
- * This is also the cbauth user entity for the / surface.
+ * Client-side roles live in the contact_roles table, reached through
+ * the `roles` relationship. The role set is extensible without
+ * schema changes; the first defined role is "organization-admin".
  */
 class
-    extends="quick.models.BaseEntity"
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
     table="contacts"
     accessors="true"
 {
 
     property name="id";
-    property name="organizationId"        column="organization_id";
-    property name="officeId"              column="office_id";
+    property name="organizationId"  column="organization_id";
+    property name="officeId"        column="office_id";
     property name="email";
-    property name="passwordHash"          column="password_hash";
-    property name="firstName"             column="first_name";
-    property name="lastName"              column="last_name";
-    property name="isActive"              column="is_active";
-    property name="isOrganizationAdmin"   column="is_organization_admin";
-    property name="lastLoginAt"           column="last_login_at";
-    property name="createdAt"             column="created_at";
-    property name="updatedAt"             column="updated_at";
+    property name="passwordHash"    column="password_hash";
+    property name="firstName"       column="first_name";
+    property name="lastName"        column="last_name";
+    property name="isActive"        column="is_active";
+    property name="lastLoginAt"     column="last_login_at" sqltype="timestamp";
+    property name="createdAt"       column="created_at"    sqltype="timestamp";
+    property name="updatedAt"       column="updated_at"    sqltype="timestamp";
 
-    // Phase 1 wires `this.globalScopes = [ "tenant" ]` once the tenant
-    // scope service is registered with Quick. Phase 0 ships without it;
-    // tenant isolation is enforced solely through cbSecurity firewalls
-    // for now.
+    function applyGlobalScopes( builder ){
+        variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
+        return this;
+    }
 
     function organization(){
         return belongsTo( "Organization@contacts", "organization_id" );
@@ -40,6 +41,10 @@ class
 
     function office(){
         return belongsTo( "Office@contacts", "office_id" );
+    }
+
+    function roles(){
+        return hasMany( "ContactRole@contacts", "contact_id" );
     }
 
     // ---- cbauth user interface ----
@@ -82,16 +87,16 @@ class
     // ---- cbsecurity role / permission interface ----
 
     /**
-     * Roles for cbsecurity. Phase 0 ships only "contact" plus
-     * "organization-admin" for the first client-side role. Phase 1
-     * fleshes out the full role system from the Organization side.
+     * Roles for cbsecurity. Reads the contact_roles table through the
+     * `roles` relationship and prepends "contact" (the family-level
+     * marker) so firewall rules can target client users as a whole.
      */
     public array function getRoles(){
-        var roles = [ "contact" ];
-        if ( getIsOrganizationAdmin() ) {
-            roles.append( "organization-admin" );
+        var out = [ "contact" ];
+        for ( var assignment in roles().get() ) {
+            out.append( assignment.getRoleKey() );
         }
-        return roles;
+        return out;
     }
 
     public array function getPermissions(){
@@ -109,6 +114,13 @@ class
 
     public boolean function hasPermission( required any permission ){
         return false;
+    }
+
+    /**
+     * Convenience: is this contact an Organization Admin for their org?
+     */
+    public boolean function isOrganizationAdmin(){
+        return hasRole( "organization-admin" );
     }
 
 }

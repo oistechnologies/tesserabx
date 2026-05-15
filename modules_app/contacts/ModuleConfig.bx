@@ -36,12 +36,19 @@ class {
     function onLoad(){
         binder.map( "Contact@contacts" )
               .to( "#moduleMapping#.models.Contact" );
+        binder.map( "ContactRole@contacts" )
+              .to( "#moduleMapping#.models.ContactRole" );
         binder.map( "Office@contacts" )
               .to( "#moduleMapping#.models.Office" );
         binder.map( "Organization@contacts" )
               .to( "#moduleMapping#.models.Organization" );
+        binder.map( "OrganizationDomain@contacts" )
+              .to( "#moduleMapping#.models.OrganizationDomain" );
         binder.map( "ContactAuthService@contacts" )
               .to( "#moduleMapping#.models.ContactAuthService" )
+              .asSingleton();
+        binder.map( "ContactsService@contacts" )
+              .to( "#moduleMapping#.models.ContactsService" )
               .asSingleton();
         binder.map( "UserService@contacts" )
               .to( "#moduleMapping#.models.UserService" )

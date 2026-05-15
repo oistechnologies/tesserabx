@@ -1,0 +1,276 @@
+/**
+ * ContactsService: the public surface other modules use to reach
+ * contact and organization data.
+ *
+ * Per CLAUDE.md, no other module imports the Contact / Organization /
+ * Office / ContactRole / OrganizationDomain entities directly. They
+ * call this service. The service owns input validation (cbvalidation
+ * usage lives in handlers; this service trusts its callers but checks
+ * preconditions that affect data integrity).
+ *
+ * Phase 1 surface:
+ *   - Organization read / list / create
+ *   - Office read / list / create within an organization
+ *   - Contact read / list / create (the agent-created provisioning
+ *     path), update, deactivate
+ *   - Role assignment: assignRole / revokeRole / listRoles
+ *   - Domain mapping: resolveOrganizationForEmail / addDomainMapping /
+ *     listDomainMappings
+ *   - Contact merge (basic): mergeContacts
+ *
+ * Phase 1c will extend this service when tickets need to look up the
+ * contact for an inbound message.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="bcrypt"  inject="@BCrypt";
+
+    // ---------------- Organizations ----------------
+
+    public any function getOrganizationById( required string id ){
+        var org = wirebox.getInstance( "Organization@contacts" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( org ) ? javaCast( "null", "" ) : org;
+    }
+
+    public any function getOrganizationBySlug( required string slug ){
+        var org = wirebox.getInstance( "Organization@contacts" )
+            .where( "slug", arguments.slug )
+            .first();
+        return isNull( org ) ? javaCast( "null", "" ) : org;
+    }
+
+    public array function listOrganizations(){
+        return wirebox.getInstance( "Organization@contacts" )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function createOrganization( required struct data ){
+        var org = wirebox.getInstance( "Organization@contacts" );
+        org.setId( newId() );
+        org.setName( arguments.data.name );
+        org.setSlug( arguments.data.slug ?: slugify( arguments.data.name ) );
+        if ( structKeyExists( arguments.data, "tier" ) ) {
+            org.setTier( arguments.data.tier );
+        }
+        org.save();
+        return org;
+    }
+
+    // ---------------- Offices ----------------
+
+    public array function listOfficesForOrganization( required string organizationId ){
+        return wirebox.getInstance( "Office@contacts" )
+            .withoutGlobalScope()
+            .where( "organization_id", arguments.organizationId )
+            .orderBy( "name" )
+            .get();
+    }
+
+    public any function createOffice( required string organizationId, required string name ){
+        var office = wirebox.getInstance( "Office@contacts" );
+        office.setId( newId() );
+        office.setOrganizationId( arguments.organizationId );
+        office.setName( arguments.name );
+        office.save();
+        return office;
+    }
+
+    // ---------------- Contacts ----------------
+
+    public any function getContactById( required string id ){
+        var contact = wirebox.getInstance( "Contact@contacts" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    public any function getContactByEmail( required string email ){
+        var contact = wirebox.getInstance( "Contact@contacts" )
+            .withoutGlobalScope()
+            .where( "email", arguments.email )
+            .first();
+        return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    public array function listContactsForOrganization( required string organizationId ){
+        return wirebox.getInstance( "Contact@contacts" )
+            .withoutGlobalScope()
+            .where( "organization_id", arguments.organizationId )
+            .orderBy( "email" )
+            .get();
+    }
+
+    /**
+     * Agent-created provisioning: create a Contact for a given
+     * Organization. Caller supplies email and either a password
+     * (which we hash) or no password (then we generate a random one
+     * for an invite flow that Phase 2 will add).
+     *
+     * Caller must validate input first; this service trusts its inputs.
+     */
+    public any function provisionContact( required struct data ){
+        var raw = structKeyExists( arguments.data, "password" ) && len( arguments.data.password )
+            ? arguments.data.password
+            : createUUID();
+        var contact = wirebox.getInstance( "Contact@contacts" );
+        contact.setId( newId() );
+        contact.setOrganizationId( arguments.data.organizationId );
+        contact.setEmail( arguments.data.email );
+        contact.setPasswordHash( bcrypt.hashPassword( raw ) );
+        if ( structKeyExists( arguments.data, "firstName" ) ) contact.setFirstName( arguments.data.firstName );
+        if ( structKeyExists( arguments.data, "lastName" ) )  contact.setLastName( arguments.data.lastName );
+        if ( structKeyExists( arguments.data, "officeId" ) && len( arguments.data.officeId ) ) {
+            contact.setOfficeId( arguments.data.officeId );
+        }
+        contact.save();
+        return contact;
+    }
+
+    public any function deactivateContact( required string id ){
+        var contact = getContactById( arguments.id );
+        if ( isNull( contact ) ) return javaCast( "null", "" );
+        contact.setIsActive( false );
+        contact.save();
+        return contact;
+    }
+
+    // ---------------- Roles ----------------
+
+    public array function listRolesForContact( required string contactId ){
+        return wirebox.getInstance( "ContactRole@contacts" )
+            .where( "contact_id", arguments.contactId )
+            .get();
+    }
+
+    public any function assignRole(
+        required string contactId,
+        required string roleKey,
+        string grantedByAgentId
+    ){
+        var existing = wirebox.getInstance( "ContactRole@contacts" )
+            .where( "contact_id", arguments.contactId )
+            .where( "role_key", arguments.roleKey )
+            .first();
+        if ( !isNull( existing ) ) {
+            return existing;
+        }
+        var assignment = wirebox.getInstance( "ContactRole@contacts" );
+        assignment.setId( newId() );
+        assignment.setContactId( arguments.contactId );
+        assignment.setRoleKey( arguments.roleKey );
+        if ( structKeyExists( arguments, "grantedByAgentId" ) && len( arguments.grantedByAgentId ?: "" ) ) {
+            assignment.setGrantedByAgentId( arguments.grantedByAgentId );
+        }
+        assignment.save();
+        return assignment;
+    }
+
+    public void function revokeRole(
+        required string contactId,
+        required string roleKey
+    ){
+        wirebox.getInstance( "ContactRole@contacts" )
+            .where( "contact_id", arguments.contactId )
+            .where( "role_key", arguments.roleKey )
+            .delete();
+    }
+
+    // ---------------- Domain mapping ----------------
+
+    public any function resolveOrganizationForEmail( required string email ){
+        var parts = listToArray( arguments.email, "@" );
+        if ( arrayLen( parts ) < 2 ) return javaCast( "null", "" );
+        var domain = lCase( parts[ arrayLen( parts ) ] );
+        var mapping = wirebox.getInstance( "OrganizationDomain@contacts" )
+            .where( "domain", domain )
+            .first();
+        if ( isNull( mapping ) ) return javaCast( "null", "" );
+        return getOrganizationById( mapping.getOrganizationId() );
+    }
+
+    public any function addDomainMapping(
+        required string organizationId,
+        required string domain,
+        boolean isVerified = false
+    ){
+        var existing = wirebox.getInstance( "OrganizationDomain@contacts" )
+            .where( "domain", lCase( arguments.domain ) )
+            .first();
+        if ( !isNull( existing ) ) {
+            return existing;
+        }
+        var mapping = wirebox.getInstance( "OrganizationDomain@contacts" );
+        mapping.setId( newId() );
+        mapping.setOrganizationId( arguments.organizationId );
+        mapping.setDomain( lCase( arguments.domain ) );
+        mapping.setIsVerified( arguments.isVerified );
+        mapping.save();
+        return mapping;
+    }
+
+    public array function listDomainMappingsForOrganization( required string organizationId ){
+        return wirebox.getInstance( "OrganizationDomain@contacts" )
+            .where( "organization_id", arguments.organizationId )
+            .orderBy( "domain" )
+            .get();
+    }
+
+    // ---------------- Contact merge ----------------
+
+    /**
+     * Basic merge: move the source contact's roles onto the target,
+     * then deactivate the source. Phase 1c will extend this to move
+     * tickets/messages onto the target. Both contacts must already
+     * exist in the same organization; cross-org merge is rejected.
+     */
+    public struct function mergeContacts(
+        required string sourceContactId,
+        required string targetContactId
+    ){
+        var source = getContactById( arguments.sourceContactId );
+        var target = getContactById( arguments.targetContactId );
+        if ( isNull( source ) || isNull( target ) ) {
+            throw( type="ContactsService.MergeFailed", message="Source or target contact not found." );
+        }
+        if ( source.getOrganizationId() != target.getOrganizationId() ) {
+            throw( type="ContactsService.CrossOrgMerge", message="Cannot merge contacts across organizations." );
+        }
+
+        var moved = 0;
+        for ( var assignment in listRolesForContact( source.getId() ) ) {
+            assignRole(
+                contactId : target.getId(),
+                roleKey   : assignment.getRoleKey()
+            );
+            moved++;
+        }
+        wirebox.getInstance( "ContactRole@contacts" )
+            .where( "contact_id", source.getId() )
+            .delete();
+
+        source.setIsActive( false );
+        source.save();
+
+        return {
+            "sourceContactId" : source.getId(),
+            "targetContactId" : target.getId(),
+            "rolesMoved"      : moved
+        };
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function newId(){
+        return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+    private string function slugify( required string text ){
+        return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+    }
+
+}

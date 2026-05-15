@@ -1,0 +1,182 @@
+/**
+ * ContactsServiceSpec: behavioral specs for the contacts service.
+ *
+ * Exercises the agent-created provisioning path, role assignment,
+ * domain-mapping resolution, and the basic merge flow. Each `it`
+ * creates and tears down its own ephemeral organization so specs
+ * stay independent of each other and of the dev seed data.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.service = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "ContactsService", function(){
+
+            it( "createOrganization persists name, slug, and tier", function(){
+                var slug = "spec-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var org = variables.service.createOrganization( {
+                    name : "Spec Org",
+                    slug : slug,
+                    tier : "Silver"
+                } );
+                expect( org.getId() ).notToBeEmpty();
+                expect( org.getSlug() ).toBe( slug );
+                expect( org.getTier() ).toBe( "Silver" );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "provisionContact hashes the password and writes a contact", function(){
+                var org = makeOrg();
+                var contact = variables.service.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "alice-" & createUUID() & "@example.com",
+                    password       : "plaintext-secret",
+                    firstName      : "Alice",
+                    lastName       : "Tester"
+                } );
+                expect( contact.getId() ).notToBeEmpty();
+                expect( contact.getPasswordHash() ).notToBe( "plaintext-secret" );
+                expect( contact.getFirstName() ).toBe( "Alice" );
+                cleanupContact( contact.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "assignRole creates a role row and is idempotent", function(){
+                var org = makeOrg();
+                var contact = makeContact( org.getId() );
+                var first = variables.service.assignRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+                var second = variables.service.assignRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+                expect( first.getId() ).toBe( second.getId() );
+
+                var roles = variables.service.listRolesForContact( contact.getId() );
+                expect( arrayLen( roles ) ).toBe( 1 );
+
+                cleanupContactRoles( contact.getId() );
+                cleanupContact( contact.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "revokeRole removes the role row", function(){
+                var org = makeOrg();
+                var contact = makeContact( org.getId() );
+                variables.service.assignRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+                variables.service.revokeRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+                expect( arrayLen( variables.service.listRolesForContact( contact.getId() ) ) ).toBe( 0 );
+
+                cleanupContact( contact.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "Contact.isOrganizationAdmin reflects the role row", function(){
+                var org = makeOrg();
+                var contact = makeContact( org.getId() );
+                expect( contact.isOrganizationAdmin() ).toBeFalse();
+
+                variables.service.assignRole(
+                    contactId : contact.getId(),
+                    roleKey   : "organization-admin"
+                );
+                var refreshed = variables.service.getContactById( contact.getId() );
+                expect( refreshed.isOrganizationAdmin() ).toBeTrue();
+
+                cleanupContactRoles( contact.getId() );
+                cleanupContact( contact.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "resolveOrganizationForEmail returns the mapped organization", function(){
+                var org = makeOrg();
+                var domain = "spec-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+                variables.service.addDomainMapping(
+                    organizationId : org.getId(),
+                    domain         : domain
+                );
+                var resolved = variables.service.resolveOrganizationForEmail( "anyone@" & domain );
+                expect( resolved ).notToBeNull();
+                expect( resolved.getId() ).toBe( org.getId() );
+
+                queryExecute(
+                    "DELETE FROM organization_domains WHERE organization_id = :orgId",
+                    { orgId : org.getId() }
+                );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "mergeContacts moves roles onto the target and deactivates the source", function(){
+                var org = makeOrg();
+                var source = makeContact( org.getId(), "src-" & createUUID() & "@example.com" );
+                var target = makeContact( org.getId(), "tgt-" & createUUID() & "@example.com" );
+                variables.service.assignRole(
+                    contactId : source.getId(),
+                    roleKey   : "organization-admin"
+                );
+
+                var result = variables.service.mergeContacts(
+                    sourceContactId : source.getId(),
+                    targetContactId : target.getId()
+                );
+
+                expect( result.rolesMoved ).toBe( 1 );
+                expect( arrayLen( variables.service.listRolesForContact( source.getId() ) ) ).toBe( 0 );
+                expect( arrayLen( variables.service.listRolesForContact( target.getId() ) ) ).toBe( 1 );
+
+                var sourceReloaded = variables.service.getContactById( source.getId() );
+                expect( sourceReloaded.getIsActive() ).toBeFalse();
+
+                cleanupContactRoles( target.getId() );
+                cleanupContact( source.getId() );
+                cleanupContact( target.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function makeOrg(){
+        return variables.service.createOrganization( {
+            name : "Spec Org " & createUUID(),
+            slug : "spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+    }
+
+    private any function makeContact( required string organizationId, string email ){
+        var addr = structKeyExists( arguments, "email" ) ? arguments.email : "c-" & createUUID() & "@example.com";
+        return variables.service.provisionContact( {
+            organizationId : arguments.organizationId,
+            email          : addr,
+            password       : "spec-password"
+        } );
+    }
+
+    private void function cleanupContact( required string id ){
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupContactRoles( required string contactId ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :cid", { cid : arguments.contactId } );
+    }
+
+    private void function cleanupOrganization( required string id ){
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.id } );
+    }
+
+}

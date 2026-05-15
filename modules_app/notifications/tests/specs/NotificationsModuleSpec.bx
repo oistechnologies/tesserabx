@@ -13,8 +13,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "exposes its entry point", function(){
-                var registry = getController().getModuleService().getModuleRegistry();
-                expect( registry[ "notifications" ] ).toHaveKey( "entryPoint" );
+                var cache = getController().getModuleService().getModuleConfigCache();
+                expect( cache ).toHaveKey( "notifications" );
+                expect( cache[ "notifications" ].entryPoint ).notToBeEmpty();
             } );
         } );
     }

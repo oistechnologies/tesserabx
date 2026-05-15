@@ -1,0 +1,29 @@
+/**
+ * OrganizationDomain: maps an email domain to an Organization.
+ *
+ * Used by channel intake (Phase 2) to route an inbound email from
+ * an unknown sender to the right tenant. Phase 1 wires the entity
+ * and the agent UI for managing mappings; the resolution happens
+ * in `channels` later.
+ *
+ * Not tenant-scoped directly: an agent manages all mappings across
+ * organizations.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="organization_domains"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"  column="organization_id";
+    property name="domain";
+    property name="isVerified"      column="is_verified";
+    property name="createdAt"       column="created_at" sqltype="timestamp";
+    property name="updatedAt"       column="updated_at" sqltype="timestamp";
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+}

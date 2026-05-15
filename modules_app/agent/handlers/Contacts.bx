@@ -1,0 +1,182 @@
+/**
+ * agent:Contacts handler.
+ *
+ * Agent-facing CRUD over the Contact entity. Implements the
+ * "agent-created provisioning" path from Phase 1: an agent creates a
+ * Contact, assigns it to an Organization (and optionally an Office),
+ * and optionally grants the organization-admin role.
+ *
+ * All data access goes through ContactsService@contacts. This handler
+ * never imports a contacts entity directly.
+ */
+class {
+
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="validator"       inject="ValidationManager@cbvalidation";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle    = "Contacts";
+        prc.organizations = contactsService.listOrganizations();
+        // Phase 1 ships one list-by-organization view. A queue-style
+        // list across orgs lands in Phase 1d alongside ticket queues.
+        prc.activeOrgId  = rc.organizationId ?: "";
+        prc.contacts     = len( prc.activeOrgId )
+            ? contactsService.listContactsForOrganization( prc.activeOrgId )
+            : [];
+        event.setView( "contacts/index" );
+    }
+
+    function show( event, rc, prc ){
+        prc.contact = contactsService.getContactById( rc.id ?: "" );
+        if ( isNull( prc.contact ) ) {
+            messagebox.warn( "That contact does not exist." );
+            relocate( uri = "/agent/contacts" );
+            return;
+        }
+        prc.pageTitle     = "Contact: " & prc.contact.getEmail();
+        prc.organization  = contactsService.getOrganizationById( prc.contact.getOrganizationId() );
+        prc.roles         = contactsService.listRolesForContact( prc.contact.getId() );
+        event.setView( "contacts/show" );
+    }
+
+    function new( event, rc, prc ){
+        prc.pageTitle    = "New contact";
+        prc.organizations = contactsService.listOrganizations();
+        prc.formData     = {
+            email           : "",
+            firstName       : "",
+            lastName        : "",
+            organizationId  : "",
+            officeId        : "",
+            password        : "",
+            organizationAdmin : false
+        };
+        event.setView( "contacts/new" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.email             = "";
+        param rc.firstName         = "";
+        param rc.lastName          = "";
+        param rc.organizationId    = "";
+        param rc.officeId          = "";
+        param rc.password          = "";
+        param rc.organizationAdmin = false;
+
+        var errors = validateNewContact( rc );
+        if ( arrayLen( errors ) ) {
+            messagebox.error( errors.toList( "<br>" ) );
+            prc.pageTitle    = "New contact";
+            prc.organizations = contactsService.listOrganizations();
+            prc.formData     = rc;
+            event.setView( "contacts/new" );
+            return;
+        }
+
+        var data = {
+            email          : rc.email,
+            firstName      : rc.firstName,
+            lastName       : rc.lastName,
+            organizationId : rc.organizationId,
+            officeId       : rc.officeId,
+            password       : rc.password
+        };
+        var contact = contactsService.provisionContact( data );
+
+        if ( isBoolean( rc.organizationAdmin ) && rc.organizationAdmin ) {
+            contactsService.assignRole(
+                contactId        : contact.getId(),
+                roleKey          : "organization-admin",
+                grantedByAgentId : currentAgentId()
+            );
+        }
+
+        messagebox.info( "Contact created." );
+        relocate( uri = "/agent/contacts/" & contact.getId() );
+    }
+
+    function edit( event, rc, prc ){
+        prc.contact = contactsService.getContactById( rc.id ?: "" );
+        if ( isNull( prc.contact ) ) {
+            messagebox.warn( "That contact does not exist." );
+            relocate( uri = "/agent/contacts" );
+            return;
+        }
+        prc.pageTitle = "Edit contact";
+        prc.roles     = contactsService.listRolesForContact( prc.contact.getId() );
+        prc.isOrgAdmin = false;
+        for ( var r in prc.roles ) {
+            if ( r.getRoleKey() == "organization-admin" ) {
+                prc.isOrgAdmin = true;
+                break;
+            }
+        }
+        event.setView( "contacts/edit" );
+    }
+
+    function update( event, rc, prc ){
+        var contact = contactsService.getContactById( rc.id ?: "" );
+        if ( isNull( contact ) ) {
+            messagebox.warn( "That contact does not exist." );
+            relocate( uri = "/agent/contacts" );
+            return;
+        }
+
+        param rc.firstName         = "";
+        param rc.lastName          = "";
+        param rc.organizationAdmin = false;
+        param rc.isActive          = true;
+
+        contact.setFirstName( rc.firstName );
+        contact.setLastName( rc.lastName );
+        contact.setIsActive( isBoolean( rc.isActive ) ? rc.isActive : ( rc.isActive == "true" || rc.isActive == "1" ) );
+        contact.save();
+
+        var wantOrgAdmin = isBoolean( rc.organizationAdmin ) ? rc.organizationAdmin : ( rc.organizationAdmin == "true" || rc.organizationAdmin == "1" );
+        if ( wantOrgAdmin ) {
+            contactsService.assignRole(
+                contactId        : contact.getId(),
+                roleKey          : "organization-admin",
+                grantedByAgentId : currentAgentId()
+            );
+        } else {
+            contactsService.revokeRole(
+                contactId : contact.getId(),
+                roleKey   : "organization-admin"
+            );
+        }
+
+        messagebox.info( "Contact updated." );
+        relocate( uri = "/agent/contacts/" & contact.getId() );
+    }
+
+    // ---------------- internals ----------------
+
+    private array function validateNewContact( required struct rc ){
+        var errors = [];
+        if ( !len( trim( arguments.rc.email ?: "" ) ) ) errors.append( "Email is required." );
+        if ( !len( trim( arguments.rc.organizationId ?: "" ) ) ) errors.append( "Organization is required." );
+        if ( !len( arguments.rc.password ?: "" ) ) errors.append( "Initial password is required." );
+        if ( len( arguments.rc.password ?: "" ) && len( arguments.rc.password ) < 8 ) {
+            errors.append( "Password must be at least 8 characters." );
+        }
+        if ( len( trim( arguments.rc.email ?: "" ) ) && !isNull( contactsService.getContactByEmail( arguments.rc.email ) ) ) {
+            errors.append( "A contact with that email already exists." );
+        }
+        return errors;
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var user = auth.getUser();
+        if ( isNull( user ) ) return "";
+        return user.getId();
+    }
+
+}

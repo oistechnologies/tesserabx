@@ -1,6 +1,11 @@
 /**
  * TestBox application context. Boots the same ColdBox app the
  * production stack runs, against the CI database/redis.
+ *
+ * The tesserabx datasource block mirrors the main /Application.bx so
+ * Quick/qb resolve it at test time. Without it, qb's grammar reports
+ * "No default datasource defined" because tests/ runs as its own
+ * BoxLang application instance.
  */
 class {
 
@@ -17,6 +22,38 @@ class {
     this.mappings[ "/testbox" ]           = rootPath & "testbox";
     this.mappings[ "/tests" ]             = rootPath & "tests";
 
+    // Quick / qb / other Ortus entities are declared with
+    // `extends="<module>.models.X"`. The CFML class resolver needs a
+    // mapping for each module name to find the .cfc file. ColdBox
+    // registers these at boot via classMappingHelper for the running
+    // app, but tests run as a separate BoxLang Application context
+    // that boots ColdBox lazily, so we walk modules/ here and pre-
+    // register the same set up front. Avoids tracking dependency
+    // chains by hand (quick → cbpaginator → ... etc.).
+    modulesRoot = rootPath & "modules";
+    if ( directoryExists( modulesRoot ) ) {
+        for ( m in directoryList( modulesRoot, false, "query" ) ) {
+            if ( m.type == "Dir" ) {
+                this.mappings[ "/" & m.name ] = modulesRoot & "/" & m.name;
+            }
+        }
+    }
+
+    this.datasources = {
+        "tesserabx" : {
+            "class"            : "org.postgresql.Driver",
+            "connectionString" : "jdbc:postgresql://"
+                                  & getSystemSetting( "DB_HOST", "db" )
+                                  & ":"
+                                  & getSystemSetting( "DB_PORT", "5432" )
+                                  & "/"
+                                  & getSystemSetting( "DB_NAME", "tesserabx" )
+                                  & "?ssl=" & getSystemSetting( "DB_SSL", "false" )
+                                  & "&characterEncoding=UTF-8",
+            "username"         : getSystemSetting( "DB_USER", "tesserabx" ),
+            "password"         : getSystemSetting( "DB_PASSWORD", "tesserabx" )
+        }
+    };
     this.datasource = "tesserabx";
 
     function onRequestStart(){

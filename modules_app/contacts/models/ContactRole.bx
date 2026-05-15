@@ -1,0 +1,27 @@
+/**
+ * ContactRole: one role assignment for a Contact.
+ *
+ * Reached through `contact.roles()`. The role_key is a free-form
+ * string so the role set is extensible without schema changes.
+ * Phase 1 defines "organization-admin"; later phases add more.
+ *
+ * Not tenant-scoped directly: visibility flows from the parent
+ * Contact, which is tenant-scoped.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="contact_roles"
+    accessors="true"
+{
+
+    property name="id";
+    property name="contactId"         column="contact_id";
+    property name="roleKey"           column="role_key";
+    property name="grantedByAgentId"  column="granted_by_agent_id";
+    property name="grantedAt"         column="granted_at" sqltype="timestamp";
+
+    function contact(){
+        return belongsTo( "Contact@contacts", "contact_id" );
+    }
+
+}

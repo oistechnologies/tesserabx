@@ -1,0 +1,141 @@
+/**
+ * TenantScopeSpec: verifies the tenant isolation primitive.
+ *
+ * The scope filters every tenant-scoped Quick query (Office, Contact,
+ * Phase 1c's ticket entities) to the current Contact's
+ * organization_id. Agents and unauthenticated callers bypass it.
+ *
+ * Tested by stubbing TenantContextProbe.currentTenantId in WireBox,
+ * then exercising the entity's Quick query. The probe is the single
+ * "who is the current tenant" oracle, so swapping it is enough to
+ * simulate either surface.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.wirebox = getController().getWireBox();
+        variables.service = variables.wirebox.getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "TenantScope", function(){
+
+            beforeEach( function(){
+                variables.fixture = createFixture();
+            } );
+
+            afterEach( function(){
+                tearDownFixture( variables.fixture );
+                restoreProbe();
+            } );
+
+            it( "filters Office queries to the current tenant when a Contact is logged in", function(){
+                stubProbeToReturn( variables.fixture.orgA.getId() );
+
+                var visible = variables.wirebox.getInstance( "Office@contacts" ).all();
+                var visibleIds = [];
+                for ( var o in visible ) {
+                    visibleIds.append( o.getId() );
+                }
+
+                expect( visibleIds ).toInclude( variables.fixture.officeA.getId() );
+                expect( visibleIds ).notToInclude( variables.fixture.officeB.getId() );
+            } );
+
+            it( "returns all offices for an agent (probe returns null)", function(){
+                stubProbeToReturn( javaCast( "null", "" ) );
+
+                var visible = variables.wirebox.getInstance( "Office@contacts" ).all();
+                var visibleIds = [];
+                for ( var o in visible ) {
+                    visibleIds.append( o.getId() );
+                }
+
+                expect( visibleIds ).toInclude( variables.fixture.officeA.getId() );
+                expect( visibleIds ).toInclude( variables.fixture.officeB.getId() );
+            } );
+
+            it( "withoutGlobalScopes lets the service reach across organizations", function(){
+                stubProbeToReturn( variables.fixture.orgA.getId() );
+
+                // The service uses withoutGlobalScopes() so cross-org
+                // lookups (an agent reading a contact in any org) work
+                // regardless of who is logged in.
+                var bContact = variables.service.getContactById( variables.fixture.contactB.getId() );
+                expect( bContact ).notToBeNull();
+                expect( bContact.getEmail() ).toBe( variables.fixture.contactB.getEmail() );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixture ----------------
+
+    private struct function createFixture(){
+        var orgA = variables.service.createOrganization( {
+            name : "Tenant A " & createUUID(),
+            slug : "tenant-a-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var orgB = variables.service.createOrganization( {
+            name : "Tenant B " & createUUID(),
+            slug : "tenant-b-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var officeA = variables.service.createOffice( orgA.getId(), "HQ-A" );
+        var officeB = variables.service.createOffice( orgB.getId(), "HQ-B" );
+        var contactA = variables.service.provisionContact( {
+            organizationId : orgA.getId(),
+            email          : "a-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var contactB = variables.service.provisionContact( {
+            organizationId : orgB.getId(),
+            email          : "b-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        return {
+            orgA     : orgA,
+            orgB     : orgB,
+            officeA  : officeA,
+            officeB  : officeB,
+            contactA : contactA,
+            contactB : contactB
+        };
+    }
+
+    private void function tearDownFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contactA.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contactB.getId() } );
+        queryExecute( "DELETE FROM offices  WHERE id = :id", { id : arguments.fixture.officeA.getId() } );
+        queryExecute( "DELETE FROM offices  WHERE id = :id", { id : arguments.fixture.officeB.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.orgA.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.orgB.getId() } );
+    }
+
+    // ---------------- probe stubbing ----------------
+
+    /**
+     * Overrides currentTenantId() on the live TenantContextProbe
+     * singleton using MockBox. The TenantScope global scope holds no
+     * reference to the probe and looks it up fresh through WireBox on
+     * every apply(), so a method override on the existing singleton
+     * is the cleanest way to swap behavior mid-test.
+     */
+    private void function stubProbeToReturn( any tenantId ){
+        var probe = variables.wirebox.getInstance( "TenantContextProbe@contacts" );
+        if ( isNull( arguments.tenantId ) ) {
+            prepareMock( probe ).$( "currentTenantId" );
+        } else {
+            prepareMock( probe ).$( "currentTenantId", arguments.tenantId );
+        }
+    }
+
+    private void function restoreProbe(){
+        // MockBox overrides survive only for the spec's life; subsequent
+        // tests reset by calling stubProbeToReturn again. Nothing to
+        // explicitly clear, but we leave the hook so the afterEach
+        // contract stays obvious.
+    }
+
+}
