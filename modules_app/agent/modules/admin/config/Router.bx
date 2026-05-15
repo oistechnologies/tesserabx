@@ -1,0 +1,15 @@
+/**
+ * admin module router.
+ *
+ * Nested inside agent. With entryPoint = "admin" and the module
+ * physically at modules_app/agent/modules/admin/, ColdBox mounts the
+ * routes at /agent/admin.
+ */
+class {
+
+    function configure(){
+        // /agent/admin landing
+        route( "/" ).to( "Home.index" );
+    }
+
+}

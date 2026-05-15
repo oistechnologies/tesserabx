@@ -1,0 +1,46 @@
+/**
+ * Agent session handler: login, logout, and the unauthorized landing.
+ *
+ * The unauthorized action returns HTTP 403 for direct hits to
+ * /agent/admin/* by non-admin agents. The route exists; access is
+ * denied.
+ */
+class {
+
+    property name="auth"       inject="AuthenticationService@cbauth";
+    property name="agentAuth"  inject="AgentAuthService@agent";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function new( event, rc, prc ){
+        prc.pageTitle = "Agent Sign in";
+        event.setLayout( name = "Agent", module = "core" );
+        event.setView( "session/new" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.email    = "";
+        param rc.password = "";
+
+        if ( agentAuth.isValidCredentials( rc.email, rc.password ) ) {
+            auth.login( agentAuth.retrieveUserByUsername( rc.email ) );
+            relocate( uri = "/agent" );
+            return;
+        }
+
+        messagebox.error( "Invalid email or password." );
+        relocate( uri = "/agent/login" );
+    }
+
+    function delete( event, rc, prc ){
+        auth.logout();
+        relocate( uri = "/agent/login" );
+    }
+
+    function unauthorized( event, rc, prc ){
+        event.setLayout( name = "Agent", module = "core" );
+        event.setHTTPHeader( statusCode = 403, statusText = "Forbidden" );
+        prc.pageTitle = "Access denied";
+        event.setView( "session/unauthorized" );
+    }
+
+}

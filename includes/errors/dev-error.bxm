@@ -1,0 +1,24 @@
+<bx:script>
+writeOutput( "<style>body{font-family:monospace;font-size:12px;background:##111;color:##eee;padding:10px}pre{background:##222;padding:8px;overflow:auto;white-space:pre-wrap;margin:4px 0}h1,h2{color:##ff8}</style>" );
+writeOutput( "<h1>Dev error trace</h1>" );
+
+bean = ( prc.exception ?: javaCast( "null", "" ) );
+if ( isNull( bean ) ) {
+    writeOutput( "<pre>no prc.exceptionBean</pre>" );
+} else {
+    mem = bean.getMemento();
+    es = ( mem.exceptionStruct ?: {} );
+    writeOutput( "<h2>Type</h2><pre>" & encodeForHTML( es.type ?: "" ) & "</pre>" );
+    writeOutput( "<h2>Message</h2><pre>" & encodeForHTML( es.message ?: "" ) & "</pre>" );
+    writeOutput( "<h2>Detail</h2><pre>" & encodeForHTML( es.detail ?: "" ) & "</pre>" );
+    writeOutput( "<h2>StackTrace</h2><pre>" & encodeForHTML( es.stackTrace ?: "" ) & "</pre>" );
+    writeOutput( "<h2>TagContext</h2>" );
+    ctx = ( es.tagContext ?: [] );
+    if ( isArray( ctx ) ) {
+        for ( frame in ctx ) {
+            writeOutput( '<pre>' & encodeForHTML( frame.template ?: "?" ) & ":" & ( frame.line ?: "?" ) & ' &mdash; ' & encodeForHTML( frame.raw_trace ?: "" ) & '</pre>' );
+        }
+    }
+    writeOutput( "<h2>exceptionStruct keys</h2><pre>" & encodeForHTML( structKeyList( es ) ) & "</pre>" );
+}
+</bx:script>

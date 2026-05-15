@@ -1,0 +1,8 @@
+{
+    "debugMode":false,
+    "defaultTimezone":"UTC",
+    "defaultLocale":"en_US",
+    "executors":{
+        "defaultTimeout":30
+    }
+}

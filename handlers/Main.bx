@@ -1,0 +1,20 @@
+/**
+ * Main application handler. The default event landing point. In normal
+ * operation the user never hits this directly: the portal handles `/`
+ * and routes diverge from there. It exists as the ColdBox
+ * defaultEvent target.
+ */
+class {
+
+    function index( event, rc, prc ){
+        // Defensive fallback. Production never hits this; the defaultEvent
+        // points at portal:Home.index, and portal owns the `/` route. If
+        // we somehow land here, relocate to the portal home (one hop).
+        relocate( event = "portal:Home.index" );
+    }
+
+    function onAppInit( event, rc, prc ){
+        writeLog( text = "TesseraBX ColdBox bootstrap complete.", log = "tesserabx" );
+    }
+
+}

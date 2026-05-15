@@ -1,0 +1,29 @@
+/**
+ * Office: optional grouping within an organization.
+ *
+ * Tenant-scoped. Not part of the isolation boundary itself.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="offices"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId" column="organization_id";
+    property name="name";
+    property name="createdAt"      column="created_at";
+    property name="updatedAt"      column="updated_at";
+
+    // Phase 1 wires `this.globalScopes = [ "tenant" ]` once the tenant
+    // scope service is registered with Quick.
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+    function contacts(){
+        return hasMany( "Contact@contacts", "office_id" );
+    }
+
+}

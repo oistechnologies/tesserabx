@@ -1,0 +1,13 @@
+/**
+ * widget module router.
+ *
+ * All routes are auto-prefixed with /widget. Phase 0 ships a placeholder;
+ * Phase 2 wires real intake endpoints.
+ */
+class {
+
+    function configure(){
+        // route( "/" ).to( "Home.index" );
+    }
+
+}

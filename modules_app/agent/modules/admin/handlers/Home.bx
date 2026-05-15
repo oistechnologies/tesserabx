@@ -1,0 +1,15 @@
+/**
+ * /agent/admin landing handler.
+ *
+ * Reached only by agents whose is_admin flag is true; the parent
+ * module's cbSecurity rules drop everyone else into the agent
+ * Session.unauthorized handler which returns 403.
+ */
+class {
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Admin";
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+}

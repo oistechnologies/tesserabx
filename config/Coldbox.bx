@@ -1,0 +1,313 @@
+/**
+ * TesseraBX ColdBox application config.
+ *
+ * Filename intentionally `Coldbox.bx` (capital C, lowercase oldbox) to
+ * match ColdBox 8's convention lookup. The class-level `variables`
+ * scope IS the config object; ColdBox reads `variables.coldbox`,
+ * `variables.settings`, `variables.modules`, etc. after configure().
+ */
+class {
+
+    function configure(){
+
+        var env = getSystemSetting( "ENVIRONMENT", "production" );
+
+        variables.coldbox = {
+            appName                  : "TesseraBX",
+            eventName                : "event",
+
+            // Implicit events. Default event lands on the portal home;
+            // Main.onAppInit still runs at application start.
+            defaultEvent             : "portal:Home.index",
+            requestStartHandler      : "",
+            requestEndHandler        : "",
+            applicationStartHandler  : "Main.onAppInit",
+            applicationEndHandler    : "",
+            sessionStartHandler      : "",
+            sessionEndHandler        : "",
+            missingTemplateHandler   : "",
+
+            // Extension points
+            applicationHelper        : "includes/helpers/ApplicationHelper.bxm",
+            viewsHelper              : "",
+            modulesExternalLocation  : [ "/tesserabx/modules" ],
+            viewsExternalLocation    : "",
+            layoutsExternalLocation  : "",
+            handlersExternalLocation : "",
+            requestContextDecorator  : "",
+            controllerDecorator      : "",
+
+            // Error handling
+            invalidHTTPMethodHandler : "",
+            invalidEventHandler      : "",
+            customErrorTemplate      : ( env == "development" ? "/includes/errors/dev-error.bxm" : "" ),
+            handleExceptions         : true,
+            exceptionHandler         : "",
+            onInvalidEvent           : "",
+
+            // App aspects
+            reinitPassword           : getSystemSetting( "COLDBOX_REINIT_PASSWORD", "" ),
+            reinitKey                : "fwreinit",
+            handlersIndexAutoReload  : ( env == "development" ),
+            handlerCaching           : ( env != "development" ),
+            eventCaching             : ( env != "development" ),
+            viewCaching              : ( env != "development" ),
+            autoMapModels            : false,
+            modulesParentSettings    : true,
+            useViewCachingDirectives : false
+        };
+
+        // Custom application settings, accessed via getSetting()
+        variables.settings = {
+            aiEnabled               : getSystemSetting( "AI_ENABLED", "false" ),
+            aiProvider              : getSystemSetting( "AI_PROVIDER", "openrouter" ),
+            aiModel                 : getSystemSetting( "AI_MODEL", "" ),
+            aiApiKey                : getSystemSetting( "AI_API_KEY", "" ),
+            uploadMaxBytes          : getSystemSetting( "UPLOAD_MAX_BYTES", "26214400" ),
+            uploadAllowedExtensions : getSystemSetting( "UPLOAD_ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,txt,csv,xls,xlsx,doc,docx,zip" ),
+            backupRetentionDays     : getSystemSetting( "BACKUP_RETENTION_DAYS", "14" ),
+            cbfsDefaultProvider     : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" )
+        };
+
+        // Module activation: bx-* are BoxLang server modules, not
+        // ColdBox modules. They live in the BoxLang server home and
+        // must not be activated by ColdBox.
+        variables.modules = {
+            exclude : [
+                "bx-ai",
+                "bx-compat-cfml",
+                "bx-esapi",
+                "bx-image",
+                "bx-mail",
+                "bx-postgresql",
+                "bx-redis",
+                "bx-plus"
+            ]
+        };
+
+        // Module-specific settings flow to the third-party modules.
+        variables.moduleSettings = {
+
+            // cbdebugger: the bottom-of-page request panel calls
+            // findNoCase( "html", response.getContentType() ) during
+            // postProcess. On a cbsecurity relocate() the content type
+            // is still null, and BoxLang's Find BIF throws NPE on a
+            // null haystack (Lucee returns 0). Short-circuit the check
+            // by disabling the dock; cbdebugger's other features stay
+            // active and the /cbdebugger endpoint still works.
+            cbdebugger : {
+                requestPanelDock : false
+            },
+
+            // CBFS: file persistence
+            cbfs : {
+                defaultDisk : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" ),
+                disks : {
+                    "local" : {
+                        provider   : "Local@cbfs",
+                        properties : {
+                            path       : expandPath( "/storage" ),
+                            autoExpand : true,
+                            visibility : "private"
+                        }
+                    },
+                    "s3" : {
+                        provider   : "S3@cbfs",
+                        properties : {
+                            accessKey  : getSystemSetting( "CBFS_S3_ACCESS_KEY", "" ),
+                            secretKey  : getSystemSetting( "CBFS_S3_SECRET_KEY", "" ),
+                            bucket     : getSystemSetting( "CBFS_S3_BUCKET", "" ),
+                            region     : getSystemSetting( "CBFS_S3_REGION", "us-west-002" ),
+                            endpoint   : getSystemSetting( "CBFS_S3_ENDPOINT", "s3.us-west-002.backblazeb2.com" ),
+                            visibility : "private"
+                        }
+                    }
+                }
+            },
+
+            // cbq: connections and workers are declared in config/cbq.bx
+            cbq : {
+                autoStartWorkers : false
+            },
+
+            // cbwire: CBWire-first reactive UI
+            cbwire : {
+                componentLocation : "wires",
+                showRequestStats  : ( env == "development" )
+            },
+
+            // cbauth: the underlying authentication service. cbsecurity
+            // delegates to this at runtime. cbauth has a single global
+            // userService and one session store, so we use a combined
+            // UserService that looks in both `agents` and `contacts`
+            // tables. Surface-specific firewalls (portal, agent) keep
+            // the wrong account family out of the wrong UI.
+            cbauth : {
+                userServiceClass : "UserService@contacts"
+            },
+
+            // cbsecurity: firewall rules and CSRF defaults. Rules apply
+            // to both surfaces. The `secureList` patterns block
+            // unauthenticated traffic; `roles` constrain to agent vs
+            // agent-admin where applicable.
+            //
+            // (Module-level cbSecurity blocks on each module's
+            // ModuleConfig.bx are not picked up by cbsecurity 3.7;
+            // rules live globally here.)
+            cbsecurity : {
+                csrf : {
+                    enableAutoVerifier    : false,
+                    rotationTimeInMinutes : 30,
+                    verifyExcludes        : [ "^/api(/|$)", "^/health" ]
+                },
+                firewall : {
+                    autoLoadFirewall              : true,
+                    invalidAuthenticationEvent    : "portal:Session.new",
+                    invalidAuthenticationRedirect : "/login",
+                    defaultAuthenticationAction   : "redirect",
+                    invalidAuthorizationEvent     : "agent:Session.unauthorized",
+                    defaultAuthorizationAction    : "block",
+                    rules : [
+                        // Most-specific rule first: /agent/admin requires
+                        // an admin-flagged agent. Anyone else gets the
+                        // agent:Session.unauthorized handler which renders
+                        // the 403 Forbidden page. We use "override" rather
+                        // than cbsecurity's "block" action because block
+                        // hardcodes HTTP 401; CLAUDE.md requires 403 here.
+                        {
+                            secureList    : "^agent/admin($|/)",
+                            match         : "url",
+                            roles         : "agent-admin",
+                            permissions   : "",
+                            action        : "override",
+                            overrideEvent : "agent:Session.unauthorized"
+                        },
+                        // The rest of /agent requires an authenticated
+                        // agent (role "agent"). Login/logout pages are
+                        // whitelisted.
+                        {
+                            whitelist   : "^agent/(login|logout)(/|$)",
+                            secureList  : "^agent($|/)",
+                            match       : "url",
+                            roles       : "agent",
+                            permissions : "",
+                            action      : "redirect",
+                            redirect    : "agent/login"
+                        },
+                        // / surface: client-only secured paths.
+                        {
+                            secureList  : "^(account|tickets|profile)($|/)",
+                            match       : "url",
+                            roles       : "",
+                            permissions : "",
+                            action      : "redirect",
+                            redirect    : "login"
+                        }
+                    ]
+                }
+            },
+
+            // cbmailservices: a mailer pairs a Java protocol class with its
+            // connection properties. The default mailer's class must be
+            // resolvable; missing or wrong-shaped keys throw on first
+            // MailQueue tick.
+            cbmailservices : {
+                from          : getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                defaultMailer : "default",
+                mailers : {
+                    default : {
+                        // CFMailProtocol uses the engine's cfmail support
+                        // (which on BoxLang is bx-mail). For SMTP this is
+                        // the right choice; the cbmailservices module
+                        // ships dedicated classes for the SaaS providers
+                        // (Postmark, Mailgun) but not generic SMTP.
+                        class      : "cbmailservices.models.protocols.CFMailProtocol",
+                        properties : {
+                            server   : getSystemSetting( "MAIL_HOST", "mailpit" ),
+                            port     : getSystemSetting( "MAIL_PORT", "1025" ),
+                            username : getSystemSetting( "MAIL_USERNAME", "" ),
+                            password : getSystemSetting( "MAIL_PASSWORD", "" ),
+                            useTLS   : ( getSystemSetting( "MAIL_TLS", "false" ) == "true" ),
+                            useSSL   : ( getSystemSetting( "MAIL_SSL", "false" ) == "true" )
+                        }
+                    }
+                }
+            },
+
+            // qb: Postgres grammar
+            qb : {
+                defaultGrammar : "PostgresGrammar@qb"
+            },
+
+            // quick: ORM
+            quick : {
+                defaultGrammar    : "PostgresGrammar@qb",
+                defaultDatasource : "tesserabx"
+            },
+
+            // cfmigrations: schema versioning
+            cfmigrations : {
+                manager             : "cfmigrations.models.QBMigrationManager",
+                migrationsDirectory : expandPath( "/resources/database/migrations" ),
+                defaultGrammar      : "PostgresGrammar@qb",
+                datasource          : "tesserabx",
+                schema              : getSystemSetting( "DB_SCHEMA", "public" )
+            }
+
+        };
+
+        // Environment detection
+        variables.environments = {
+            development : "^localhost,^127\.0\.0\.1,^192\.168\.,\.local$,^app$"
+        };
+
+        // LogBox
+        variables.logBox = {
+            appenders : {
+                console : {
+                    class      : "coldbox.system.logging.appenders.ConsoleAppender",
+                    properties : {}
+                }
+            },
+            root       : { levelmax : "INFO", levelMin : "FATAL", appenders : "*" },
+            categories : {
+                "coldbox.system" : { levelMax : "WARN" }
+            }
+        };
+
+        variables.layoutSettings = { defaultLayout : "", defaultView : "" };
+
+        // Cross-module event names. Modules emit, notifications + audit consume.
+        variables.interceptorSettings = {
+            customInterceptionPoints : [
+                "onTicketCreated",
+                "onTicketUpdated",
+                "onTicketAssigned",
+                "onTicketResolved",
+                "onTicketClosed",
+                "onTicketMessagePosted",
+                "onContactCreated",
+                "onContactPromoted",
+                "onOrganizationCreated",
+                "onAuditEventRecorded",
+                "onSlaBreachWarning",
+                "onSlaBreached"
+            ]
+        };
+
+        variables.interceptors = [];
+    }
+
+    function development(){
+        variables.coldbox.handlerCaching = false;
+        variables.coldbox.eventCaching   = false;
+        variables.coldbox.viewCaching    = false;
+    }
+
+    function production(){
+        variables.coldbox.handlerCaching = true;
+        variables.coldbox.eventCaching   = true;
+        variables.coldbox.viewCaching    = true;
+    }
+
+}

@@ -1,0 +1,68 @@
+/**
+ * agent module: the technician dashboard surface.
+ *
+ * Owns Agent, Team, and agent-local entities (saved filters, etc).
+ * Serves /agent and contains the nested admin child module which
+ * resolves to /agent/admin.
+ */
+class {
+
+    this.title              = "agent";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Technician dashboard surface at /agent, containing the nested admin child module.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "agent";
+    this.modelNamespace     = "agent";
+    this.cfmapping          = "tesserabx.modules.agent";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts", "audit", "tickets" ];
+
+    function configure(){
+        settings = {};
+
+        routes = [
+            { pattern : "/",                handler : "Home",    action : "index" },
+            { pattern : "/login",           handler : "Session", action : "new"   },
+            { pattern : "/logout",          handler : "Session", action : "delete" },
+            { pattern : "/:handler/:action?" }
+        ];
+
+        // cbSecurity firewall for /agent. Distinct from portal's firewall:
+        // AgentAuthService backs cbauth, and the session storage key is
+        // namespaced separately. The nested admin module overlays its own
+        // /agent/admin rules so non-admin agents get 403 (not 404).
+        cbSecurity = {
+            userService         : "AgentAuthService@agent",
+            sessionStorageScope : "session",
+            authStorage         : "tesserabx_agent_user",
+            firewall : {
+                rulesSource                 : "model",
+                rulesModel                  : "AgentSecurityRules@agent",
+                invalidAuthenticationEvent  : "agent:Session.new",
+                defaultAuthenticationAction : "redirect",
+                invalidAuthorizationEvent   : "agent:Session.unauthorized",
+                defaultAuthorizationAction  : "block"
+            }
+        };
+
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){
+        binder.map( "Agent@agent" )
+              .to( "#moduleMapping#.models.Agent" );
+        binder.map( "AgentAuthService@agent" )
+              .to( "#moduleMapping#.models.AgentAuthService" )
+              .asSingleton();
+        binder.map( "AgentSecurityRules@agent" )
+              .to( "#moduleMapping#.models.AgentSecurityRules" )
+              .asSingleton();
+    }
+
+    function onUnload(){}
+
+}

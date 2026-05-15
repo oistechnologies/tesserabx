@@ -1,0 +1,31 @@
+/**
+ * automation module: trigger-condition-action rules engine.
+ *
+ * Owns AutomationRule plus escalation and assignment-strategy config.
+ */
+class {
+
+    this.title              = "automation";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Rules engine, escalation, assignment strategies, recurring tickets.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "automation";
+    this.modelNamespace     = "automation";
+    this.cfmapping          = "tesserabx.modules.automation";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "tickets", "contacts" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

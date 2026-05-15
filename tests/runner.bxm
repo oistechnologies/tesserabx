@@ -1,0 +1,17 @@
+<bx:setting enableOutputOnly=true>
+<!---
+	TesseraBX — TestBox runner.
+
+	Executes all tests under /tests/specs/ with the simple reporter by
+	default. Override via URL query params.
+--->
+<bx:param name="url.reporter"           default="simple">
+<bx:param name="url.directory"          default="tests.specs">
+<bx:param name="url.recurse"            default="true" type="boolean">
+<bx:param name="url.bundles"            default="">
+<bx:param name="url.labels"             default="">
+<bx:param name="url.excludes"           default="">
+<bx:param name="url.reportpath"         default="#expandPath( "/tests/results" )#">
+<bx:param name="url.bundlesPattern"     default="*Spec*.cfc|*Test*.cfc|*Spec*.bx|*Test*.bx">
+
+<bx:include template="/testbox/system/runners/HTMLRunner.cfm">

@@ -1,0 +1,45 @@
+<bx:output>
+<div class="row g-3">
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card text-bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">Open tickets</h5>
+                <p class="display-6 mb-0">0</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card text-bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">Awaiting reply</h5>
+                <p class="display-6 mb-0">0</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card text-bg-danger">
+            <div class="card-body">
+                <h5 class="card-title">SLA at risk</h5>
+                <p class="display-6 mb-0">0</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card text-bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Resolved today</h5>
+                <p class="display-6 mb-0">0</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">Welcome</div>
+            <div class="card-body">
+                <p class="mb-0">Agent dashboard placeholder. Phase 1 wires the queue, ticket list, and reply panes.</p>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

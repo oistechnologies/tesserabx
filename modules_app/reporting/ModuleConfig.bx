@@ -1,0 +1,32 @@
+/**
+ * reporting module.
+ *
+ * Owns no entities. Reads across other modules' service layers to
+ * render dashboards, scheduled exports, raw data exports.
+ */
+class {
+
+    this.title              = "reporting";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Dashboards, exports, scheduled reports.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "reporting";
+    this.modelNamespace     = "reporting";
+    this.cfmapping          = "tesserabx.modules.reporting";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts", "tickets", "sla" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

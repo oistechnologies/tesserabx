@@ -1,0 +1,29 @@
+{
+    "name":"tesserabx",
+    "app":{
+        "cfengine":"boxlang@1",
+        "serverHomeDirectory":".engine/boxlang",
+        "engineConfigFile":".boxlang.json"
+    },
+    "web":{
+        "host":"0.0.0.0",
+        "http":{
+            "port":"${PORT:-8080}"
+        },
+        "rewrites":{
+            "enable":true
+        },
+        "directoryBrowsing":false
+    },
+    "jvm":{
+        "heapSize":1024,
+        "minHeapSize":256,
+        "javaVersion":"openjdk21_jre"
+    },
+    "openBrowser":false,
+    "console":true,
+    "trayEnable":false,
+    "scripts":{
+        "onServerInitialInstall":"install bx-compat-cfml,bx-ai,bx-esapi,bx-postgresql,bx-redis,bx-image,bx-mail"
+    }
+}

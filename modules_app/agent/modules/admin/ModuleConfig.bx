@@ -1,0 +1,44 @@
+/**
+ * admin module: nested inside agent.
+ *
+ * Loads as part of agent's lifecycle and resolves to /agent/admin.
+ * Module-level cbSecurity rules cover /agent/admin/*, gated to
+ * admin-flagged agents.
+ *
+ * Owns the RBAC entities, branding, and configuration entities.
+ */
+class {
+
+    this.title              = "admin";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Administration and configuration surface, nested at /agent/admin.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    // Mount the admin surface at /agent/admin. The module physically
+    // lives inside agent's modules/ folder per the CLAUDE.md spec, but
+    // ColdBox 8's nested-module inheritance of parent entryPoint is
+    // not automatic, so we declare the full prefix here.
+    this.entryPoint         = "agent/admin";
+    this.modelNamespace     = "admin";
+    this.cfmapping          = "tesserabx.modules.agent.modules.admin";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts", "audit", "tickets", "agent" ];
+
+    function configure(){
+        settings = {};
+
+        routes = [
+            { pattern : "/",                handler : "Home", action : "index" },
+            { pattern : "/:handler/:action?" }
+        ];
+
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

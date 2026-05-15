@@ -1,0 +1,17 @@
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+    }
+
+    function run(){
+        describe( "admin nested module", function(){
+            it( "loads as part of the agent module lifecycle", function(){
+                var modules = getController().getModuleService().getModuleRegistry();
+                expect( modules ).toHaveKey( "admin" );
+            } );
+        } );
+    }
+
+}

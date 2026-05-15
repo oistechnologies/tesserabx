@@ -1,0 +1,7 @@
+<bx:setting enablecfoutputonly="yes" requesttimeout="600">
+<bx:silent>
+<!--- TesseraBX front controller. Placeholder only; ColdBox 8 processes
+      the request via Application.bx onRequestStart. Calling
+      processColdBoxRequest() here would render the page twice. --->
+</bx:silent>
+<bx:setting enablecfoutputonly="no">

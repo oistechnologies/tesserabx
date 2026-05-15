@@ -1,0 +1,36 @@
+/**
+ * TenantContextProbe.
+ *
+ * Single source of truth for "who is the current tenant" within a
+ * request.
+ *
+ *   - Authenticated Contact: returns the contact's organization_id.
+ *   - Authenticated Agent  : returns null (agents see across organizations).
+ *   - Unauthenticated      : returns null (access control via cbSecurity).
+ */
+class singleton=true {
+
+    property name="authService" inject="AuthenticationService@cbauth";
+
+    public any function currentTenantId(){
+        if ( !authService.isLoggedIn() ) {
+            return javaCast( "null", "" );
+        }
+        var user = authService.getUser();
+        if ( isNull( user ) ) {
+            return javaCast( "null", "" );
+        }
+        if ( structKeyExists( user, "getOrganizationId" ) ) {
+            try {
+                var orgId = user.getOrganizationId();
+                if ( !isNull( orgId ) && len( orgId ) ) {
+                    return orgId;
+                }
+            } catch ( any e ) {
+                // Fall through; no scope applied.
+            }
+        }
+        return javaCast( "null", "" );
+    }
+
+}

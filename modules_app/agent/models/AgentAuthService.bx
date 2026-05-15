@@ -1,0 +1,36 @@
+/**
+ * AgentAuthService.
+ *
+ * The cbauth UserService for the /agent surface. Phase 6 layers TOTP
+ * MFA verification on top of password verification (MFA required for
+ * provider agents).
+ */
+class singleton=true {
+
+    property name="bcrypt"  inject="@BCrypt";
+    property name="wirebox" inject="wirebox";
+
+    public any function retrieveUserByUsername( required string username ){
+        var agent = wirebox.getInstance( "Agent@agent" )
+            .where( "email", arguments.username )
+            .where( "is_active", true )
+            .first();
+        return isNull( agent ) ? javaCast( "null", "" ) : agent;
+    }
+
+    public any function retrieveUserById( required string id ){
+        var agent = wirebox.getInstance( "Agent@agent" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( agent ) ? javaCast( "null", "" ) : agent;
+    }
+
+    public boolean function isValidCredentials( required string username, required string password ){
+        var user = retrieveUserByUsername( arguments.username );
+        if ( isNull( user ) ) {
+            return false;
+        }
+        return bcrypt.checkPassword( arguments.password, user.getPasswordHash() );
+    }
+
+}

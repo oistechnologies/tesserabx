@@ -1,0 +1,23 @@
+/**
+ * portal module router.
+ *
+ * Routes here are mounted under the module entryPoint, which is empty
+ * for portal, so they live at the application root.
+ *
+ * ColdBox 8 only picks up routes from this file when a module declares
+ * `entryPoint` in ModuleConfig.bx. A `routes = [ ... ]` array in the
+ * ModuleConfig's configure() body is silently ignored.
+ */
+class {
+
+    function configure(){
+        // Public landing
+        route( "/" ).to( "Home.index" );
+
+        // Auth
+        route( "login" ).withVerbs( "GET" ).to( "Session.new" );
+        route( "login" ).withVerbs( "POST" ).to( "Session.create" );
+        route( "logout" ).to( "Session.delete" );
+    }
+
+}

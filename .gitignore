@@ -1,0 +1,64 @@
+.DS_Store
+.env
+.env.local
+.env.*.local
+
+# CommandBox
+.engine/
+.cfconfig/
+.cfconfigignore
+coldbox-be/
+modules/coldbox/
+.tmp/
+
+# Module installs (resolved from box.json)
+modules/cbq/
+modules/cbfs/
+modules/cbauth/
+modules/cbsecurity/
+modules/cbsswagger/
+modules/cbswagger/
+modules/cbvalidation/
+modules/cbmailservices/
+modules/cbmessagebox/
+modules/cbstorages/
+modules/cbjwt/
+modules/cbwire/
+modules/cfmigrations/
+modules/mementifier/
+modules/qb/
+modules/quick/
+modules/cbdebugger/
+modules/testbox/
+modules/mockbox/
+modules/cbi18n/
+modules/cbpaginator/
+modules/cors/
+modules/hyper/
+modules/cbantisamy/
+modules/cbcsrf/
+modules/bcrypt/
+
+# Build artifacts
+build/
+dist/
+
+# Logs
+logs/
+*.log
+
+# CBFS local storage and uploads
+storage/
+
+# Database backups
+backups/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.fleet/
+.history/
+
+# OS
+Thumbs.db

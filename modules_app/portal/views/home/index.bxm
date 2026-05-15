@@ -1,0 +1,24 @@
+<bx:output>
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title">Welcome to TesseraBX</h2>
+                <p class="card-text">
+                    Submit a request, track your tickets, or browse the knowledge base. This portal is the public-facing customer surface. The provider's agents work the technician dashboard at
+                    <code>/agent</code>.
+                </p>
+                <a href="/login" class="btn btn-primary">Sign in</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-lg-4">
+        <div class="card">
+            <div class="card-header">Status</div>
+            <div class="card-body">
+                <p class="mb-0">TesseraBX is online.</p>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

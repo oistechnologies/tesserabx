@@ -1,0 +1,59 @@
+/**
+ * contacts module: the foundational module.
+ *
+ * Owns Organization (the tenant boundary), Office, Contact, the
+ * organization domain-mapping entity, and the tenant isolation
+ * primitive (Quick global scope) that every tenant-scoped table in
+ * every other module applies.
+ *
+ * Depends on nothing below it.
+ */
+class {
+
+    this.title              = "contacts";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Contacts, organizations, offices, tenant isolation primitive.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "contacts";
+    this.modelNamespace     = "contacts";
+    this.cfmapping          = "tesserabx.modules.contacts";
+    // Auto-mapping disabled because the autoMapModels path expects a
+    // single flat models/ directory and the scopes/ subfolder confuses
+    // ColdBox's mapDirectory in BoxLang. We bind manually in onLoad.
+    this.autoMapModels      = false;
+    this.dependencies       = [];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){
+        binder.map( "Contact@contacts" )
+              .to( "#moduleMapping#.models.Contact" );
+        binder.map( "Office@contacts" )
+              .to( "#moduleMapping#.models.Office" );
+        binder.map( "Organization@contacts" )
+              .to( "#moduleMapping#.models.Organization" );
+        binder.map( "ContactAuthService@contacts" )
+              .to( "#moduleMapping#.models.ContactAuthService" )
+              .asSingleton();
+        binder.map( "UserService@contacts" )
+              .to( "#moduleMapping#.models.UserService" )
+              .asSingleton();
+        binder.map( "TenantContextProbe@contacts" )
+              .to( "#moduleMapping#.models.TenantContextProbe" )
+              .asSingleton();
+        binder.map( "TenantScope@contacts" )
+              .to( "#moduleMapping#.models.scopes.TenantScope" )
+              .asSingleton();
+    }
+
+    function onUnload(){}
+
+}

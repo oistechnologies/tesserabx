@@ -1,0 +1,11 @@
+/**
+ * agent Home handler. Renders the technician dashboard landing on /agent.
+ */
+class {
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Agent Dashboard";
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+}

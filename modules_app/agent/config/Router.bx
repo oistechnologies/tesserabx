@@ -1,0 +1,23 @@
+/**
+ * agent module router.
+ *
+ * All routes are auto-prefixed with /agent because of
+ * `entryPoint = "agent"` in ModuleConfig.bx.
+ */
+class {
+
+    function configure(){
+        // /agent landing
+        route( "/" ).to( "Home.index" );
+
+        // Auth
+        route( "login" ).withVerbs( "GET" ).to( "Session.new" );
+        route( "login" ).withVerbs( "POST" ).to( "Session.create" );
+        route( "logout" ).to( "Session.delete" );
+
+        // Unauthorized landing (the 403 page hit by non-admin agents
+        // trying to reach /agent/admin/*).
+        route( "unauthorized" ).to( "Session.unauthorized" );
+    }
+
+}

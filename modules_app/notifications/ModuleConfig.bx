@@ -1,0 +1,32 @@
+/**
+ * notifications module: outbound notification fan-out.
+ *
+ * Event consumer: other modules announce events, notifications
+ * decides delivery across email, Slack/Teams, in-app.
+ */
+class {
+
+    this.title              = "notifications";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Notification templates, delivery preferences, outbound fan-out across channels.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "notifications";
+    this.modelNamespace     = "notifications";
+    this.cfmapping          = "tesserabx.modules.notifications";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

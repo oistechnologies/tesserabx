@@ -1,0 +1,34 @@
+/**
+ * tickets module: the ticketing core.
+ *
+ * Owns Ticket, TicketMessage, TicketEvent, TicketLink, Attachment, Tag,
+ * and custom-field entities. channels, portal, and widget create
+ * tickets through this module's service layer; they never write
+ * entities directly.
+ */
+class {
+
+    this.title              = "tickets";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Ticketing core: entities, lifecycle, threading, custom fields, accountless flow.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "tickets";
+    this.modelNamespace     = "tickets";
+    this.cfmapping          = "tesserabx.modules.tickets";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts", "audit" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

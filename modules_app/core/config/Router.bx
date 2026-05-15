@@ -1,0 +1,15 @@
+/**
+ * core module router.
+ *
+ * core's entryPoint is "core", so routes here mount at /core. The
+ * health endpoints are also declared in the top-level config/Router.bx
+ * so /health works without the /core prefix.
+ */
+class {
+
+    function configure(){
+        route( "health" ).to( "Health.index" );
+        route( "health/worker" ).to( "Health.worker" );
+    }
+
+}

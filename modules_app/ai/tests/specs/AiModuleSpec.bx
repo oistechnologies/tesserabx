@@ -1,0 +1,22 @@
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+    }
+
+    function run(){
+        describe( "ai module", function(){
+            it( "is registered with ColdBox", function(){
+                var modules = getController().getModuleService().getModuleRegistry();
+                expect( modules ).toHaveKey( "ai" );
+            } );
+
+            it( "exposes its entry point", function(){
+                var registry = getController().getModuleService().getModuleRegistry();
+                expect( registry[ "ai" ] ).toHaveKey( "entryPoint" );
+            } );
+        } );
+    }
+
+}

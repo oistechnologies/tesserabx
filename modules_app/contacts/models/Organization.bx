@@ -1,0 +1,28 @@
+/**
+ * Organization: the tenant boundary.
+ *
+ * Phase 0 ships the minimum columns. Phase 1 expands with tier, domain
+ * mappings, custom fields, and the full role system.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="organizations"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="slug";
+    property name="isActive"   column="is_active";
+    property name="createdAt"  column="created_at";
+    property name="updatedAt"  column="updated_at";
+
+    function offices(){
+        return hasMany( "Office@contacts", "organization_id" );
+    }
+
+    function contacts(){
+        return hasMany( "Contact@contacts", "organization_id" );
+    }
+
+}

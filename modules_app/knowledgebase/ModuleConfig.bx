@@ -1,0 +1,33 @@
+/**
+ * knowledgebase module.
+ *
+ * Owns Article, ArticleVersion, ArticleFeedback, Category, and
+ * ArticleOrganization (the many-to-many join for org-scoped articles).
+ * Three visibility tiers: public, organization-scoped, internal.
+ */
+class {
+
+    this.title              = "knowledgebase";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Knowledge base authoring, versioning, three-tier visibility.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "kb";
+    this.modelNamespace     = "knowledgebase";
+    this.cfmapping          = "tesserabx.modules.knowledgebase";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts", "audit" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

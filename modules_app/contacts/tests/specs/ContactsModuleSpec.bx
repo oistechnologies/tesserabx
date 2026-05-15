@@ -1,0 +1,22 @@
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+    }
+
+    function run(){
+        describe( "contacts module", function(){
+            it( "is registered with ColdBox", function(){
+                var modules = getController().getModuleService().getModuleRegistry();
+                expect( modules ).toHaveKey( "contacts" );
+            } );
+
+            it( "exposes its entry point", function(){
+                var registry = getController().getModuleService().getModuleRegistry();
+                expect( registry[ "contacts" ] ).toHaveKey( "entryPoint" );
+            } );
+        } );
+    }
+
+}

@@ -1,0 +1,35 @@
+/**
+ * api module: the versioned REST API surface.
+ *
+ * Serves /api. Owns no domain entities; serializes entities owned by
+ * other modules through mementifier. JWT auth through cbSecurity.
+ * OpenAPI docs auto-generated through cbswagger.
+ */
+class {
+
+    this.title              = "api";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Versioned REST API, JWT auth, mementifier serialization, OpenAPI docs, webhooks.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "api";
+    this.modelNamespace     = "api";
+    this.cfmapping          = "tesserabx.modules.api";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "tickets", "contacts" ];
+
+    function configure(){
+        settings = {};
+        routes = [
+            { pattern : "/v1/:handler/:action?" }
+        ];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

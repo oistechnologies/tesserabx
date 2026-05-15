@@ -1,0 +1,23 @@
+/**
+ * PortalSecurityRules: the cbSecurity rule set for the / surface.
+ *
+ * Phase 0: public landing, login, signup are unauthenticated. Anything
+ * under /account, /tickets, /profile requires an authenticated Contact.
+ */
+class singleton=true {
+
+    public array function getSecurityRules(){
+        return [
+            {
+                whitelist   : "^(login|logout|register|kb|health|widget|api)(/|$)|^$",
+                secureList  : "^(account|tickets|profile)(/|$)",
+                match       : "url",
+                roles       : "",
+                permissions : "",
+                action      : "redirect",
+                redirect    : "login"
+            }
+        ];
+    }
+
+}

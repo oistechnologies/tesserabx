@@ -1,0 +1,27 @@
+/**
+ * TenantScope: the tenant isolation primitive.
+ *
+ * Applied to every tenant-scoped Quick entity. When the current request
+ * belongs to a Contact, restricts all queries to that user's
+ * organization_id. Agents bypass the scope (see TenantContextProbe).
+ *
+ * Lives in `contacts` because contacts owns the tenant entities and
+ * defines what "current tenant" means.
+ *
+ * Usage on a tenant-scoped entity:
+ *   this.globalScopes = [ "tenant" ];
+ */
+class {
+
+    property name="authService"        inject="AuthenticationService@cbauth";
+    property name="tenantContextProbe" inject="TenantContextProbe@contacts";
+
+    public any function apply( required any builder, required any quickBuilder ){
+        var ctx = tenantContextProbe.currentTenantId();
+        if ( !isNull( ctx ) && len( ctx ) ) {
+            arguments.builder.where( "organization_id", ctx );
+        }
+        return arguments.builder;
+    }
+
+}

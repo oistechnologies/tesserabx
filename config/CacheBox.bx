@@ -1,0 +1,40 @@
+/**
+ * TesseraBX CacheBox config.
+ *
+ * Default + template caches use the in-memory provider. When real
+ * Redis-backed caches are needed in later phases (session affinity
+ * across worker scaling), additional caches register through their
+ * owning modules rather than here.
+ */
+class {
+
+    function configure(){
+        variables.cacheBox = {
+            defaultCache : {
+                objectDefaultTimeout            : 60,
+                objectDefaultLastAccessTimeout  : 30,
+                useLastAccessTimeouts           : true,
+                reapFrequency                   : 5,
+                freeMemoryPercentageThreshold   : 0,
+                evictionPolicy                  : "LRU",
+                evictCount                      : 1,
+                maxObjects                      : 500,
+                objectStore                     : "ConcurrentSoftReferenceStore"
+            },
+            caches : {
+                template : {
+                    provider   : "coldbox.system.cache.providers.CacheBoxColdBoxProvider",
+                    properties : {
+                        objectDefaultTimeout           : 60,
+                        objectDefaultLastAccessTimeout : 30,
+                        useLastAccessTimeouts          : true,
+                        reapFrequency                  : 5,
+                        evictionPolicy                 : "LRU",
+                        maxObjects                     : 500
+                    }
+                }
+            }
+        };
+    }
+
+}

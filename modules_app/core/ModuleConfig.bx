@@ -1,0 +1,54 @@
+/**
+ * core module: the app shell.
+ *
+ * Owns nothing in the domain. Provides:
+ *   - Two surface layouts (AdminLTE for / and /agent)
+ *   - Shared CBWire components and view partials
+ *   - Shared interceptors and base handlers
+ *   - Health-check endpoints
+ *
+ * Loads first; nothing depends below it (other than ColdBox itself).
+ */
+class {
+
+    this.title              = "core";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "TesseraBX app shell, layouts, shared components, health endpoints.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "core";
+    this.modelNamespace     = "core";
+    this.cfmapping          = "tesserabx.modules.core";
+    this.autoMapModels      = false;
+    this.dependencies       = [];
+
+    function configure(){
+        settings = {};
+
+        routes = [
+            { pattern : "/health",        handler : "Health", action : "index"  },
+            { pattern : "/health/worker", handler : "Health", action : "worker" },
+            { pattern : "/:handler/:action?" }
+        ];
+
+        // Both surface layouts live in this module's layouts/ folder.
+        layoutSettings = { defaultLayout : "Portal" };
+
+        layouts = [
+            { file : "Portal", views : "", folders : "" },
+            { file : "Agent",  views : "", folders : "" }
+        ];
+
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){
+        controller.getLogBox().getLogger( this ).info( "core module loaded" );
+    }
+
+    function onUnload(){}
+
+}

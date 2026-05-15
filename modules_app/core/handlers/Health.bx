@@ -1,0 +1,25 @@
+/**
+ * Health endpoints. Used by Docker healthchecks and external probes.
+ */
+class {
+
+    function index( event, rc, prc ){
+        var result = {
+            "status"    : "ok",
+            "service"   : "tesserabx-app",
+            "timestamp" : dateTimeFormat( now(), "yyyy-MM-dd'T'HH:mm:ss'Z'" ),
+            "version"   : "0.0.1"
+        };
+        event.renderData( type = "json", data = result, statusCode = 200 );
+    }
+
+    function worker( event, rc, prc ){
+        var result = {
+            "status"    : "ok",
+            "service"   : "tesserabx-worker",
+            "timestamp" : dateTimeFormat( now(), "yyyy-MM-dd'T'HH:mm:ss'Z'" )
+        };
+        event.renderData( type = "json", data = result, statusCode = 200 );
+    }
+
+}

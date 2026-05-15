@@ -1,0 +1,33 @@
+/**
+ * audit module: cross-cutting compliance log.
+ *
+ * Owns AuditEvent. Service layer other modules call to record
+ * significant operations. Distinct from tickets's own TicketEvent
+ * (the agent-facing ticket timeline).
+ */
+class {
+
+    this.title              = "audit";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Central audit log entity, service, and admin UI for cross-module compliance events.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "audit";
+    this.modelNamespace     = "audit";
+    this.cfmapping          = "tesserabx.modules.audit";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

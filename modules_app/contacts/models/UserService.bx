@@ -1,0 +1,77 @@
+/**
+ * UserService.
+ *
+ * cbauth requires a single global userService that resolves a user ID
+ * to a User object. TesseraBX has two account families (Contact for
+ * the / surface, Agent for /agent) and one cbauth instance, so this
+ * service multiplexes: an incoming ID is looked up in `agents` first,
+ * then `contacts`. Surface-specific firewalls in each module ensure
+ * the wrong family can't reach the wrong UI.
+ *
+ * Lives in `contacts` because contacts owns the user-identity story
+ * and Contact is the dominant client-facing entity. The agent module
+ * doesn't need to know about this; it injects this service through
+ * its own session handler.
+ */
+class singleton=true {
+
+    property name="bcrypt"  inject="@BCrypt";
+    property name="wirebox" inject="wirebox";
+
+    /**
+     * Look up a user by their stored ID. cbauth calls this on every
+     * authenticated request to rehydrate the user from the session.
+     *
+     * Order: agents first (cheaper to fail-out if it's a Contact ID,
+     * since Contact lookups are usually more frequent at scale). For
+     * tiny Phase 0 data either order is fine.
+     */
+    public any function retrieveUserById( required string id ){
+        var agent = wirebox.getInstance( "Agent@agent" )
+            .where( "id", arguments.id )
+            .first();
+        if ( !isNull( agent ) ) {
+            return agent;
+        }
+        var contact = wirebox.getInstance( "Contact@contacts" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    /**
+     * Look up by username (email). Not strictly required by cbauth
+     * (the Session handlers call ContactAuthService / AgentAuthService
+     * directly during login), but exists so generic cbauth call sites
+     * keep working.
+     */
+    public any function retrieveUserByUsername( required string username ){
+        var agent = wirebox.getInstance( "Agent@agent" )
+            .where( "email", arguments.username )
+            .where( "is_active", true )
+            .first();
+        if ( !isNull( agent ) ) {
+            return agent;
+        }
+        var contact = wirebox.getInstance( "Contact@contacts" )
+            .where( "email", arguments.username )
+            .where( "is_active", true )
+            .first();
+        return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    /**
+     * Credential check. Surface-specific session handlers
+     * (portal:Session.create / agent:Session.create) prefer the
+     * surface-bound auth services so they never accidentally
+     * authenticate an Agent against the / surface or vice versa.
+     */
+    public boolean function isValidCredentials( required string username, required string password ){
+        var user = retrieveUserByUsername( arguments.username );
+        if ( isNull( user ) ) {
+            return false;
+        }
+        return bcrypt.checkPassword( arguments.password, user.getPasswordHash() );
+    }
+
+}

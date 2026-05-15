@@ -1,0 +1,38 @@
+/**
+ * TesseraBX top-level router.
+ *
+ * Each surface owns its own routes through its module's ModuleConfig.bx:
+ *   /        -> portal
+ *   /agent   -> agent (with /agent/admin nested through the admin child)
+ *   /api     -> api
+ *   /widget  -> widget
+ *
+ * This top-level router only declares the catch-all. Surface routes
+ * travel with their owning module.
+ */
+class extends="coldbox.system.web.routing.Router" {
+
+    function configure(){
+
+        setMultiDomainDiscovery( false );
+
+        // Health endpoints. The owning module (core) also exposes these,
+        // but declaring them at the top level guarantees /health exists
+        // before any module load.
+        route( "/health" ).to( "core:Health.index" );
+        route( "/health/worker" ).to( "core:Health.worker" );
+
+        // Portal surface (/) routes. The portal module has an empty
+        // entryPoint, so its own config/Router.bx isn't reliably mounted
+        // by ColdBox's module router. Declaring these here ensures the
+        // client-portal auth flow works end to end.
+        route( "/" ).to( "portal:Home.index" );
+        route( "/login" ).withVerbs( "GET" ).to( "portal:Session.new" );
+        route( "/login" ).withVerbs( "POST" ).to( "portal:Session.create" );
+        route( "/logout" ).to( "portal:Session.delete" );
+
+        // Default catch-all. Module routes are matched first.
+        route( ":handler/:action?" ).end();
+    }
+
+}

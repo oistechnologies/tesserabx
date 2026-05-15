@@ -1,0 +1,32 @@
+/**
+ * widget module: embeddable support widget intake.
+ *
+ * Serves /widget. Separate from portal so it can be cached and
+ * rate-limited independently. Owns no domain entities.
+ */
+class {
+
+    this.title              = "widget";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Embeddable support widget intake at /widget.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "widget";
+    this.modelNamespace     = "widget";
+    this.cfmapping          = "tesserabx.modules.widget";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "tickets" ];
+
+    function configure(){
+        settings = {};
+        routes = [ { pattern : "/:handler/:action?" } ];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

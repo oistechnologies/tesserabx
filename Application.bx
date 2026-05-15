@@ -1,0 +1,105 @@
+/**
+ * TesseraBX Application bootstrap.
+ *
+ * Native BoxLang class. ColdBox 8 is loaded on top of bx-compat-cfml so
+ * the framework's .cfc code remains supported, but the application's
+ * own code is BoxLang-native (.bx / .bxm).
+ *
+ * The datasource is declared HERE rather than in boxlang.json so the
+ * BoxLang runtime guarantees to see it at boot (the runtime config
+ * file is only loaded when explicitly referenced; Application.bx is
+ * always read).
+ */
+class {
+
+    this.name                 = "TesseraBX_" & hash( getCurrentTemplatePath() );
+    this.sessionManagement    = true;
+    this.sessionTimeout       = createTimespan( 0, 1, 0, 0 );
+    this.setClientCookies     = true;
+    this.applicationTimeout   = createTimespan( 30, 0, 0, 0 );
+    this.timezone             = getSystemSetting( "APP_TIMEZONE", "UTC" );
+
+    // Application paths. modules_app/ holds our 16 modules; modules/
+    // holds CommandBox-installed third-party packages.
+    rootPath                                    = getDirectoryFromPath( getCurrentTemplatePath() );
+    this.mappings[ "/coldbox" ]                 = rootPath & "coldbox";
+    this.mappings[ "/testbox" ]                 = rootPath & "testbox";
+    this.mappings[ "/tesserabx" ]               = rootPath;
+    this.mappings[ "/tesserabx/modules" ]       = rootPath & "modules_app";
+    this.mappings[ "/root" ]                    = rootPath;
+
+    // Datasource definitions. tesserabx is the single Postgres datasource
+    // everything in the app uses. Env-driven so dev/staging/prod swap
+    // credentials without code changes. cbq's DBProvider, qb, quick,
+    // cfmigrations, and direct queryExecute() calls all key off this.
+    this.datasources = {
+        "tesserabx" : {
+            "class"            : "org.postgresql.Driver",
+            "connectionString" : "jdbc:postgresql://"
+                                  & getSystemSetting( "DB_HOST", "db" )
+                                  & ":"
+                                  & getSystemSetting( "DB_PORT", "5432" )
+                                  & "/"
+                                  & getSystemSetting( "DB_NAME", "tesserabx" )
+                                  & "?ssl=" & getSystemSetting( "DB_SSL", "false" )
+                                  & "&characterEncoding=UTF-8",
+            "username"         : getSystemSetting( "DB_USER", "tesserabx" ),
+            "password"         : getSystemSetting( "DB_PASSWORD", "tesserabx" )
+        }
+    };
+    this.datasource = "tesserabx";
+
+    // ColdBox bootstrap settings
+    COLDBOX_APP_ROOT_PATH = rootPath;
+    COLDBOX_APP_MAPPING   = "";
+    COLDBOX_CONFIG_FILE   = "";
+    COLDBOX_APP_KEY       = "cbController";
+    COLDBOX_FAIL_FAST     = true;
+
+    /**
+     * Fires when the application starts. Boots ColdBox.
+     */
+    public boolean function onApplicationStart(){
+        application.cbBootstrap = new coldbox.system.Bootstrap(
+            COLDBOX_CONFIG_FILE,
+            COLDBOX_APP_ROOT_PATH,
+            COLDBOX_APP_KEY,
+            COLDBOX_APP_MAPPING,
+            COLDBOX_FAIL_FAST
+        );
+        application.cbBootstrap.loadColdbox();
+        return true;
+    }
+
+    /**
+     * Fires on every request. Hands off to ColdBox.
+     */
+    public boolean function onRequestStart( required string targetPage ){
+        if ( !structKeyExists( application, "cbBootstrap" ) || isRefreshingApp() ) {
+            onApplicationStart();
+        }
+        application.cbBootstrap.onRequestStart( arguments.targetPage );
+        return true;
+    }
+
+    public void function onSessionStart(){
+        application.cbBootstrap.onSessionStart();
+    }
+
+    public void function onSessionEnd( required struct sessionScope, required struct appScope ){
+        arguments.appScope.cbBootstrap.onSessionEnd( argumentCollection = arguments );
+    }
+
+    public void function onApplicationEnd( required struct appScope ){
+        arguments.appScope.cbBootstrap.onApplicationEnd( arguments.appScope );
+    }
+
+    public boolean function onMissingTemplate( required string template ){
+        return application.cbBootstrap.onMissingTemplate( argumentCollection = arguments );
+    }
+
+    private boolean function isRefreshingApp(){
+        return structKeyExists( url, "fwreinit" );
+    }
+
+}

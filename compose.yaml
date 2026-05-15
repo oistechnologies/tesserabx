@@ -1,0 +1,156 @@
+# TesseraBX base stack.
+#
+# Production composition. Attaches to an external Docker network whose
+# name comes from the PROXY_NETWORK environment variable. The external
+# reverse proxy lives there. TLS, HTTPS, and certificates are the
+# proxy's responsibility; this stack speaks plain HTTP.
+#
+# Services:
+#   app        - the ColdBox application on BoxLang
+#   worker     - same image as app; runs the cbq worker pool
+#   scheduler  - same image as app; runs ColdBox scheduled tasks
+#   db         - PostgreSQL 16 with pgvector
+#   redis      - cache and cbq queue backend
+#
+# To scale the worker:  docker compose up --scale worker=N
+
+services:
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tesserabx/app:${TESSERABX_IMAGE_TAG:-latest}
+    container_name: tesserabx-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      PORT: "8080"
+      WORKER_MODE: "false"
+      SCHEDULER_MODE: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+      - proxy
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # worker and scheduler run the same image as app with the same default
+  # command (`box server start`). They differentiate behavior through
+  # env vars that config/cbq.bx and config/Scheduler.bx read at boot:
+  #   WORKER_MODE=true     cbq worker pool consumes jobs in this process.
+  #   SCHEDULER_MODE=true  ColdBox scheduled tasks fire in this process.
+  # The app container leaves both unset so it neither consumes queue
+  # jobs nor duplicates scheduled work. The worker container's web port
+  # is not published; only `app` is reachable from outside.
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tesserabx/app:${TESSERABX_IMAGE_TAG:-latest}
+    container_name: tesserabx-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      WORKER_MODE: "true"
+      SCHEDULER_MODE: "false"
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Skip the migration entrypoint: app has already applied migrations
+    # by the time it's healthy (via depends_on).
+    command: [ "/usr/local/lib/build/run.sh" ]
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tesserabx/app:${TESSERABX_IMAGE_TAG:-latest}
+    container_name: tesserabx-scheduler
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      WORKER_MODE: "false"
+      SCHEDULER_MODE: "true"
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: [ "/usr/local/lib/build/run.sh" ]
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+  db:
+    # pgvector ships an official Postgres 16 + pgvector image. Saves us
+    # building a custom Postgres image just to enable an extension.
+    image: pgvector/pgvector:pg16
+    container_name: tesserabx-db
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${DB_NAME:-tesserabx}
+      POSTGRES_USER: ${DB_USER:-tesserabx}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tesserabx}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-tesserabx} -d ${DB_NAME:-tesserabx}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: tesserabx-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --save 60 1
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db_data:
+  redis_data:
+
+networks:
+  default:
+    name: tesserabx_default
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK}

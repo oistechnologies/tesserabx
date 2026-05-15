@@ -1,0 +1,114 @@
+/**
+ * Contact: a client-side user account.
+ *
+ * Tenant-scoped: a Contact belongs to exactly one Organization and
+ * never sees data from another organization.
+ *
+ * Phase 0 ships the minimum to authenticate. Phase 1 expands with the
+ * full client-side role system, merge history, tier inheritance, and
+ * per-organization custom fields.
+ *
+ * This is also the cbauth user entity for the / surface.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="contacts"
+    accessors="true"
+{
+
+    property name="id";
+    property name="organizationId"        column="organization_id";
+    property name="officeId"              column="office_id";
+    property name="email";
+    property name="passwordHash"          column="password_hash";
+    property name="firstName"             column="first_name";
+    property name="lastName"              column="last_name";
+    property name="isActive"              column="is_active";
+    property name="isOrganizationAdmin"   column="is_organization_admin";
+    property name="lastLoginAt"           column="last_login_at";
+    property name="createdAt"             column="created_at";
+    property name="updatedAt"             column="updated_at";
+
+    // Phase 1 wires `this.globalScopes = [ "tenant" ]` once the tenant
+    // scope service is registered with Quick. Phase 0 ships without it;
+    // tenant isolation is enforced solely through cbSecurity firewalls
+    // for now.
+
+    function organization(){
+        return belongsTo( "Organization@contacts", "organization_id" );
+    }
+
+    function office(){
+        return belongsTo( "Office@contacts", "office_id" );
+    }
+
+    // ---- cbauth user interface ----
+
+    public string function getUsername(){
+        return getEmail();
+    }
+
+    public string function getPassword(){
+        return getPasswordHash();
+    }
+
+    public string function retrieveUserId(){
+        return getId();
+    }
+
+    public string function retrieveUsername(){
+        return getEmail();
+    }
+
+    public boolean function isLoaded(){
+        var theId = getId();
+        return !isNull( theId ) && len( theId );
+    }
+
+    // ---- Surface discriminator ----
+
+    public string function surface(){
+        return "portal";
+    }
+
+    public boolean function isContact(){
+        return true;
+    }
+
+    public boolean function isAgent(){
+        return false;
+    }
+
+    // ---- cbsecurity role / permission interface ----
+
+    /**
+     * Roles for cbsecurity. Phase 0 ships only "contact" plus
+     * "organization-admin" for the first client-side role. Phase 1
+     * fleshes out the full role system from the Organization side.
+     */
+    public array function getRoles(){
+        var roles = [ "contact" ];
+        if ( getIsOrganizationAdmin() ) {
+            roles.append( "organization-admin" );
+        }
+        return roles;
+    }
+
+    public array function getPermissions(){
+        return [];
+    }
+
+    public boolean function hasRole( required any role ){
+        var requested = isArray( arguments.role ) ? arguments.role : listToArray( arguments.role );
+        var owned = getRoles();
+        for ( var r in requested ) {
+            if ( arrayFindNoCase( owned, trim( r ) ) ) return true;
+        }
+        return false;
+    }
+
+    public boolean function hasPermission( required any permission ){
+        return false;
+    }
+
+}

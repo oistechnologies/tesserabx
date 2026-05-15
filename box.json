@@ -1,0 +1,82 @@
+{
+    "name":"TesseraBX",
+    "slug":"tesserabx",
+    "version":"0.0.1",
+    "author":"OIS Technologies",
+    "location":"https://github.com/oistechnologies/tesserabx",
+    "homepage":"https://github.com/oistechnologies/tesserabx",
+    "documentation":"https://github.com/oistechnologies/tesserabx",
+    "repository":{
+        "type":"git",
+        "url":"https://github.com/oistechnologies/tesserabx"
+    },
+    "shortDescription":"TesseraBX: a multi-tenant help-desk and customer support platform built on ColdBox and BoxLang.",
+    "type":"projects",
+    "license":[
+        {
+            "type":"Apache-2.0",
+            "url":"https://www.apache.org/licenses/LICENSE-2.0"
+        }
+    ],
+    "engines":[
+        {
+            "type":"boxlang",
+            "version":">=1.0.0"
+        }
+    ],
+    "scripts":{
+        "install:dependencies":"install --production",
+        "install:dev":"install",
+        "format":"echo 'no formatter configured yet'",
+        "migrate:up":"migrate up",
+        "migrate:down":"migrate down",
+        "migrate:fresh":"migrate fresh",
+        "test:run":"testbox run",
+        "start":"server start"
+    },
+    "dependencies":{
+        "coldbox":"^8.1.0",
+        "cbsecurity":"^3.7.0",
+        "cbauth":"^7.0.0",
+        "cbvalidation":"^4.8.0",
+        "cbmailservices":"^2.9.0",
+        "cbmessagebox":"^4.1.0",
+        "cbstorages":"^3.5.0",
+        "cbpaginator":"^2.8.3",
+        "cbi18n":"^3.5.0",
+        "cbcsrf":"^3.2.0",
+        "cbantisamy":"^2.2.0",
+        "cbswagger":"^3.1.3",
+        "cbq":"^5.0.7",
+        "cbfs":"^1.1.4",
+        "cbwire":"^5.0.4",
+        "cors":"^3.0.9",
+        "cfmigrations":"^5.1.1",
+        "mementifier":"^3.7.0",
+        "qb":"^13.1.0",
+        "quick":"^12.0.12",
+        "hyper":"^8.2.2",
+        "bcrypt":"^3.2.0"
+    },
+    "devDependencies":{
+        "testbox":"^7.0.0",
+        "cbdebugger":"^4.4.0",
+        "commandbox-dotenv":"^2.4.1",
+        "commandbox-cfformat":"^0.21.0",
+        "commandbox-cfconfig":"^2.2.1",
+        "commandbox-migrations":"^5.3.0"
+    },
+    "installPaths":{
+        "coldbox":"coldbox/",
+        "testbox":"testbox/",
+        "cbsecurity":"modules/cbsecurity/",
+        "cbq":"modules/cbq/"
+    },
+    "testbox":{
+        "runner":"http://localhost:${PORT:-8080}/tests/runner.bxm",
+        "verbose":false,
+        "watchDelay":500,
+        "watchPaths":"**.bx"
+    },
+    "_cfmigrationsNote":"Migration config lives in .cfmigrations.json at the project root (cfmigrations v4 format)."
+}

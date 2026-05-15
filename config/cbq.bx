@@ -1,0 +1,48 @@
+/**
+ * cbq configuration.
+ *
+ * Three containers (app, worker, scheduler) share the same image and
+ * run the same `box server start` command. WORKER_MODE controls
+ * whether this container actually defines a worker pool — defining
+ * one starts the DB watcher even if quantity is 0, so we skip it
+ * entirely on app/scheduler containers.
+ *
+ * Phase 0 uses the DB provider on the tesserabx datasource. A
+ * SyncProvider stays registered everywhere so any caller that
+ * explicitly dispatches via .onConnection("sync") gets blocking
+ * semantics (used by tests).
+ */
+class {
+
+    function configure(){
+
+        var isWorker = ( getSystemSetting( "WORKER_MODE", "false" ) == "true" );
+
+        newConnection( "default" )
+            .setProvider( "DBProvider@cbq" )
+            .markAsDefault( true );
+
+        newConnection( "sync" )
+            .setProvider( "SyncProvider@cbq" );
+
+        // Sync pool is safe to declare in any container; it doesn't poll.
+        newWorkerPool( "sync", "sync" )
+            .quantity( 1 )
+            .onQueue( "default" )
+            .timeout( 60 )
+            .maxAttempts( 1 );
+
+        // DB-backed default pool is only declared on the worker
+        // container. Declaring it elsewhere starts the watcher, which
+        // polls cbq_jobs every 5s.
+        if ( isWorker ) {
+            newWorkerPool( "default", "default" )
+                .quantity( 1 )
+                .onQueue( "default" )
+                .timeout( 60 )
+                .maxAttempts( 3 );
+        }
+
+    }
+
+}

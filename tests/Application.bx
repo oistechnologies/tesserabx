@@ -1,0 +1,27 @@
+/**
+ * TestBox application context. Boots the same ColdBox app the
+ * production stack runs, against the CI database/redis.
+ */
+class {
+
+    this.name              = "TesseraBX_tests_" & hash( getCurrentTemplatePath() );
+    this.sessionManagement = true;
+    this.setClientCookies  = true;
+
+    rootPath                              = reReplaceNoCase( getDirectoryFromPath( getCurrentTemplatePath() ), "tests(\\|/)$", "" );
+    this.mappings[ "/" ]                  = rootPath;
+    this.mappings[ "/root" ]              = rootPath;
+    this.mappings[ "/tesserabx" ]         = rootPath;
+    this.mappings[ "/tesserabx/modules" ] = rootPath & "modules_app";
+    this.mappings[ "/coldbox" ]           = rootPath & "coldbox";
+    this.mappings[ "/testbox" ]           = rootPath & "testbox";
+    this.mappings[ "/tests" ]             = rootPath & "tests";
+
+    this.datasource = "tesserabx";
+
+    function onRequestStart(){
+        bx:setting requesttimeout="120";
+        return true;
+    }
+
+}

@@ -1,0 +1,35 @@
+/**
+ * ContactAuthService.
+ *
+ * The cbauth UserService for the / surface. Looks up Contact users by
+ * email and verifies their stored bcrypt password hash.
+ */
+class singleton=true {
+
+    property name="bcrypt"  inject="@BCrypt";
+    property name="wirebox" inject="wirebox";
+
+    public any function retrieveUserByUsername( required string username ){
+        var contact = wirebox.getInstance( "Contact@contacts" )
+            .where( "email", arguments.username )
+            .where( "is_active", true )
+            .first();
+        return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    public any function retrieveUserById( required string id ){
+        var contact = wirebox.getInstance( "Contact@contacts" )
+            .where( "id", arguments.id )
+            .first();
+        return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    public boolean function isValidCredentials( required string username, required string password ){
+        var user = retrieveUserByUsername( arguments.username );
+        if ( isNull( user ) ) {
+            return false;
+        }
+        return bcrypt.checkPassword( arguments.password, user.getPasswordHash() );
+    }
+
+}

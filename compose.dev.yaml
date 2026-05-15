@@ -1,0 +1,93 @@
+# TesseraBX development override.
+#
+# Used together with compose.yaml:
+#   docker compose -f compose.yaml -f compose.dev.yaml up
+#
+# This override:
+#   - Removes the external proxy network attachment so the stack runs
+#     standalone with no reverse proxy and no TLS.
+#   - Publishes app HTTP port to the host so the developer can reach it.
+#   - Mounts the source tree into app, worker, and scheduler for live
+#     reload.
+#   - Adds mailpit (SMTP trap) and adminer (DB inspector).
+#   - Enables cbdebugger and verbose logging.
+
+services:
+
+  app:
+    environment:
+      ENVIRONMENT: development
+      BOX_SERVER_PROFILE: development
+    ports:
+      - "${APP_HOST_PORT:-8080}:8080"
+    networks:
+      - default
+    volumes:
+      - .:/app
+      - /app/coldbox
+      - /app/modules
+      - /app/testbox
+      - /app/.engine
+    depends_on:
+      mailpit:
+        condition: service_started
+
+  worker:
+    environment:
+      ENVIRONMENT: development
+    networks:
+      - default
+    volumes:
+      - .:/app
+      - /app/coldbox
+      - /app/modules
+      - /app/testbox
+
+  scheduler:
+    environment:
+      ENVIRONMENT: development
+    networks:
+      - default
+    volumes:
+      - .:/app
+      - /app/coldbox
+      - /app/modules
+      - /app/testbox
+
+  db:
+    ports:
+      # Exposed to host so adminer (or external psql) can reach it
+      # directly during dev.
+      - "${DB_HOST_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: tesserabx-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"   # web UI
+      - "${MAILPIT_SMTP_PORT:-1025}:1025" # SMTP
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  adminer:
+    image: adminer:latest
+    container_name: tesserabx-adminer
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+
+networks:
+  default:
+    name: tesserabx_default
+  # Override removes the external proxy attachment for standalone dev.
+  proxy:
+    external: false
+    name: tesserabx_dev_proxy_unused

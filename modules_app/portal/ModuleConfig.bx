@@ -1,0 +1,58 @@
+/**
+ * portal module: the client self-service surface.
+ *
+ * Serves the root `/` surface. Owns no entities of its own; creates
+ * tickets through the tickets service layer.
+ */
+class {
+
+    this.title              = "portal";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Client-facing self-service portal at /.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "";
+    this.modelNamespace     = "portal";
+    this.cfmapping          = "tesserabx.modules.portal";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts", "tickets", "knowledgebase" ];
+
+    function configure(){
+        settings = {};
+
+        routes = [
+            { pattern : "/",                handler : "Home",    action : "index" },
+            { pattern : "/login",           handler : "Session", action : "new"   },
+            { pattern : "/logout",          handler : "Session", action : "delete" }
+        ];
+
+        // cbSecurity firewall for the / surface.
+        cbSecurity = {
+            userService         : "ContactAuthService@contacts",
+            sessionStorageScope : "session",
+            authStorage         : "tesserabx_portal_user",
+            firewall : {
+                rulesSource                 : "model",
+                rulesModel                  : "PortalSecurityRules@portal",
+                invalidAuthenticationEvent  : "portal:Session.new",
+                defaultAuthenticationAction : "redirect",
+                invalidAuthorizationEvent   : "portal:Session.new",
+                defaultAuthorizationAction  : "redirect"
+            }
+        };
+
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){
+        binder.map( "PortalSecurityRules@portal" )
+              .to( "#moduleMapping#.models.PortalSecurityRules" )
+              .asSingleton();
+    }
+
+    function onUnload(){}
+
+}

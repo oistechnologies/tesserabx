@@ -1,0 +1,34 @@
+<bx:script>
+/**
+ * TesseraBX application helper. Loaded into every handler and view by
+ * ColdBox. Keep this small.
+ *
+ * BoxLang ships the ESAPI encoders (encodeForHTML, encodeForHTMLAttribute,
+ * encodeForJavaScript, EncodeFor, GetSafeHTML, ...) through the bx-esapi
+ * server module. Do not redefine them here; the native versions are
+ * what BoxLang and ColdBox expect.
+ */
+
+/**
+ * AI capability flag. Every AI-related CBWire component and view partial
+ * must call this before rendering. When false, the surrounding element
+ * MUST render nothing.
+ */
+boolean function isAiEnabled(){
+    var flag = getSetting( "aiEnabled", false );
+    return isBoolean( flag ) ? flag : ( flag == "true" );
+}
+
+/**
+ * Current surface identifier. "portal" for /, "agent" for /agent,
+ * "api" or "widget" otherwise.
+ */
+string function currentSurface(){
+    var ev   = getRequestContext();
+    var path = ev.getCurrentRoutedURL();
+    if ( reFindNoCase( "^api(/|$)", path ) ) return "api";
+    if ( reFindNoCase( "^widget(/|$)", path ) ) return "widget";
+    if ( reFindNoCase( "^agent(/|$)", path ) ) return "agent";
+    return "portal";
+}
+</bx:script>

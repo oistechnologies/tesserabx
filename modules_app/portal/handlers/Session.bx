@@ -1,0 +1,35 @@
+/**
+ * Portal session handler: login and logout for client (Contact) users.
+ */
+class {
+
+    property name="auth"        inject="AuthenticationService@cbauth";
+    property name="contactAuth" inject="ContactAuthService@contacts";
+    property name="messagebox"  inject="messagebox@cbmessagebox";
+
+    function new( event, rc, prc ){
+        prc.pageTitle = "Sign in";
+        event.setLayout( name = "Portal", module = "core" );
+        event.setView( "session/new" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.email    = "";
+        param rc.password = "";
+
+        if ( contactAuth.isValidCredentials( rc.email, rc.password ) ) {
+            auth.login( contactAuth.retrieveUserByUsername( rc.email ) );
+            relocate( uri = "/" );
+            return;
+        }
+
+        messagebox.error( "Invalid email or password." );
+        relocate( uri = "/login" );
+    }
+
+    function delete( event, rc, prc ){
+        auth.logout();
+        relocate( uri = "/" );
+    }
+
+}

@@ -1,0 +1,38 @@
+/**
+ * ai module: bx-ai integration plus the AI middleware facade.
+ *
+ * This is the ONLY module that imports bx-ai. Every AI feature in
+ * other modules calls the facade exposed here, never the provider
+ * directly.
+ *
+ * Owns AiInteraction. Optional at runtime; when the capability flag
+ * is off, no AI UI renders anywhere.
+ */
+class {
+
+    this.title              = "ai";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "AI middleware facade and bx-ai integration, optional at runtime.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "ai";
+    this.modelNamespace     = "ai";
+    this.cfmapping          = "tesserabx.modules.ai";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "audit" ];
+
+    function configure(){
+        settings = {
+            enabled : controller.getSetting( name = "aiEnabled", defaultValue = false )
+        };
+        routes = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

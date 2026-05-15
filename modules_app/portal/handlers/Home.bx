@@ -1,0 +1,11 @@
+/**
+ * portal Home handler. Renders the portal landing on `/`.
+ */
+class {
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "TesseraBX Help Desk";
+        event.setLayout( name = "Portal", module = "core" );
+    }
+
+}

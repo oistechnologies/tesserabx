@@ -1,0 +1,42 @@
+/**
+ * TesseraBX global scheduler.
+ *
+ * ColdBox's scheduler service runs in every container that boots
+ * ColdBox. To prevent the app + worker + scheduler all firing the
+ * same scheduled task three times, we gate task registration on the
+ * SCHEDULER_MODE env var. Only the `scheduler` container has it
+ * set to "true" (see compose.yaml).
+ *
+ * Tasks registered in later phases (Phase 3 onward):
+ *   - SLA breach checks
+ *   - Recurring ticket creation
+ *   - Nightly pg_dump backup
+ *   - Scheduled report exports
+ *   - Data retention sweeps
+ *
+ * Phase 0 ships an empty scheduler.
+ */
+class extends="coldbox.system.web.tasks.ColdBoxScheduler" {
+
+    function configure(){
+        setTimezone( "UTC" );
+
+        var isSchedulerContainer = ( getSystemSetting( "SCHEDULER_MODE", "false" ) == "true" );
+        if ( !isSchedulerContainer ) {
+            // App and worker containers: skip task registration so we
+            // don't run the same job in three places.
+            return;
+        }
+
+        // No tasks registered yet in Phase 0.
+    }
+
+    function onStartup(){
+        writeLog( text = "tesserabx scheduler started", log = "tesserabx-scheduler" );
+    }
+
+    function onShutdown(){
+        writeLog( text = "tesserabx scheduler stopped", log = "tesserabx-scheduler" );
+    }
+
+}

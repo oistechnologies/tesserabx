@@ -1,0 +1,16 @@
+<bx:output>
+<div class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-6">
+        <div class="card border-danger">
+            <div class="card-body text-center">
+                <i class="bi bi-shield-lock fs-1 text-danger"></i>
+                <h2 class="card-title mt-3">Access denied</h2>
+                <p class="text-body-secondary">
+                    The path you requested exists, but your account is not authorized to view it. The administration surface is restricted to provider administrators.
+                </p>
+                <a href="/agent" class="btn btn-outline-secondary">Back to dashboard</a>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

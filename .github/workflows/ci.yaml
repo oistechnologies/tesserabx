@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  COMMANDBOX_VERSION: 6.x
+  BOXLANG_VERSION: 1
+  TZ: UTC
+
+jobs:
+
+  test:
+    name: TestBox specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: tesserabx_test
+          POSTGRES_USER: tesserabx
+          POSTGRES_PASSWORD: tesserabx
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tesserabx -d tesserabx_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up CommandBox
+        uses: Ortus-Solutions/setup-commandbox@v2.0.1
+
+      - name: Install CommandBox dependencies
+        run: box install
+
+      - name: Run database migrations
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_NAME: tesserabx_test
+          DB_USER: tesserabx
+          DB_PASSWORD: tesserabx
+          DB_SSL: "false"
+          DB_SCHEMA: public
+        run: |
+          box migrate install
+          box migrate up --force
+
+      - name: Run TestBox specs
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_NAME: tesserabx_test
+          DB_USER: tesserabx
+          DB_PASSWORD: tesserabx
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          ENVIRONMENT: ci
+          AI_ENABLED: "false"
+          CBFS_DEFAULT_PROVIDER: local
+        run: box testbox run reporter=text outputFile=tests/results/testbox-report.txt
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testbox-report
+          path: tests/results/
+          if-no-files-found: ignore

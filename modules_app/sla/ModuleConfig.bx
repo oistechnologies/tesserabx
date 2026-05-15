@@ -1,0 +1,32 @@
+/**
+ * sla module.
+ *
+ * Owns SlaPolicy, BusinessHoursCalendar (with its own timezone), and
+ * related entities. Pause/resume during pending states.
+ */
+class {
+
+    this.title              = "sla";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "SLA policies, business-hours calendars, breach warnings, pause/resume.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "sla";
+    this.modelNamespace     = "sla";
+    this.cfmapping          = "tesserabx.modules.sla";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "contacts" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

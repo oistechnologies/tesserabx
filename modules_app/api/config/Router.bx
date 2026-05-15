@@ -1,0 +1,16 @@
+/**
+ * api module router.
+ *
+ * All routes are auto-prefixed with /api because of
+ * `entryPoint = "api"` in ModuleConfig.bx.
+ *
+ * Phase 0 ships a placeholder /v1/ping; Phase 1+ wires the real
+ * endpoints.
+ */
+class {
+
+    function configure(){
+        // route( "/v1/ping" ).to( "Ping.index" );
+    }
+
+}

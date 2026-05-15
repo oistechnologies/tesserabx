@@ -1,0 +1,31 @@
+/**
+ * AgentSecurityRules: cbSecurity rules for the /agent surface.
+ *
+ * Phase 0: every /agent/* path requires an authenticated Agent. Login
+ * and logout are whitelisted. The nested admin overlay requires the
+ * `agent-admin` role and returns 403 on unauthorized access.
+ */
+class singleton=true {
+
+    public array function getSecurityRules(){
+        return [
+            {
+                whitelist   : "^agent/(login|logout)(/|$)|^agent$",
+                secureList  : "^agent(/|$)",
+                match       : "url",
+                roles       : "agent",
+                permissions : "",
+                action      : "redirect",
+                redirect    : "agent/login"
+            },
+            {
+                secureList  : "^agent/admin(/|$)",
+                match       : "url",
+                roles       : "agent-admin",
+                permissions : "",
+                action      : "block"
+            }
+        ];
+    }
+
+}

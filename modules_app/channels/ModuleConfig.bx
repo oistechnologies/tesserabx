@@ -1,0 +1,32 @@
+/**
+ * channels module: inbound channel intake and normalization.
+ *
+ * Owns channel-config entities and the inbound email-address and
+ * domain blacklist. Creates tickets through the tickets service.
+ */
+class {
+
+    this.title              = "channels";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Channel intake (email IMAP, chat, contact form), normalization, blacklist.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "channels";
+    this.modelNamespace     = "channels";
+    this.cfmapping          = "tesserabx.modules.channels";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "tickets", "contacts" ];
+
+    function configure(){
+        settings = {};
+        routes   = [];
+        interceptorSettings = { customInterceptionPoints : [] };
+        interceptors = [];
+    }
+
+    function onLoad(){}
+    function onUnload(){}
+
+}

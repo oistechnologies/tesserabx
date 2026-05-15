@@ -1,0 +1,26 @@
+/**
+ * TesseraBX WireBox binder.
+ *
+ * Phase 0 defaults. Module-level bindings live in each module's
+ * ModuleConfig.bx. Cross-module aliases or Java mappings would go
+ * here if they were needed.
+ */
+class extends="coldbox.system.ioc.config.Binder" {
+
+    function configure(){
+        variables.wireBox = {
+            scopeRegistration : {
+                enabled : true,
+                scope   : "application",
+                key     : "wireBox"
+            },
+            customDSL      : {},
+            customScopes   : {},
+            scanLocations  : [],
+            stopRecursions : [],
+            parentInjector : "",
+            listeners      : []
+        };
+    }
+
+}
