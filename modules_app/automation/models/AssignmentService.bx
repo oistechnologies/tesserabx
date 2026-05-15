@@ -32,6 +32,16 @@ class singleton=true {
         required string strategy,
         string strategyKey = "default"
     ){
+        // Validate the strategy first so an unknown name always throws,
+        // even when the eligible-agent pool is empty (CI starts with
+        // zero agents in the DB).
+        if ( !arrayContainsNoCase( variables.SUPPORTED_STRATEGIES, arguments.strategy ) ) {
+            throw(
+                type    = "AssignmentService.UnknownStrategy",
+                message = "Unknown assignment strategy [#arguments.strategy#]. Supported: " & variables.SUPPORTED_STRATEGIES.toList()
+            );
+        }
+
         var eligible = listEligibleAgentIds();
         if ( !eligible.len() ) return "";
 
@@ -39,10 +49,14 @@ class singleton=true {
             case "roundRobin":  return pickRoundRobin( eligible, arguments.strategyKey );
             case "leastLoaded": return pickLeastLoaded( eligible );
         }
-        throw(
-            type    = "AssignmentService.UnknownStrategy",
-            message = "Unknown assignment strategy [#arguments.strategy#]. Supported: " & variables.SUPPORTED_STRATEGIES.toList()
-        );
+        return "";
+    }
+
+    private boolean function arrayContainsNoCase( required array list, required string value ){
+        for ( var v in arguments.list ) {
+            if ( lCase( toString( v ) ) == lCase( arguments.value ) ) return true;
+        }
+        return false;
     }
 
     /**

@@ -24,23 +24,25 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         describe( "AssignmentService", function(){
 
             it( "round-robin rotates through every active agent and wraps", function(){
-                var key      = "rr-spec-" & lCase( replace( createUUID(), "-", "", "all" ) );
+                // CI starts with no agents in the DB; the seeder only
+                // runs in dev. Create our own pool so the rotation is
+                // deterministic regardless of environment.
+                var seeded = [ makeAgent(), makeAgent() ];
+                var key    = "rr-spec-" & lCase( replace( createUUID(), "-", "", "all" ) );
                 var eligible = variables.assignment.listEligibleAgentIds();
-                expect( eligible.len() ).toBeGTE( 1 );
+                expect( eligible.len() ).toBeGTE( seeded.len() );
 
                 var seen = [];
                 for ( var i = 1; i <= eligible.len(); i++ ) {
                     seen.append( variables.assignment.pickAgent( strategy = "roundRobin", strategyKey = key ) );
                 }
-                // Each pass visited each agent exactly once.
                 for ( var id in eligible ) expect( seen ).toInclude( id );
 
-                // One more call wraps back to one of the agents we have
-                // already seen in this rotation.
                 var wrap = variables.assignment.pickAgent( strategy = "roundRobin", strategyKey = key );
                 expect( seen ).toInclude( wrap );
 
                 queryExecute( "DELETE FROM assignment_state WHERE strategy_key = :k", { k : key } );
+                for ( var id in seeded ) queryExecute( "DELETE FROM agents WHERE id = :id", { id : id } );
             } );
 
             it( "least-loaded picks an agent with no open tickets when one exists", function(){
