@@ -1,0 +1,149 @@
+/**
+ * TriageServiceSpec: tests the parts of triage that do not need a
+ * live provider. The triage() entrypoint is tested through the
+ * disabled-capability path; apply() is tested by handing it a
+ * known result struct so the policy boundary is verified without
+ * the model being involved.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.triage      = getController().getWireBox().getInstance( "TriageService@ai" );
+        variables.tickets     = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts    = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.capability  = getController().getWireBox().getInstance( "AiCapability@ai" );
+        variables.aiOff       = !variables.capability.isEnabled();
+    }
+
+    function run(){
+        describe( "TriageService.apply", function(){
+
+            it( "updates priority and type, adds tags, records a triage event", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "Triage apply test",
+                    priority           : "normal",
+                    ticketType         : "request"
+                } );
+                variables.triage.apply( t.getId(), {
+                    "outcome"    : "ok",
+                    "priority"   : "high",
+                    "ticketType" : "incident",
+                    "tags"       : [ "Password Reset", "Login" ],
+                    "sentiment"  : "negative",
+                    "rationale"  : "user blocked"
+                } );
+
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "high" );
+                expect( refreshed.getTicketType() ).toBe( "incident" );
+
+                var tags = variables.tickets.listTagsForTicket( t.getId() );
+                var slugs = [];
+                for ( var tag in tags ) slugs.append( tag.slug );
+                expect( slugs ).toInclude( "password-reset" );
+                expect( slugs ).toInclude( "login" );
+
+                var events = variables.tickets.listEventsForTicket( t.getId() );
+                var triageEventFound = false;
+                for ( var e in events ) {
+                    if ( e.getEventType() == "ticket.triaged" ) triageEventFound = true;
+                }
+                expect( triageEventFound ).toBeTrue();
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+            } );
+
+            it( "ignores invalid priority / ticketType values silently", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "Triage bad values",
+                    priority           : "normal",
+                    ticketType         : "request"
+                } );
+                variables.triage.apply( t.getId(), {
+                    "outcome"    : "ok",
+                    "priority"   : "panic",        // not in the valid list
+                    "ticketType" : "complaint",    // not in the valid list
+                    "tags"       : [],
+                    "sentiment"  : "",
+                    "rationale"  : ""
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "normal" );
+                expect( refreshed.getTicketType() ).toBe( "request" );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+            } );
+
+            it( "is a no-op when outcome is not ok", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "Triage outcome filter",
+                    priority           : "normal"
+                } );
+                variables.triage.apply( t.getId(), {
+                    "outcome"    : "error",
+                    "priority"   : "urgent",
+                    "ticketType" : "incident",
+                    "tags"       : [ "should-not-stick" ]
+                } );
+                var refreshed = variables.tickets.getTicket( t.getId() );
+                expect( refreshed.getPriority() ).toBe( "normal" );
+                expect( variables.tickets.listTagsForTicket( t.getId() ).len() ).toBe( 0 );
+
+                cleanupTicket( t.getId() );
+                cleanupFixture( f );
+            } );
+
+        } );
+
+        describe( "TriageService.triage", function(){
+            it( "returns available=false when AI is off", function(){
+                if ( !variables.aiOff ) return;
+                var result = variables.triage.triage( "nonexistent" );
+                expect( result.available ).toBeFalse();
+                expect( result.outcome ).toBe( "disabled" );
+            } );
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Triage Spec Org " & createUUID(),
+            slug : "triage-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "triage-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        return { org : org, contact : contact };
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_tags     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+    }
+
+}

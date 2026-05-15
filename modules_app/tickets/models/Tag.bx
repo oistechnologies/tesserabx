@@ -1,0 +1,17 @@
+/**
+ * Tag: a label that can be applied to many tickets. Tags are
+ * provider-wide vocabulary, not tenant-scoped.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="tags"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="slug";
+    property name="color";
+    property name="createdAt" column="created_at" sqltype="timestamp";
+
+}

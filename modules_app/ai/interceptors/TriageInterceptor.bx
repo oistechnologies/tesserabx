@@ -1,0 +1,45 @@
+/**
+ * TriageInterceptor: runs AI triage on newly-created tickets.
+ *
+ * Listens for the tickets module's onTicketCreated announce, asks
+ * TriageService to classify the ticket, and applies the result. The
+ * call is wrapped in try/catch so a slow or failing provider can
+ * never break ticket creation; the worst case is a logged warning
+ * and an un-triaged ticket the agent triages by hand.
+ *
+ * Resolved through wirebox at invocation time rather than via
+ * property injection: the interceptor is constructed during
+ * configure(), before onLoad's binder.map for TriageService, so a
+ * direct injection would fail to resolve at construction.
+ *
+ * Phase 4c runs synchronously; the cbq job wrapping called out in
+ * the build plan is a follow-up polish that does not change this
+ * code's contract.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onTicketCreated( event, interceptData, rc, prc ){
+        try {
+            var capability = wirebox.getInstance( "AiCapability@ai" );
+            if ( !capability.isFeatureEnabled( "triage" ) ) return;
+
+            if ( !structKeyExists( arguments.interceptData, "ticket" ) || isNull( arguments.interceptData.ticket ) ) return;
+            var ticket = arguments.interceptData.ticket;
+
+            var triage = wirebox.getInstance( "TriageService@ai" );
+            var result = triage.triage( ticket.getId() );
+            triage.apply( ticket.getId(), result );
+        } catch ( any e ) {
+            writeLog(
+                text : "TriageInterceptor onTicketCreated failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

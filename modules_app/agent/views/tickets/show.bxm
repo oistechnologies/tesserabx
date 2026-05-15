@@ -42,6 +42,14 @@
                     </dd>
                     <dt class="col-sm-3">Source</dt>
                     <dd class="col-sm-9">#encodeForHTML( local.t.getSource() )#</dd>
+                    <bx:if arrayLen( prc.tags ?: [] )>
+                        <dt class="col-sm-3">Tags</dt>
+                        <dd class="col-sm-9">
+                            <bx:loop array="#prc.tags#" item="local.tag">
+                                <span class="badge text-bg-#encodeForHTMLAttribute( local.tag.color ?: 'secondary' )# me-1">#encodeForHTML( local.tag.name )#</span>
+                            </bx:loop>
+                        </dd>
+                    </bx:if>
                 </dl>
             </div>
         </div>

@@ -28,6 +28,15 @@ class singleton=true {
     property name="aiPiiRedactionRaw"   inject="coldbox:setting:aiPiiRedaction";
 
     public boolean function isEnabled(){
+        // tests/Application.bx flags the test app's own application
+        // scope so AI runs deterministically. Production app uses a
+        // different `this.name`, so its application scope never has
+        // this key set.
+        try {
+            if ( structKeyExists( application, "_tesserabx_test_mode" ) && application._tesserabx_test_mode ) {
+                return false;
+            }
+        } catch ( any e ) { /* application scope may not be readable from a worker thread; ignore */ }
         return asBool( variables.aiEnabledRaw );
     }
 

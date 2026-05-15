@@ -28,7 +28,13 @@ class {
         variables.settings = {};
         variables.routes   = [];
         variables.interceptorSettings = { customInterceptionPoints : [] };
-        variables.interceptors = [];
+        variables.interceptors = [
+            {
+                class      : "#moduleMapping#.interceptors.TriageInterceptor",
+                name       : "TriageInterceptor",
+                properties : {}
+            }
+        ];
     }
 
     function onLoad(){
@@ -47,6 +53,9 @@ class {
               .asSingleton();
         binder.map( "SuggestedReplyService@ai" )
               .to( "#moduleMapping#.models.SuggestedReplyService" )
+              .asSingleton();
+        binder.map( "TriageService@ai" )
+              .to( "#moduleMapping#.models.TriageService" )
               .asSingleton();
     }
 

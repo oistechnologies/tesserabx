@@ -160,6 +160,121 @@ class singleton=true {
             .get();
     }
 
+    /**
+     * Tags attached to a ticket, in insertion order. Bypasses tenant
+     * scope; the caller (agent UI, AI triage) handles authorization.
+     */
+    public array function listTagsForTicket( required string ticketId ){
+        var rows = queryExecute(
+            "SELECT t.id, t.name, t.slug, t.color
+             FROM   tags t
+             JOIN   ticket_tags tt ON tt.tag_id = t.id
+             WHERE  tt.ticket_id = :id
+             ORDER  BY tt.created_at",
+            { id : arguments.ticketId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "id"    : rows.id[ i ],
+                "name"  : rows.name[ i ],
+                "slug"  : rows.slug[ i ],
+                "color" : rows.color[ i ]
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Apply one or more tags to a ticket by display name. Idempotent:
+     * unknown names are created (slugified, default colour), known
+     * names are reused, and a (ticket, tag) pair already in the join
+     * table is left alone. Returns the array of tag rows now on the
+     * ticket.
+     */
+    public array function applyTagsByName(
+        required string ticketId,
+        required array  tagNames,
+        string actorType = "",
+        string actorId   = ""
+    ){
+        if ( !arguments.tagNames.len() ) return listTagsForTicket( arguments.ticketId );
+        var t = getTicket( arguments.ticketId );
+        if ( isNull( t ) ) {
+            throw( type = "TicketsService.UnknownTicket", message = "No ticket with id [#arguments.ticketId#]." );
+        }
+
+        var addedNames = [];
+        for ( var raw in arguments.tagNames ) {
+            var name = trim( raw );
+            if ( !len( name ) ) continue;
+            var slug = slugifyTag( name );
+            // Upsert the tag itself.
+            var existing = queryExecute(
+                "SELECT id FROM tags WHERE slug = :s",
+                { s : slug }
+            );
+            var tagId = existing.recordCount ? existing.id[ 1 ] : "";
+            if ( !len( tagId ) ) {
+                tagId = newId();
+                queryExecute(
+                    "INSERT INTO tags ( id, name, slug, color, created_at )
+                     VALUES ( :id, :name, :slug, 'secondary', NOW() )
+                     ON CONFLICT ( slug ) DO NOTHING",
+                    { id : tagId, name : name, slug : slug }
+                );
+                // Race: another caller created it between our SELECT
+                // and INSERT; re-read to pick up their id.
+                var verify = queryExecute( "SELECT id FROM tags WHERE slug = :s", { s : slug } );
+                if ( verify.recordCount ) tagId = verify.id[ 1 ];
+            }
+            // Attach to the ticket.
+            queryExecute(
+                "INSERT INTO ticket_tags ( ticket_id, tag_id, created_at )
+                 VALUES ( :tid, :tag, NOW() )
+                 ON CONFLICT ( ticket_id, tag_id ) DO NOTHING",
+                { tid : t.getId(), tag : tagId }
+            );
+            addedNames.append( name );
+        }
+        if ( addedNames.len() ) {
+            recordTicketEvent(
+                ticketId  : t.getId(),
+                eventType : "ticket.tags_added",
+                actorType : arguments.actorType,
+                actorId   : arguments.actorId,
+                metadata  : { "tags" : addedNames }
+            );
+        }
+        return listTagsForTicket( t.getId() );
+    }
+
+    private string function slugifyTag( required string name ){
+        var s = lCase( trim( arguments.name ) );
+        s = reReplace( s, "[^a-z0-9]+", "-", "all" );
+        s = reReplace( s, "^-+|-+$", "", "all" );
+        return left( s, 80 );
+    }
+
+    /**
+     * Public wrapper around recordTicketEvent for AI triage runs.
+     * Keeps the private recorder private to non-tickets callers while
+     * giving the AI triage service a one-call way to land a clean
+     * ticket-timeline entry without touching ticket_events directly.
+     */
+    public void function recordTriageEvent(
+        required string ticketId,
+        struct metadata = {}
+    ){
+        recordTicketEvent(
+            ticketId  : arguments.ticketId,
+            eventType : "ticket.triaged",
+            actorType : "ai",
+            actorId   : "triage",
+            metadata  : arguments.metadata
+        );
+    }
+
     // ---------- Writes ----------
 
     /**

@@ -404,6 +404,8 @@ class {
         // prefills the textarea itself.
         arguments.prc.suggestedReply    = flash.get( "suggestedReply", "" );
         arguments.prc.suggestedNotes    = flash.get( "suggestedNotes", "" );
+
+        arguments.prc.tags = ticketsService.listTagsForTicket( arguments.ticket.getId() );
     }
 
     private string function currentAgentId(){

@@ -50,6 +50,8 @@ class {
               .to( "#moduleMapping#.models.TicketEvent" );
         binder.map( "Attachment@tickets" )
               .to( "#moduleMapping#.models.Attachment" );
+        binder.map( "Tag@tickets" )
+              .to( "#moduleMapping#.models.Tag" );
         binder.map( "TicketsService@tickets" )
               .to( "#moduleMapping#.models.TicketsService" )
               .asSingleton();

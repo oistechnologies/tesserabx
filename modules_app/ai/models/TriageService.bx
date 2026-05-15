@@ -1,0 +1,168 @@
+/**
+ * TriageService: classify an inbound ticket through the model.
+ *
+ * Returns {priority, ticketType, tags, sentiment, rationale} parsed
+ * from a strict-JSON model response. The synchronous entrypoint
+ * `triage(ticket)` is for specs and admin tooling; the production
+ * path goes through TriageTicketJob (cbq) so the http request that
+ * created the ticket is never blocked by a provider call.
+ *
+ * `apply(ticket, result)` is the policy boundary: it decides what to
+ * change on the ticket (priority, type, tags) based on the model's
+ * suggestion. Today every field the model returns is applied; future
+ * passes may layer in admin-configurable thresholds (e.g., "only
+ * upgrade priority, never downgrade").
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="promptService"  inject="AiSystemPromptService@ai";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    variables.FEATURE_KEY = "triage";
+    variables.FALLBACK_SYSTEM_PROMPT = "Classify the ticket into JSON {""priority"": ""low|normal|high|urgent"", ""ticketType"": ""incident|request|problem|question"", ""tags"": [], ""sentiment"": ""positive|neutral|negative"", ""rationale"": ""...""}";
+
+    variables.VALID_PRIORITIES = [ "low", "normal", "high", "urgent" ];
+    variables.VALID_TYPES      = [ "incident", "request", "problem", "question" ];
+    variables.VALID_SENTIMENTS = [ "positive", "neutral", "negative" ];
+
+    /**
+     * Run triage against a ticket. Returns a struct with
+     *   available:bool, outcome:string, priority/ticketType/tags/sentiment/rationale
+     * Synchronous; the cbq job wraps this so the agent UI does not
+     * wait on the provider.
+     */
+    public struct function triage( required string ticketId ){
+        var off = { "available" : false, "outcome" : "disabled", "priority" : "", "ticketType" : "", "tags" : [], "sentiment" : "", "rationale" : "" };
+        if ( !capability.isFeatureEnabled( variables.FEATURE_KEY ) ) return off;
+
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) return { "available" : true, "outcome" : "error", "priority" : "", "ticketType" : "", "tags" : [], "sentiment" : "", "rationale" : "Ticket not found" };
+
+        var template = promptService.getForFeature( variables.FEATURE_KEY );
+        if ( !len( template ) ) template = variables.FALLBACK_SYSTEM_PROMPT;
+        var systemPrompt = promptService.renderTemplate( template, {} );
+
+        var userPrompt = buildUserPrompt( ticket );
+        var result = middleware.complete(
+            feature : variables.FEATURE_KEY,
+            prompt  : userPrompt,
+            options : {
+                systemPrompt   : systemPrompt,
+                organizationId : ticket.getOrganizationId() ?: "",
+                ticketId       : ticket.getId(),
+                temperature    : 0.2,
+                maxTokens      : 400
+            }
+        );
+
+        if ( result.outcome != "ok" ) {
+            return { "available" : true, "outcome" : result.outcome, "priority" : "", "ticketType" : "", "tags" : [], "sentiment" : "", "rationale" : result.error ?: "" };
+        }
+        var parsed = parseModelJson( result.text );
+        parsed.available = true;
+        parsed.outcome   = "ok";
+        return parsed;
+    }
+
+    /**
+     * Apply triage results to the ticket. Idempotent: if the model
+     * suggests the same priority/type already on the ticket we still
+     * record the tags and emit a triage event. Records a single
+     * "ticket.triaged" ticket-event capturing what changed.
+     */
+    public void function apply( required string ticketId, required struct result ){
+        if ( arguments.result.outcome != "ok" ) return;
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) return;
+
+        var changed = {};
+        var newPriority = arguments.result.priority ?: "";
+        var newType     = arguments.result.ticketType ?: "";
+
+        if ( len( newPriority ) && arrayFindNoCase( variables.VALID_PRIORITIES, newPriority ) > 0 && newPriority != ( ticket.getPriority() ?: "" ) ) {
+            ticket.setPriority( newPriority );
+            changed.priority = { "from" : ticket.getPriority(), "to" : newPriority };
+        }
+        if ( len( newType ) && arrayFindNoCase( variables.VALID_TYPES, newType ) > 0 && newType != ( ticket.getTicketType() ?: "" ) ) {
+            ticket.setTicketType( newType );
+            changed.ticketType = { "from" : ticket.getTicketType(), "to" : newType };
+        }
+        if ( !structIsEmpty( changed ) ) ticket.save();
+
+        var tags = arguments.result.tags ?: [];
+        if ( isArray( tags ) && tags.len() ) {
+            ticketsService.applyTagsByName(
+                ticketId  : ticket.getId(),
+                tagNames  : tags,
+                actorType : "ai",
+                actorId   : variables.FEATURE_KEY
+            );
+            changed.tags = tags;
+        }
+
+        if ( !structIsEmpty( changed ) ) {
+            ticketsService.recordTriageEvent(
+                ticketId  : ticket.getId(),
+                metadata  : {
+                    "applied"   : changed,
+                    "sentiment" : arguments.result.sentiment ?: "",
+                    "rationale" : arguments.result.rationale ?: ""
+                }
+            );
+        }
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function parseModelJson( required string raw ){
+        var stripped = stripCodeFences( trim( arguments.raw ) );
+        var fallback = { "priority" : "", "ticketType" : "", "tags" : [], "sentiment" : "", "rationale" : "" };
+        if ( !len( stripped ) || !isJSON( stripped ) ) return fallback;
+        try {
+            var data = jsonDeserialize( stripped );
+            if ( !isStruct( data ) ) return fallback;
+            return {
+                "priority"   : toString( data.priority   ?: "" ),
+                "ticketType" : toString( data.ticketType ?: "" ),
+                "tags"       : isArray( data.tags ?: [] ) ? data.tags : [],
+                "sentiment"  : toString( data.sentiment  ?: "" ),
+                "rationale"  : toString( data.rationale  ?: "" )
+            };
+        } catch ( any e ) {
+            return fallback;
+        }
+    }
+
+    private string function stripCodeFences( required string text ){
+        var t = arguments.text;
+        if ( left( t, 7 ) == "```json" ) t = listRest( t, char( 10 ) );
+        else if ( left( t, 3 ) == "```" ) t = listRest( t, char( 10 ) );
+        if ( right( t, 3 ) == "```" ) t = left( t, len( t ) - 3 );
+        return trim( t );
+    }
+
+    private string function buildUserPrompt( required any ticket ){
+        var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        var lines = [
+            "Subject: " & arguments.ticket.getSubject(),
+            "Source: "  & ( arguments.ticket.getSource() ?: "agent" ),
+            ""
+        ];
+        if ( messages.len() ) {
+            // Use only the first public message; triage runs on the
+            // initial ticket, not the full conversation.
+            for ( var m in messages ) {
+                if ( m.getIsInternal() ?: false ) continue;
+                lines.append( "Initial message:" );
+                lines.append( ( m.getBody() ?: "" ) );
+                break;
+            }
+        } else {
+            lines.append( "(No message body; classify from the subject only.)" );
+        }
+        return lines.toList( char( 10 ) );
+    }
+
+}

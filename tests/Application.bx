@@ -58,6 +58,14 @@ class {
 
     function onRequestStart(){
         bx:setting requesttimeout="120";
+        // Spec runs must be deterministic. The TriageInterceptor would
+        // otherwise fire a live provider call on every ticket.created,
+        // making ticket-creation specs flaky and burning real tokens.
+        // This flag lives in the test application's own scope (a
+        // separate scope from the production app's, because the two
+        // use different this.name values), and AiCapability checks
+        // for it to force-disable AI under specs.
+        application._tesserabx_test_mode = true;
         return true;
     }
 
