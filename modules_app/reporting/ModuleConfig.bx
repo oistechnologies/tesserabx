@@ -3,6 +3,12 @@
  *
  * Owns no entities. Reads across other modules' service layers to
  * render dashboards, scheduled exports, raw data exports.
+ *
+ * Service-only module: no HTTP entry point of its own. Reports for
+ * provider staff live under /agent/reports so they inherit the
+ * agent firewall (CLAUDE.md: two surfaces, / and /agent). The
+ * route is registered in /config/Router.bx pointing at handlers
+ * here via the reporting: prefix.
  */
 class {
 
@@ -13,20 +19,25 @@ class {
     this.version            = "0.0.1";
     this.viewParentLookup   = true;
     this.layoutParentLookup = true;
-    this.entryPoint         = "reporting";
+    this.entryPoint         = "";
     this.modelNamespace     = "reporting";
     this.cfmapping          = "tesserabx.modules.reporting";
     this.autoMapModels      = false;
     this.dependencies       = [ "contacts", "tickets", "sla" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.settings              = {};
+        variables.routes                = [];
+        variables.interceptorSettings   = { customInterceptionPoints : [] };
+        variables.interceptors          = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "ReportingService@reporting" )
+              .to( "#moduleMapping#.models.ReportingService" )
+              .asSingleton();
+    }
+
     function onUnload(){}
 
 }

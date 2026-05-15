@@ -1,0 +1,30 @@
+/**
+ * agent:Reports handler.
+ *
+ * Dashboard at /agent/reports. The reporting module owns the data
+ * (ReportingService); this handler is the UI surface so it can live
+ * under the agent firewall and the Agent layout without us having
+ * to teach ColdBox how to route cross-module handler events from a
+ * per-module router.
+ */
+class {
+
+    property name="reportingService" inject="ReportingService@reporting";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Reports";
+        prc.tiles      = reportingService.overviewTiles();
+        prc.volume     = reportingService.ticketVolumePerDay( 30 );
+        prc.byStatus   = reportingService.ticketCountsByColumn( "status" );
+        prc.byPriority = reportingService.ticketCountsByColumn( "priority" );
+        prc.bySource   = reportingService.ticketCountsByColumn( "source" );
+        prc.backlog    = reportingService.backlogAgeBuckets();
+        prc.agentLoad  = reportingService.agentOpenLoad();
+        event.setView( "reports/index" );
+    }
+
+}

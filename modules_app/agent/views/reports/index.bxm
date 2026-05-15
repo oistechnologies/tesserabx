@@ -1,0 +1,237 @@
+<bx:output>
+<bx:set local.tiles = prc.tiles >
+
+<bx:set local.slaPct = local.tiles.slaCompliancePct ?: 0 >
+<bx:set local.slaColor = local.tiles.slaTotal gt 0
+                       ? ( local.slaPct gte 90 ? "success"
+                       : ( local.slaPct gte 70 ? "warning"
+                       :                          "danger" ) )
+                       : "secondary" >
+
+<div class="row g-3 mb-3 align-items-stretch">
+    <div class="col-12 col-md-6 col-xl-3 d-flex">
+        <div class="card text-bg-primary flex-fill">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Open tickets</div>
+                    <div class="display-6 fw-semibold">#encodeForHTML( local.tiles.openTickets )#</div>
+                </div>
+                <i class="bi bi-card-list fs-1 opacity-50"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3 d-flex">
+        <div class="card text-bg-info flex-fill">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Created today</div>
+                    <div class="display-6 fw-semibold">#encodeForHTML( local.tiles.createdToday )#</div>
+                </div>
+                <i class="bi bi-plus-circle fs-1 opacity-50"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3 d-flex">
+        <div class="card text-bg-warning flex-fill">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Avg first response</div>
+                    <div class="display-6 fw-semibold">
+                        <bx:if local.tiles.avgFirstResponseMinutes gt 0>
+                            #encodeForHTML( local.tiles.avgFirstResponseMinutes )# <small class="fs-6 opacity-75">min</small>
+                        <bx:else>
+                            -
+                        </bx:if>
+                    </div>
+                    <div class="small opacity-75">last 30 days</div>
+                </div>
+                <i class="bi bi-stopwatch fs-1 opacity-50"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3 d-flex">
+        <div class="card text-bg-#local.slaColor# flex-fill">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">SLA first-response compliance</div>
+                    <div class="display-6 fw-semibold">
+                        <bx:if local.tiles.slaTotal gt 0>
+                            #encodeForHTML( local.tiles.slaCompliancePct )#<small class="fs-6 opacity-75">%</small>
+                        <bx:else>
+                            -
+                        </bx:if>
+                    </div>
+                    <div class="small opacity-75">
+                        <bx:if local.tiles.slaTotal gt 0>
+                            #encodeForHTML( local.tiles.slaMet )# of #encodeForHTML( local.tiles.slaTotal )# met (30d)
+                        <bx:else>
+                            no SLA tickets in window
+                        </bx:if>
+                    </div>
+                </div>
+                <i class="bi bi-shield-check fs-1 opacity-50"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3 align-items-stretch">
+    <div class="col-12 col-xl-8 d-flex">
+        <div class="card flex-fill">
+            <div class="card-header bg-primary-subtle">
+                <i class="bi bi-graph-up text-primary me-1"></i>
+                <strong>Ticket volume</strong>
+                <span class="text-body-secondary small ms-1">last 30 days</span>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-volume" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-xl-4 d-flex">
+        <div class="card flex-fill">
+            <div class="card-header bg-warning-subtle">
+                <i class="bi bi-hourglass-split text-warning me-1"></i>
+                <strong>Backlog age</strong>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <bx:loop array="#prc.backlog#" item="local.b">
+                            <bx:set local.bColor = local.b.label eq "< 24h"      ? "success"
+                                                : ( local.b.label eq "1 to 3 days" ? "info"
+                                                : ( local.b.label eq "3 to 7 days" ? "warning"
+                                                :                                    "danger" ) ) >
+                            <tr>
+                                <td class="ps-3">
+                                    <span class="badge text-bg-#local.bColor# me-2">&nbsp;</span>
+                                    #encodeForHTML( local.b.label )#
+                                </td>
+                                <td class="text-end pe-3"><strong>#encodeForHTML( local.b.count )#</strong></td>
+                            </tr>
+                        </bx:loop>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3 align-items-stretch">
+    <div class="col-12 col-md-4 d-flex">
+        <div class="card flex-fill">
+            <div class="card-header bg-info-subtle">
+                <i class="bi bi-tag text-info me-1"></i><strong>By status</strong>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-status" height="160"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4 d-flex">
+        <div class="card flex-fill">
+            <div class="card-header bg-danger-subtle">
+                <i class="bi bi-exclamation-triangle text-danger me-1"></i><strong>By priority</strong>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-priority" height="160"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-4 d-flex">
+        <div class="card flex-fill">
+            <div class="card-header bg-success-subtle">
+                <i class="bi bi-inbox text-success me-1"></i><strong>By source</strong>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-source" height="160"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-secondary-subtle">
+                <i class="bi bi-people text-secondary me-1"></i><strong>Agent open load</strong>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr><th>Agent</th><th>Email</th><th class="text-end">Open</th></tr>
+                    </thead>
+                    <tbody>
+                        <bx:if !arrayLen( prc.agentLoad )>
+                            <tr><td colspan="3" class="text-body-secondary text-center py-3">No agents.</td></tr>
+                        </bx:if>
+                        <bx:loop array="#prc.agentLoad#" item="local.row">
+                            <bx:set local.loadColor = local.row.openCount eq 0   ? "success"
+                                                   : ( local.row.openCount lte 3 ? "info"
+                                                   : ( local.row.openCount lte 7 ? "warning"
+                                                   :                                "danger" ) ) >
+                            <tr>
+                                <td>#encodeForHTML( local.row.name )#</td>
+                                <td class="text-body-secondary">#encodeForHTML( local.row.email )#</td>
+                                <td class="text-end">
+                                    <span class="badge text-bg-#local.loadColor#">#encodeForHTML( local.row.openCount )#</span>
+                                </td>
+                            </tr>
+                        </bx:loop>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function(){
+    var volumeData   = #jsonSerialize( prc.volume )#;
+    var byStatus     = #jsonSerialize( prc.byStatus )#;
+    var byPriority   = #jsonSerialize( prc.byPriority )#;
+    var bySource     = #jsonSerialize( prc.bySource )#;
+
+    function ctx( id ){
+        var el = document.getElementById( id );
+        return el ? el.getContext( '2d' ) : null;
+    }
+
+    var volC = ctx( 'chart-volume' );
+    if ( volC ) {
+        new Chart( volC, {
+            type : 'line',
+            data : {
+                labels   : volumeData.map( function( d ){ return d.day; } ),
+                datasets : [ {
+                    label : 'Tickets',
+                    data  : volumeData.map( function( d ){ return d.count; } ),
+                    fill  : true,
+                    tension : 0.25,
+                    borderColor     : '##0d6efd',
+                    backgroundColor : 'rgba(13,110,253,0.12)'
+                } ]
+            },
+            options : { responsive : true, plugins : { legend : { display : false } }, scales : { y : { beginAtZero : true, ticks : { precision : 0 } } } }
+        } );
+    }
+
+    function donut( id, rows ){
+        var c = ctx( id );
+        if ( !c ) return;
+        new Chart( c, {
+            type : 'doughnut',
+            data : {
+                labels   : rows.map( function( r ){ return r.label; } ),
+                datasets : [ { data : rows.map( function( r ){ return r.count; } ) } ]
+            },
+            options : { responsive : true, plugins : { legend : { position : 'bottom' } } }
+        } );
+    }
+    donut( 'chart-status',   byStatus );
+    donut( 'chart-priority', byPriority );
+    donut( 'chart-source',   bySource );
+})();
+</script>
+</bx:output>

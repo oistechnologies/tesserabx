@@ -60,6 +60,11 @@ class {
             "GET"  : "index",
             "POST" : "create"
         } );
+
+        // Reporting dashboard. The reporting module exposes the
+        // service; the handler / view live here in agent so the
+        // route is local and ColdBox doesn't try to cross modules.
+        route( "reports" ).to( "Reports.index" );
     }
 
 }

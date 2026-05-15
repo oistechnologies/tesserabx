@@ -54,6 +54,9 @@
                             <a href="/agent/contacts" class="nav-link"><i class="nav-icon bi bi-people"></i><p>Contacts</p></a>
                         </li>
                         <li class="nav-item">
+                            <a href="/agent/reports" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>Reports</p></a>
+                        </li>
+                        <li class="nav-item">
                             <a href="/agent/admin" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a>
                         </li>
                     </ul>

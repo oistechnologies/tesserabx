@@ -1,0 +1,177 @@
+/**
+ * ReportingService: read-only queries that back the agent dashboards.
+ *
+ * Per CLAUDE.md the reporting module owns no entities; every query
+ * here reads tickets / sla_policies / ai_interactions / etc. via raw
+ * SQL because the dashboard needs grouped aggregates that the Quick
+ * entity reads do not express well. The service is the only thing
+ * in this module that talks to the database; handlers go through
+ * here.
+ *
+ * Window-based methods take a `windowDays` arg defaulting to 30 so
+ * the same helper drives both the "last 30 days" and "last 7 days"
+ * tiles without duplication.
+ */
+class singleton=true {
+
+    public struct function overviewTiles(){
+        var open       = queryExecute( "SELECT COUNT(*) AS n FROM tickets WHERE status NOT IN ( 'resolved', 'closed' )" );
+        var openTotal  = open.n[ 1 ];
+
+        var today      = queryExecute( "SELECT COUNT(*) AS n FROM tickets WHERE created_at >= CURRENT_DATE" );
+        var todayCount = today.n[ 1 ];
+
+        var avgFirstResponseRow = queryExecute(
+            "SELECT AVG( EXTRACT( EPOCH FROM ( first_response_at - created_at ) ) / 60.0 ) AS avg_minutes
+             FROM   tickets
+             WHERE  first_response_at IS NOT NULL
+             AND    created_at >= NOW() - INTERVAL '30 days'"
+        );
+        var avgFirstResponseMinutes = val( avgFirstResponseRow.avg_minutes[ 1 ] ?: 0 );
+
+        // SLA first-response compliance: of the tickets that had an
+        // SLA policy AND have a recorded first response within the
+        // last 30 days, how many beat first_response_due_at?
+        var slaRow = queryExecute(
+            "SELECT
+                COUNT( * ) FILTER ( WHERE first_response_at IS NOT NULL AND first_response_at <= first_response_due_at ) AS met,
+                COUNT( * ) FILTER ( WHERE first_response_at IS NOT NULL ) AS total
+             FROM tickets
+             WHERE sla_policy_id IS NOT NULL
+             AND   first_response_due_at IS NOT NULL
+             AND   created_at >= NOW() - INTERVAL '30 days'"
+        );
+        var slaMet   = slaRow.met[ 1 ];
+        var slaTotal = slaRow.total[ 1 ];
+        var slaPct   = slaTotal > 0 ? ( slaMet / slaTotal ) * 100 : 0;
+
+        return {
+            "openTickets"             : openTotal,
+            "createdToday"            : todayCount,
+            "avgFirstResponseMinutes" : round( avgFirstResponseMinutes ),
+            "slaCompliancePct"        : round( slaPct ),
+            "slaMet"                  : slaMet,
+            "slaTotal"                : slaTotal
+        };
+    }
+
+    /**
+     * Ticket counts per day for the last `windowDays`, in
+     * chronological order. Includes zero-count days so the chart
+     * has a continuous x-axis.
+     */
+    public array function ticketVolumePerDay( numeric windowDays = 30 ){
+        // cast( ... as date ) instead of `::date` because the JDBC
+        // named-parameter binder reads `::date` as the parameter
+        // `:date` and throws "Named parameter not provided".
+        var rows = queryExecute(
+            "WITH days AS (
+                 SELECT generate_series(
+                     cast( CURRENT_DATE - ( cast( :n as integer ) - 1 ) * INTERVAL '1 day' as date ),
+                     CURRENT_DATE,
+                     INTERVAL '1 day'
+                 ) AS d
+             )
+             SELECT cast( d as date ) AS day,
+                    COALESCE( c.n, 0 ) AS count
+             FROM   days
+             LEFT JOIN (
+                 SELECT cast( created_at as date ) AS d, COUNT(*) AS n
+                 FROM   tickets
+                 WHERE  created_at >= ( CURRENT_DATE - ( cast( :n as integer ) - 1 ) * INTERVAL '1 day' )
+                 GROUP  BY 1
+             ) c USING ( d )
+             ORDER  BY day",
+            { n : int( arguments.windowDays ) }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( { "day" : dateTimeFormat( rows.day[ i ], "yyyy-mm-dd" ), "count" : rows.count[ i ] } );
+        }
+        return out;
+    }
+
+    /**
+     * Counts grouped by an enumerated column. `column` is whitelisted
+     * to avoid any chance of SQL injection from a route param.
+     */
+    public array function ticketCountsByColumn( required string column ){
+        var allowed = [ "status", "priority", "source", "ticket_type" ];
+        if ( !arrayContainsNoCase( allowed, arguments.column ) ) return [];
+        var rows = queryExecute(
+            "SELECT " & arguments.column & " AS label, COUNT(*) AS n
+             FROM   tickets
+             GROUP  BY " & arguments.column & "
+             ORDER  BY n DESC"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( { "label" : rows.label[ i ] ?: "(none)", "count" : rows.n[ i ] } );
+        }
+        return out;
+    }
+
+    /**
+     * Open tickets bucketed by age. Buckets are agent-friendly:
+     * fresh (<24h), this week (1-3d, 4-7d), stale (>7d). The
+     * scheduler escalation rules in Phase 3e operate on this same
+     * data; this is the human-readable view of it.
+     */
+    public array function backlogAgeBuckets(){
+        var rows = queryExecute(
+            "SELECT
+                COUNT(*) FILTER ( WHERE NOW() - created_at <  INTERVAL '24 hours' ) AS fresh,
+                COUNT(*) FILTER ( WHERE NOW() - created_at >= INTERVAL '24 hours' AND NOW() - created_at < INTERVAL '3 days' ) AS one_to_three,
+                COUNT(*) FILTER ( WHERE NOW() - created_at >= INTERVAL '3 days'   AND NOW() - created_at < INTERVAL '7 days' ) AS three_to_seven,
+                COUNT(*) FILTER ( WHERE NOW() - created_at >= INTERVAL '7 days' )                                              AS stale
+             FROM tickets
+             WHERE status NOT IN ( 'resolved', 'closed' )"
+        );
+        return [
+            { "label" : "< 24h",      "count" : rows.fresh[ 1 ] },
+            { "label" : "1 to 3 days", "count" : rows.one_to_three[ 1 ] },
+            { "label" : "3 to 7 days", "count" : rows.three_to_seven[ 1 ] },
+            { "label" : "> 7 days",   "count" : rows.stale[ 1 ] }
+        ];
+    }
+
+    /**
+     * Agent workload: count of currently-open tickets assigned to
+     * each agent, plus the agent's display name. Drives the "who is
+     * loaded up" widget on the dashboard.
+     */
+    public array function agentOpenLoad(){
+        var rows = queryExecute(
+            "SELECT a.id, a.email, a.first_name, a.last_name, COUNT( t.id ) AS open_count
+             FROM   agents a
+             LEFT   JOIN tickets t
+                    ON t.assigned_to_agent_id = a.id
+                   AND t.status NOT IN ( 'resolved', 'closed' )
+             WHERE  a.is_active = TRUE
+             GROUP  BY a.id, a.email, a.first_name, a.last_name
+             ORDER  BY open_count DESC, a.email ASC
+             LIMIT  10"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var first = rows.first_name[ i ] ?: "";
+            var last  = rows.last_name[ i ] ?: "";
+            var name  = trim( first & " " & last );
+            out.append( {
+                "id"        : rows.id[ i ],
+                "email"     : rows.email[ i ],
+                "name"      : len( name ) ? name : rows.email[ i ],
+                "openCount" : rows.open_count[ i ]
+            } );
+        }
+        return out;
+    }
+
+    private boolean function arrayContainsNoCase( required array list, required string value ){
+        for ( var v in arguments.list ) {
+            if ( lCase( toString( v ) ) == lCase( arguments.value ) ) return true;
+        }
+        return false;
+    }
+
+}

@@ -12,10 +12,13 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( modules ).toHaveKey( "reporting" );
             } );
 
-            it( "exposes its entry point", function(){
+            it( "is service-only (no HTTP entry point of its own)", function(){
+                // Routes live under /agent/reports so they inherit
+                // the agent firewall; the module itself is service-
+                // only (handlers exposed via the reporting: prefix).
                 var cache = getController().getModuleService().getModuleConfigCache();
                 expect( cache ).toHaveKey( "reporting" );
-                expect( cache[ "reporting" ].entryPoint ).notToBeEmpty();
+                expect( cache[ "reporting" ].entryPoint ).toBe( "" );
             } );
         } );
     }

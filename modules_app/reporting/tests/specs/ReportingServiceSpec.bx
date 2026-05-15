@@ -1,0 +1,73 @@
+/**
+ * ReportingServiceSpec: smoke checks that every dashboard helper
+ * returns the right shape without throwing. We do not assert exact
+ * counts because the dev / CI database state varies between runs;
+ * we assert the contract callers (handlers, views) rely on.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "ReportingService@reporting" );
+    }
+
+    function run(){
+        describe( "ReportingService", function(){
+
+            it( "overviewTiles returns numeric fields", function(){
+                var t = variables.svc.overviewTiles();
+                expect( t ).toHaveKey( "openTickets" );
+                expect( t ).toHaveKey( "createdToday" );
+                expect( t ).toHaveKey( "avgFirstResponseMinutes" );
+                expect( t ).toHaveKey( "slaCompliancePct" );
+                expect( isNumeric( t.openTickets ) ).toBeTrue();
+                expect( isNumeric( t.slaCompliancePct ) ).toBeTrue();
+            } );
+
+            it( "ticketVolumePerDay returns one entry per day in the window", function(){
+                var rows = variables.svc.ticketVolumePerDay( 7 );
+                expect( rows ).toBeArray();
+                expect( rows.len() ).toBe( 7 );
+                expect( rows[ 1 ] ).toHaveKey( "day" );
+                expect( rows[ 1 ] ).toHaveKey( "count" );
+            } );
+
+            it( "ticketCountsByColumn rejects non-whitelisted columns", function(){
+                var rows = variables.svc.ticketCountsByColumn( "subject" );
+                expect( rows ).toBeArray();
+                expect( rows.len() ).toBe( 0 );
+            } );
+
+            it( "ticketCountsByColumn returns rows for an allowed column", function(){
+                var rows = variables.svc.ticketCountsByColumn( "status" );
+                expect( rows ).toBeArray();
+                // No tickets in CI -> empty; with seed data -> at least one bucket
+                if ( rows.len() ) {
+                    expect( rows[ 1 ] ).toHaveKey( "label" );
+                    expect( rows[ 1 ] ).toHaveKey( "count" );
+                }
+            } );
+
+            it( "backlogAgeBuckets returns the four named buckets", function(){
+                var rows = variables.svc.backlogAgeBuckets();
+                expect( rows.len() ).toBe( 4 );
+                var labels = [];
+                for ( var r in rows ) labels.append( r.label );
+                expect( labels ).toInclude( "< 24h" );
+                expect( labels ).toInclude( "> 7 days" );
+            } );
+
+            it( "agentOpenLoad returns rows shaped for the dashboard table", function(){
+                var rows = variables.svc.agentOpenLoad();
+                expect( rows ).toBeArray();
+                if ( rows.len() ) {
+                    expect( rows[ 1 ] ).toHaveKey( "email" );
+                    expect( rows[ 1 ] ).toHaveKey( "openCount" );
+                }
+            } );
+
+        } );
+    }
+
+}
