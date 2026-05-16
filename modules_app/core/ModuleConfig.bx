@@ -56,10 +56,18 @@ class {
         binder.map( "RetentionService@core" )
               .to( "#moduleMapping#.models.RetentionService" )
               .asSingleton();
+        binder.map( "StorageVerifyService@core" )
+              .to( "#moduleMapping#.models.StorageVerifyService" )
+              .asSingleton();
         // Patched cbq DBProvider that quotes "reservedBy" in its
         // orderByRaw fragments. Required for Postgres + cbq.
         binder.map( "PostgresDBProvider@core" )
               .to( "#moduleMapping#.models.cbq.PostgresDBProvider" );
+        // cbfs provider for Backblaze B2 and other S3-compatible
+        // endpoints whose hostname already embeds the region.
+        // Wraps s3sdk's AmazonS3 with a path-style URL builder fix.
+        binder.map( "B2Provider@core" )
+              .to( "#moduleMapping#.models.cbfs.B2Provider" );
     }
 
     function onUnload(){}

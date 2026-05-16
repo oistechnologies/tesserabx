@@ -1,0 +1,47 @@
+/**
+ * /agent/admin/storage handler.
+ *
+ * Surfaces the configured CBFS provider and runs an end-to-end
+ * verification (write → read-back → signed URL → private bucket
+ * check → cleanup) on demand. The build plan calls this out as
+ * the explicit deployment-readiness gate for the production
+ * storage path: an operator runs it against the configured
+ * Backblaze B2 (or other S3-compatible) credentials and only
+ * declares the system live once every step is green.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*.
+ */
+class {
+
+    property name="storage"    inject="StorageVerifyService@core";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle      = "Storage";
+        prc.defaultProvider = getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" );
+        prc.credsConfigured = len( getSystemSetting( "CBFS_PROVIDER_ACCESS_KEY", "" ) )
+                           && len( getSystemSetting( "CBFS_PROVIDER_BUCKET",     "" ) );
+        prc.bucket          = getSystemSetting( "CBFS_PROVIDER_BUCKET",   "" );
+        prc.endpoint        = getSystemSetting( "CBFS_PROVIDER_ENDPOINT", "" );
+        prc.region          = getSystemSetting( "CBFS_PROVIDER_REGION",   "" );
+        prc.report          = "";
+        event.setView( "storage/index" );
+    }
+
+    function verify( event, rc, prc ){
+        prc.pageTitle      = "Storage";
+        prc.defaultProvider = getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" );
+        prc.credsConfigured = len( getSystemSetting( "CBFS_PROVIDER_ACCESS_KEY", "" ) )
+                           && len( getSystemSetting( "CBFS_PROVIDER_BUCKET",     "" ) );
+        prc.bucket          = getSystemSetting( "CBFS_PROVIDER_BUCKET",   "" );
+        prc.endpoint        = getSystemSetting( "CBFS_PROVIDER_ENDPOINT", "" );
+        prc.region          = getSystemSetting( "CBFS_PROVIDER_REGION",   "" );
+        prc.report          = storage.verify();
+        event.setView( "storage/index" );
+    }
+
+}

@@ -67,7 +67,7 @@ TesseraBX deploys by building the image from the working tree on the deploy host
 git clone https://github.com/oistechnologies/tesserabx.git /opt/tesserabx
 cd /opt/tesserabx
 cp .env.example .env
-# edit .env with real credentials, PROXY_NETWORK, CBFS_S3_* for production, etc.
+# edit .env with real credentials, PROXY_NETWORK, CBFS_PROVIDER_* for production, etc.
 docker compose up -d --build
 ```
 
@@ -109,7 +109,29 @@ These are tracked as Phase 6 hardening; the manual recipe above is what we ship 
 
 A nightly database backup task (built in Phase 3) runs `pg_dump`, compresses the dump, and writes it to the configured CBFS provider under a dated path. It prunes dumps older than `BACKUP_RETENTION_DAYS`.
 
-> **Warning.** When `CBFS_DEFAULT_PROVIDER=local` in production, the backup file lands on the same host as the database. That is only partial protection; if the host fails, both the database and its backups are lost together. Setting `CBFS_DEFAULT_PROVIDER=s3` (with the Backblaze B2 credentials populated) places backups offsite and negates that concern. Disaster recovery beyond nightly backups (point-in-time recovery, tested restores, replication) is the operator's responsibility.
+> **Warning.** When `CBFS_DEFAULT_PROVIDER=local` in production, the backup file lands on the same host as the database. That is only partial protection; if the host fails, both the database and its backups are lost together. Setting `CBFS_DEFAULT_PROVIDER=b2` (with the Backblaze B2 credentials populated) or `CBFS_DEFAULT_PROVIDER=s3` (for genuine AWS S3) places backups offsite and negates that concern. Disaster recovery beyond nightly backups (point-in-time recovery, tested restores, replication) is the operator's responsibility.
+
+## Storage providers
+
+Three CBFS providers ship — pick one per environment with `CBFS_DEFAULT_PROVIDER`:
+
+- `local` — disk on the running container. Development default. Files persist to `/storage` inside the container.
+- `s3` — genuine AWS S3 via cbfs's stock S3Provider. Pointed at `amazonaws.com` with `CBFS_PROVIDER_REGION` as the AWS region.
+- `b2` — Backblaze B2 (or any other S3-compatible endpoint whose hostname embeds the region — Wasabi, DigitalOcean Spaces, MinIO, etc.) via [B2Provider@core](modules_app/core/models/cbfs/B2Provider.cfc). The patched provider swaps in [PatchedAmazonS3.cfc](modules_app/core/models/cbfs/PatchedAmazonS3.cfc) which corrects s3sdk's path-style URL builder for non-AWS domains; talking to a B2 bucket through the stock provider produces a doubled region in the hostname and a 403 on every request.
+
+`s3` and `b2` share one set of credential env vars (`CBFS_PROVIDER_ACCESS_KEY`, `CBFS_PROVIDER_SECRET_KEY`, `CBFS_PROVIDER_BUCKET`, `CBFS_PROVIDER_REGION`, `CBFS_PROVIDER_ENDPOINT`) since only one is active per environment. `CBFS_PROVIDER_ENDPOINT` is only consulted by the `b2` provider; `s3` always talks to `amazonaws.com`.
+
+## Storage verification (deployment-readiness gate)
+
+Before the first production deploy, log in as an admin agent and visit `/agent/admin/storage`. The "Run verification" button drives a five-step smoke test against the active CBFS provider:
+
+1. **write** — 4 KB of random bytes to `storage-verify/test-<uuid>.bin`
+2. **read-back** — fetch the bytes and SHA-256 compare end to end
+3. **signed-url** — request a time-limited signed URL and confirm a real HTTP GET returns 200 (S3 family only; skipped on the local disk)
+4. **private-bucket** — request the bucket's public URL and confirm it rejects with 401/403 (skipped on local; if it returns 200, the bucket is public — tighten the ACL before going live)
+5. **delete** — remove the test object
+
+Every step must be green before declaring the storage path production-ready. The verification is safe to re-run any time; the test object lives under `storage-verify/` and is removed on success.
 
 ## AI is optional
 

@@ -107,7 +107,17 @@ class {
                 requestPanelDock : false
             },
 
-            // CBFS: file persistence
+            // CBFS: file persistence. Three providers — pick one
+            // per environment via CBFS_DEFAULT_PROVIDER:
+            //   local — disk on the running container (dev)
+            //   s3    — genuine AWS S3 via cbfs's stock S3Provider
+            //   b2    — Backblaze B2 (or any non-AWS S3-compatible
+            //           endpoint whose hostname embeds the region)
+            //           via our B2Provider@core, which wraps s3sdk
+            //           with a path-style URL builder fix.
+            //
+            // s3 and b2 share one set of credentials env vars
+            // (CBFS_PROVIDER_*) since only one is active at a time.
             cbfs : {
                 defaultDisk : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" ),
                 disks : {
@@ -120,14 +130,56 @@ class {
                         }
                     },
                     "s3" : {
+                        // cbfs's stock S3Provider — pointed at real
+                        // AWS S3. Path-style is supported but
+                        // virtual-host style is the AWS default and
+                        // also works.
                         provider   : "S3Provider@cbfs",
                         properties : {
-                            accessKey  : getSystemSetting( "CBFS_S3_ACCESS_KEY", "" ),
-                            secretKey  : getSystemSetting( "CBFS_S3_SECRET_KEY", "" ),
-                            bucket     : getSystemSetting( "CBFS_S3_BUCKET", "" ),
-                            region     : getSystemSetting( "CBFS_S3_REGION", "us-west-002" ),
-                            endpoint   : getSystemSetting( "CBFS_S3_ENDPOINT", "s3.us-west-002.backblazeb2.com" ),
-                            visibility : "private"
+                            accessKey         : getSystemSetting( "CBFS_PROVIDER_ACCESS_KEY", "" ),
+                            secretKey         : getSystemSetting( "CBFS_PROVIDER_SECRET_KEY", "" ),
+                            defaultBucketName : getSystemSetting( "CBFS_PROVIDER_BUCKET",     "" ),
+                            awsRegion         : getSystemSetting( "CBFS_PROVIDER_REGION",     "us-east-1" ),
+                            awsDomain         : "amazonaws.com",
+                            defaultACL        : "private",
+                            visibility        : "private",
+                            ssl               : true,
+                            // cbfs's S3Provider reads properties.path
+                            // unconditionally in buildPath(); an empty
+                            // string keeps callers in control of the
+                            // key while preventing the "key [PATH] was
+                            // not found in the struct" error.
+                            path              : ""
+                        }
+                    },
+                    "b2" : {
+                        // Our B2Provider — same wire protocol as the
+                        // stock S3Provider but swaps in a patched
+                        // AmazonS3 client that doesn't double-prepend
+                        // the region on path-style URLs. Use this for
+                        // Backblaze B2 / Wasabi / DigitalOcean Spaces
+                        // / MinIO / any non-AWS endpoint.
+                        //
+                        // The endpoint is stripped of its scheme up
+                        // front because s3sdk wants `awsDomain` as a
+                        // bare hostname.
+                        provider   : "B2Provider@core",
+                        properties : {
+                            accessKey         : getSystemSetting( "CBFS_PROVIDER_ACCESS_KEY", "" ),
+                            secretKey         : getSystemSetting( "CBFS_PROVIDER_SECRET_KEY", "" ),
+                            defaultBucketName : getSystemSetting( "CBFS_PROVIDER_BUCKET",     "" ),
+                            awsRegion         : getSystemSetting( "CBFS_PROVIDER_REGION",     "us-west-002" ),
+                            awsDomain         : reReplaceNoCase(
+                                                    getSystemSetting( "CBFS_PROVIDER_ENDPOINT", "s3.us-west-002.backblazeb2.com" ),
+                                                    "^https?://",
+                                                    ""
+                                                ),
+                            defaultACL        : "private",
+                            visibility        : "private",
+                            urlStyle          : "path",
+                            ssl               : true,
+                            // See note on the s3 disk's `path` above.
+                            path              : ""
                         }
                     }
                 }

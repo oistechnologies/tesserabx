@@ -14,6 +14,7 @@
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/workflow"><i class="bi bi-diagram-2"></i> Workflow</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/webhooks"><i class="bi bi-broadcast"></i> Webhooks</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/gdpr"><i class="bi bi-shield-lock"></i> GDPR requests</a>
+                <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/storage"><i class="bi bi-hdd-network"></i> Storage</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/audit"><i class="bi bi-journal-text"></i> Audit log</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/blacklist"><i class="bi bi-shield-x"></i> Inbound blacklist</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/kb"><i class="bi bi-book"></i> Knowledge base</a>

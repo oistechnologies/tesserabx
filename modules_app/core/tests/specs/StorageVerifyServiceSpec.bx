@@ -1,0 +1,52 @@
+/**
+ * StorageVerifyServiceSpec: exercises the verification flow
+ * against the local-disk provider that dev runs on. The S3
+ * path is verified by an operator against real Backblaze
+ * credentials before declaring a deploy ready.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "StorageVerifyService@core" );
+    }
+
+    function run(){
+        describe( "StorageVerifyService", function(){
+
+            it( "returns a populated report with a started/completed timestamp", function(){
+                var report = variables.svc.verify();
+                expect( report ).toHaveKey( "started_at" );
+                expect( report ).toHaveKey( "completed_at" );
+                expect( report ).toHaveKey( "steps" );
+                expect( report.steps ).toBeArray();
+            } );
+
+            it( "passes the write / read-back / delete steps on the local disk", function(){
+                var report = variables.svc.verify();
+                var stepsByName = {};
+                for ( var s in report.steps ) stepsByName[ s.name ] = s;
+                expect( stepsByName.write.ok ).toBeTrue();
+                expect( stepsByName[ "read-back" ].ok ).toBeTrue();
+                expect( stepsByName.delete.ok ).toBeTrue();
+            } );
+
+            it( "marks the signed-URL and private-bucket steps as skipped on the local provider", function(){
+                var report = variables.svc.verify();
+                var stepsByName = {};
+                for ( var s in report.steps ) stepsByName[ s.name ] = s;
+                expect( stepsByName[ "signed-url" ].ok ).toBeTrue();
+                expect( stepsByName[ "signed-url" ].detail ).toInclude( "skipped" );
+                expect( stepsByName[ "private-bucket" ].ok ).toBeTrue();
+            } );
+
+            it( "reports all_ok=true when every step passes", function(){
+                var report = variables.svc.verify();
+                expect( report.all_ok ).toBeTrue();
+            } );
+
+        } );
+    }
+
+}

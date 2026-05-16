@@ -47,11 +47,12 @@ dist/
 logs/
 *.log
 
-# CBFS local storage and uploads
-storage/
+# CBFS local storage and uploads (root-anchored — there is also
+# an admin view folder named "storage" we do want to track).
+/storage/
 
 # Database backups
-backups/
+/backups/
 
 # IDE
 .idea/

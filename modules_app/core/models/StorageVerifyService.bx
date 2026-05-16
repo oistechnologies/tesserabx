@@ -1,0 +1,243 @@
+/**
+ * StorageVerifyService: end-to-end smoke test against the
+ * configured CBFS provider.
+ *
+ * Operators run this before flipping production over to the
+ * Backblaze B2 (or any S3-compatible) provider. The build plan
+ * marks it as the explicit "deployment-ready" gate for the
+ * production storage path.
+ *
+ * Steps for the default disk:
+ *   1. Pick a unique key under storage-verify/
+ *   2. Write 4 KB of random bytes
+ *   3. Read the bytes back, hash both ends, compare
+ *   4. Ask the provider for a signed URL
+ *   5. (For S3 providers) HEAD the signed URL → expect 200
+ *   6. (For S3 providers) HEAD an unsigned URL → expect 401/403
+ *   7. Delete the test object
+ *
+ * The local provider has no signed-URL or access-control
+ * concept; steps 4-6 short-circuit with a "skipped" note so
+ * the local disk verification still passes when run in dev.
+ *
+ * The returned struct is a per-step report the admin UI
+ * renders as a checklist; each step has { name, ok, detail }.
+ */
+class singleton=true {
+
+    property name="cbfs" inject="DiskService@cbfs";
+
+    public struct function verify(){
+        var report = {
+            "started_at" : dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" ),
+            "disk_name"  : "",
+            "provider"   : "",
+            "steps"      : []
+        };
+
+        try {
+            var disk = cbfs.defaultDisk();
+            report.disk_name = describe( disk );
+            report.provider  = providerOf( disk );
+        } catch ( any e ) {
+            report.steps.append( step( "resolve-disk", false, "Could not resolve default disk: " & e.message ) );
+            report.completed_at = dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" );
+            return report;
+        }
+
+        var key = "storage-verify/test-" & createUUID() & ".bin";
+        var payload = generateRandomBytes( 4096 );
+        var localChecksum = hash( payload, "SHA-256" );
+
+        // 1. Write
+        try {
+            disk.create( path = key, contents = payload, overwrite = true );
+            report.steps.append( step( "write", true, "Wrote " & len( payload ) & " bytes to " & key ) );
+        } catch ( any e ) {
+            report.steps.append( step( "write", false, e.message ) );
+            report.completed_at = dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" );
+            return report;
+        }
+
+        // 2. Read back + checksum
+        try {
+            var readBack = disk.get( key );
+            var readChecksum = hash( readBack, "SHA-256" );
+            var matches = ( readChecksum == localChecksum );
+            report.steps.append( step(
+                "read-back",
+                matches,
+                matches
+                    ? "Checksum matches (SHA-256 = " & left( readChecksum, 12 ) & "…)"
+                    : "Checksum mismatch — write succeeded but the bytes that came back differ from what we sent."
+            ) );
+        } catch ( any e ) {
+            report.steps.append( step( "read-back", false, e.message ) );
+        }
+
+        // 3. Signed URL — only meaningful for S3-family providers.
+        if ( report.provider == "s3" ) {
+            try {
+                // cbfs's S3Provider exposes temporaryURL (capital
+                // URL) for presigned links. Method is NOT
+                // temporaryUri or uri — those don't exist on this
+                // provider.
+                var signedUrl = disk.temporaryURL( path = key, expiration = 5 ); // minutes
+                var probe = probeUrl( signedUrl );
+                report.steps.append( step(
+                    "signed-url",
+                    probe.code >= 200 && probe.code < 300,
+                    "GET signed URL → HTTP " & probe.code
+                ) );
+            } catch ( any e ) {
+                report.steps.append( step( "signed-url", false, e.message ) );
+            }
+
+            // 4. Unsigned URL — built manually from the disk's
+            // properties since cbfs's url() returns a signed URL
+            // on a private-visibility disk (same code path as
+            // temporaryURL above).
+            try {
+                var rawUrl = buildUnsignedUrl( disk, key );
+                if ( !len( rawUrl ) ) {
+                    report.steps.append( step( "private-bucket", false, "Could not build an unsigned URL — endpoint or bucket missing on disk properties." ) );
+                } else {
+                    var probe = probeUrl( rawUrl );
+                    var isPrivate = ( probe.code == 401 || probe.code == 403 );
+                    report.steps.append( step(
+                        "private-bucket",
+                        isPrivate,
+                        isPrivate
+                            ? "Unsigned GET correctly rejected with HTTP " & probe.code
+                            : "Unsigned GET returned HTTP " & probe.code & " — bucket may be public. Tighten ACL before going live."
+                    ) );
+                }
+            } catch ( any e ) {
+                report.steps.append( step( "private-bucket", false, e.message ) );
+            }
+        } else {
+            report.steps.append( step( "signed-url",     true, "skipped — provider [" & report.provider & "] has no signed-URL concept" ) );
+            report.steps.append( step( "private-bucket", true, "skipped — provider [" & report.provider & "] is filesystem-private" ) );
+        }
+
+        // 5. Cleanup
+        try {
+            disk.delete( key );
+            report.steps.append( step( "delete", true, "Removed " & key ) );
+        } catch ( any e ) {
+            report.steps.append( step( "delete", false, e.message ) );
+        }
+
+        report.completed_at = dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" );
+        report.all_ok       = allOk( report.steps );
+        return report;
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function step( required string name, required boolean ok, required string detail ){
+        return { "name" : arguments.name, "ok" : arguments.ok, "detail" : arguments.detail };
+    }
+
+    private boolean function allOk( required array steps ){
+        for ( var s in arguments.steps ) if ( !s.ok ) return false;
+        return true;
+    }
+
+    private string function describe( required any disk ){
+        try { return arguments.disk.getName() ?: ""; } catch ( any e ) { return ""; }
+    }
+
+    /**
+     * Build the unsigned bucket URL for a key. cbfs's url() on a
+     * private disk returns a signed URL (same code path as
+     * temporaryURL), so for the "is the bucket really private?"
+     * probe we have to construct the raw form by hand from the
+     * disk's properties: `https://<host>/<bucket>/<key>` for
+     * path-style, `https://<bucket>.<host>/<key>` for virtual.
+     */
+    private string function buildUnsignedUrl( required any disk, required string key ){
+        try {
+            var props = arguments.disk.getProperties();
+            var host  = props.awsDomain         ?: "";
+            var bkt   = props.defaultBucketName ?: ( props.bucketName ?: "" );
+            if ( !len( host ) || !len( bkt ) ) return "";
+            var scheme = ( props.ssl ?: true ) ? "https://" : "http://";
+            var style  = props.urlStyle ?: "path";
+            if ( style == "path" ) {
+                return scheme & host & "/" & bkt & "/" & arguments.key;
+            }
+            return scheme & bkt & "." & host & "/" & arguments.key;
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    /**
+     * Best-effort introspection of the cbfs provider kind so the
+     * verification can skip signed-URL steps on local disks.
+     */
+    private string function providerOf( required any disk ){
+        try {
+            var meta = getMetadata( arguments.disk );
+            var name = meta.fullname ?: "";
+            if ( findNoCase( "b2provider",   name ) ) return "s3"; // B2Provider extends S3Provider; same code path applies
+            if ( findNoCase( "s3provider",   name ) ) return "s3";
+            if ( findNoCase( "localprovider", name ) ) return "local";
+            return "unknown";
+        } catch ( any e ) {
+            return "unknown";
+        }
+    }
+
+    /**
+     * 4 KB of cryptographically-random bytes. Used as the test
+     * payload so the checksum compare is meaningful (not all
+     * zeros).
+     */
+    private string function generateRandomBytes( required numeric size ){
+        var rng = createObject( "java", "java.security.SecureRandom" ).init();
+        var bytes = createObject( "java", "java.lang.reflect.Array" )
+            .newInstance(
+                createObject( "java", "java.lang.Byte" ).TYPE,
+                javaCast( "int", arguments.size )
+            );
+        rng.nextBytes( bytes );
+        return toString( bytes, "ISO-8859-1" );
+    }
+
+    /**
+     * GET the URL via java.net.HttpURLConnection and return its
+     * status code. Returns { code: int, error: "" }; network
+     * errors come back as code=0 and a populated `error` field.
+     *
+     * The method is GET (not HEAD) because S3 V4 presigned URLs
+     * are method-specific — temporaryURL() signs for GET, and
+     * Backblaze B2 strictly rejects a HEAD against a GET-signed
+     * URL with 403 SignatureDoesNotMatch even though the
+     * presence/absence of the object would otherwise be visible
+     * via HEAD.
+     */
+    private struct function probeUrl( required string url ){
+        try {
+            var urlObj = createObject( "java", "java.net.URL" ).init( arguments.url );
+            var conn = urlObj.openConnection();
+            conn.setRequestMethod( "GET" );
+            conn.setConnectTimeout( javaCast( "int", 5000 ) );
+            conn.setReadTimeout( javaCast( "int", 5000 ) );
+            conn.setInstanceFollowRedirects( javaCast( "boolean", false ) );
+            var code = conn.getResponseCode();
+            // Drain (and discard) the body so the connection is
+            // returned cleanly to the pool. A 4 KB stream costs us
+            // nothing here and keeps the socket from lingering.
+            try {
+                var is = ( code >= 200 && code < 300 ) ? conn.getInputStream() : conn.getErrorStream();
+                if ( !isNull( is ) ) is.close();
+            } catch ( any inner ) {}
+            return { "code" : code, "error" : "" };
+        } catch ( any e ) {
+            return { "code" : 0, "error" : e.message };
+        }
+    }
+
+}

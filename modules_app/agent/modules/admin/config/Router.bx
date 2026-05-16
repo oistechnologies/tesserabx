@@ -40,6 +40,10 @@ class {
         } );
         route( "kb" ).to( "Kb.index" );
 
+        // Storage (CBFS) verification gate.
+        route( "storage/verify" ).withVerbs( "POST" ).to( "Storage.verify" );
+        route( "storage" ).to( "Storage.index" );
+
         // GDPR data subject requests.
         route( "gdpr/export" ).withVerbs( "GET" ).to( "Gdpr.exportData" );
         route( "gdpr/erase" ).withVerbs( "POST" ).to( "Gdpr.erase" );

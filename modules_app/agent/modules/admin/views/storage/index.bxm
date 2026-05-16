@@ -1,0 +1,118 @@
+<bx:output>
+<div class="mb-3">
+    <h2 class="h5 mb-0">Storage</h2>
+    <p class="text-body-secondary small mb-0">
+        Where attachments, generated reports, and exports persist. Production deployments use Backblaze B2 or any other
+        S3-compatible bucket via the <code>s3</code> provider; the local-disk provider is the development default and
+        is only partial protection in production (backups land on the same host as the database).
+    </p>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><strong>Active provider</strong></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <bx:switch expression="#prc.defaultProvider#">
+                            <bx:case value="s3">
+                                <span class="badge text-bg-success fs-6">s3</span>
+                                <span class="text-body-secondary ms-2">Genuine AWS S3 (cbfs stock provider)</span>
+                            </bx:case>
+                            <bx:case value="b2">
+                                <span class="badge text-bg-success fs-6">b2</span>
+                                <span class="text-body-secondary ms-2">Backblaze B2 / S3-compatible (patched provider)</span>
+                            </bx:case>
+                            <bx:defaultcase>
+                                <span class="badge text-bg-warning fs-6">local</span>
+                                <span class="text-body-secondary ms-2">Disk attached to this container</span>
+                            </bx:defaultcase>
+                        </bx:switch>
+                    </div>
+                </div>
+                <bx:if prc.defaultProvider neq "local">
+                    <hr>
+                    <dl class="row small mb-0">
+                        <dt class="col-sm-3">Bucket</dt>
+                        <dd class="col-sm-9"><code>#encodeForHTML( prc.bucket )#</code></dd>
+                        <bx:if prc.defaultProvider eq "b2">
+                            <dt class="col-sm-3">Endpoint</dt>
+                            <dd class="col-sm-9"><code>#encodeForHTML( prc.endpoint )#</code></dd>
+                        </bx:if>
+                        <dt class="col-sm-3">Region</dt>
+                        <dd class="col-sm-9"><code>#encodeForHTML( prc.region )#</code></dd>
+                        <dt class="col-sm-3">Credentials</dt>
+                        <dd class="col-sm-9">
+                            <bx:if prc.credsConfigured>
+                                <span class="badge text-bg-success">Configured</span>
+                            <bx:else>
+                                <span class="badge text-bg-danger">Missing — set CBFS_PROVIDER_ACCESS_KEY and CBFS_PROVIDER_BUCKET</span>
+                            </bx:if>
+                        </dd>
+                    </dl>
+                </bx:if>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><strong>Production readiness gate</strong></div>
+            <div class="card-body">
+                <p class="small text-body-secondary mb-2">
+                    Runs a five-step end-to-end verification against the active provider: write, read-back checksum,
+                    signed-URL probe, private-bucket probe, cleanup. Safe to run any time; the test object lives under
+                    <code>storage-verify/</code> and is deleted on success.
+                </p>
+                <form method="post" action="/agent/admin/storage/verify">
+                    <button class="btn btn-primary" type="submit">
+                        <i class="bi bi-shield-check"></i> Run verification
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<bx:if isStruct( prc.report ) and structKeyExists( prc.report, "steps" )>
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>Verification report</strong>
+            <bx:if prc.report.all_ok ?: false>
+                <span class="badge text-bg-success">All steps passed</span>
+            <bx:else>
+                <span class="badge text-bg-danger">At least one step failed</span>
+            </bx:if>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th style="width: 2rem;"></th>
+                        <th>Step</th>
+                        <th>Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:loop array="#prc.report.steps#" item="s">
+                        <tr>
+                            <td class="text-center">
+                                <bx:if s.ok>
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                <bx:else>
+                                    <i class="bi bi-x-circle-fill text-danger"></i>
+                                </bx:if>
+                            </td>
+                            <td><code>#encodeForHTML( s.name )#</code></td>
+                            <td><small>#encodeForHTML( s.detail )#</small></td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer small text-body-secondary">
+            Started #encodeForHTML( prc.report.started_at )# · Completed #encodeForHTML( prc.report.completed_at ?: "" )#
+        </div>
+    </div>
+</bx:if>
+</bx:output>
