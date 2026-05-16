@@ -55,9 +55,15 @@ class singleton=true {
         var payload = generateRandomBytes( 4096 );
         var localChecksum = hash( binaryEncode( payload, "hex" ), "SHA-256" );
 
-        // 1. Write
+        // 1. Write.
+        // The disk is configured visibility="private", which on the
+        // LocalProvider maps to POSIX mode 000 (no access for anyone,
+        // including the owner). Root bypasses POSIX, so the dev
+        // container — running as root — could still read the file
+        // back; a non-root CI runner cannot. Pass an explicit mode
+        // 600 (rw-------) so the verification works for both.
         try {
-            disk.create( path = key, contents = payload, overwrite = true );
+            disk.create( path = key, contents = payload, overwrite = true, mode = "600" );
             report.steps.append( step( "write", true, "Wrote " & len( payload ) & " bytes to " & key ) );
         } catch ( any e ) {
             report.steps.append( step( "write", false, e.message ) );
