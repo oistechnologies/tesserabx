@@ -62,19 +62,21 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( agentId, "" );
             } );
 
-            it( "skips channels that are neither inapp nor email", function(){
-                // Slack template lives in the table but Phase 5c-2
-                // only dispatches inapp + email; slack stays in 5c-3.
+            it( "silently skips a template row for an unrecognized channel", function(){
+                // inapp + email + slack are the wired channels. Any
+                // other channel value in the templates table must not
+                // crash dispatch and must not create a notifications
+                // row, so an unknown row stays inert.
                 queryExecute(
                     "INSERT INTO notification_templates
                         ( id, event_key, channel, recipient_type, title_template, body_template, is_active )
                      VALUES
-                        ( :id, 'spec.slack_only', 'slack', 'agent', 'hello {{subject}}', 'body', TRUE )",
+                        ( :id, 'spec.sms_only', 'sms', 'agent', 'hello {{subject}}', 'body', TRUE )",
                     { id : createUUID() }
                 );
                 var agentId = createUUID();
                 variables.svc.dispatchForEvent(
-                    eventKey   : "spec.slack_only",
+                    eventKey   : "spec.sms_only",
                     recipients : [ { "type" : "agent", "id" : agentId } ],
                     context    : { "subject" : "hi" }
                 );
@@ -83,7 +85,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     { id : agentId }
                 );
                 expect( rows.n[ 1 ] ).toBe( 0 );
-                queryExecute( "DELETE FROM notification_templates WHERE event_key = 'spec.slack_only'" );
+                queryExecute( "DELETE FROM notification_templates WHERE event_key = 'spec.sms_only'" );
             } );
 
             it( "isChannelEnabled defaults to true when no preference row exists", function(){
@@ -146,6 +148,51 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.svc.unreadCount( "agent", agentId ) ).toBe( 0 );
 
                 cleanup( agentId, "" );
+            } );
+
+            it( "buildUnsubscribeUrl + verifyUnsubscribeToken round-trip the recipient/event/channel tuple", function(){
+                var unsubUrl = variables.svc.buildUnsubscribeUrl( "contact", "rid-123", "ticket.status_changed", "email" );
+                expect( unsubUrl ).toInclude( "/unsubscribe?token=" );
+                var token = listLast( unsubUrl, "=" );
+                var decoded = variables.svc.verifyUnsubscribeToken( token );
+                expect( decoded ).notToBeNull();
+                expect( decoded.recipientType ).toBe( "contact" );
+                expect( decoded.recipientId   ).toBe( "rid-123" );
+                expect( decoded.eventKey      ).toBe( "ticket.status_changed" );
+                expect( decoded.channel       ).toBe( "email" );
+            } );
+
+            it( "verifyUnsubscribeToken rejects a tampered signature", function(){
+                var unsubUrl = variables.svc.buildUnsubscribeUrl( "agent", "rid-xyz", "ticket.created", "email" );
+                var token = listLast( unsubUrl, "=" );
+                // Flip a character early in the signature half. Last-
+                // char flips can fall in base64 padding bits and
+                // decode to identical bytes, so target a position we
+                // know contributes to the byte sequence.
+                var dotIdx = find( ".", token );
+                var flipAt = dotIdx + 2; // first char of signature
+                var orig   = mid( token, flipAt, 1 );
+                var swap   = ( orig == "A" ? "B" : "A" );
+                var tampered = mid( token, 1, flipAt - 1 ) & swap & mid( token, flipAt + 1, len( token ) - flipAt );
+                expect( variables.svc.verifyUnsubscribeToken( tampered ) ).toBeNull();
+                expect( variables.svc.verifyUnsubscribeToken( "" ) ).toBeNull();
+                expect( variables.svc.verifyUnsubscribeToken( "junk" ) ).toBeNull();
+            } );
+
+            it( "recordBounce inserts a notification_bounces row", function(){
+                var email = "bounce-" & createUUID() & "@example.com";
+                variables.svc.recordBounce(
+                    recipientEmail : email,
+                    kind           : "hard",
+                    reason         : "mailbox does not exist"
+                );
+                var rows = queryExecute(
+                    "SELECT kind, reason FROM notification_bounces WHERE recipient_email = :e",
+                    { e : email }
+                );
+                expect( rows.recordCount ).toBe( 1 );
+                expect( rows.kind[ 1 ] ).toBe( "hard" );
+                queryExecute( "DELETE FROM notification_bounces WHERE recipient_email = :e", { e : email } );
             } );
 
             it( "markAllRead clears every unread row for the recipient", function(){

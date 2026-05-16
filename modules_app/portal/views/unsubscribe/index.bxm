@@ -1,0 +1,38 @@
+<bx:output>
+<div class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-body">
+                <bx:if prc.invalid>
+                    <h2 class="h4 mb-2">Link expired or invalid</h2>
+                    <p class="text-body-secondary mb-0">
+                        We could not verify this unsubscribe link. It may be malformed or
+                        for a notification stream that no longer exists. If you keep
+                        receiving messages you do not want, reply to the email or
+                        contact support.
+                    </p>
+                <bx:elseif ( rc.resubscribed ?: "" ) eq "1">
+                    <h2 class="h4 mb-2">You're back on the list</h2>
+                    <p class="text-body-secondary mb-0">
+                        We will send #encodeForHTML( prc.decoded.eventKey )#
+                        notifications to you again over #encodeForHTML( prc.decoded.channel )#.
+                    </p>
+                <bx:else>
+                    <h2 class="h4 mb-2">You're unsubscribed</h2>
+                    <p class="text-body-secondary">
+                        We will not send any more <strong>#encodeForHTML( prc.decoded.eventKey )#</strong>
+                        notifications to you over <strong>#encodeForHTML( prc.decoded.channel )#</strong>.
+                        Other notification types are unaffected.
+                    </p>
+                    <form method="post" action="/unsubscribe/resubscribe">
+                        <input type="hidden" name="token" value="#encodeForHTMLAttribute( prc.token )#">
+                        <button class="btn btn-outline-primary btn-sm" type="submit">
+                            <i class="bi bi-arrow-counterclockwise"></i> Re-enable these notifications
+                        </button>
+                    </form>
+                </bx:if>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

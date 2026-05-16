@@ -1,0 +1,59 @@
+/**
+ * portal:Unsubscribe handler.
+ *
+ * Public /unsubscribe endpoint. The link arrives in the footer of
+ * every outbound notification email; clicking it lands here with a
+ * signed token that identifies (recipient_type, recipient_id,
+ * event_key, channel). We verify the HMAC, flip the preference to
+ * enabled=false, and render a small confirmation page with a
+ * single-click "Re-enable" form.
+ *
+ * No auth required: the token itself authenticates the request.
+ * That is the standard pattern for one-click unsubscribe.
+ */
+class {
+
+    property name="notificationsService" inject="NotificationsService@notifications";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.token = "";
+        prc.pageTitle = "Unsubscribe";
+        prc.token     = rc.token;
+        prc.decoded   = notificationsService.verifyUnsubscribeToken( rc.token );
+        prc.invalid   = isNull( prc.decoded );
+        prc.alreadyOff = false;
+        if ( !prc.invalid ) {
+            // Apply the opt-out on GET so the link is one-click. Some
+            // mailers prefetch links to check safety; if that becomes
+            // a problem in production we add a confirm POST step.
+            notificationsService.setPreference(
+                recipientType : prc.decoded.recipientType,
+                recipientId   : prc.decoded.recipientId,
+                eventKey      : prc.decoded.eventKey,
+                channel       : prc.decoded.channel,
+                enabled       : false
+            );
+        }
+        event.setView( "unsubscribe/index" );
+    }
+
+    function resubscribe( event, rc, prc ){
+        param rc.token = "";
+        var decoded = notificationsService.verifyUnsubscribeToken( rc.token );
+        if ( !isNull( decoded ) ) {
+            notificationsService.setPreference(
+                recipientType : decoded.recipientType,
+                recipientId   : decoded.recipientId,
+                eventKey      : decoded.eventKey,
+                channel       : decoded.channel,
+                enabled       : true
+            );
+        }
+        relocate( uri = "/unsubscribe?token=" & rc.token & "&resubscribed=1" );
+    }
+
+}

@@ -52,6 +52,13 @@ class extends="coldbox.system.web.routing.Router" {
             "POST" : "create"
         } );
 
+        // Email-footer unsubscribe link. Token-authenticated; the
+        // POST resubscribe sits behind the same token so a single
+        // round trip can re-enable a stream the recipient changed
+        // their mind about.
+        route( "/unsubscribe/resubscribe" ).withVerbs( "POST" ).to( "portal:Unsubscribe.resubscribe" );
+        route( "/unsubscribe" ).to( "portal:Unsubscribe.index" );
+
         // Default catch-all. Module routes are matched first.
         route( ":handler/:action?" ).end();
     }

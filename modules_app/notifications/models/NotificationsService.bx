@@ -20,8 +20,11 @@
  */
 class singleton=true {
 
-    property name="wirebox"     inject="wirebox";
-    property name="mailService" inject="mailService@cbmailservices";
+    property name="wirebox"               inject="wirebox";
+    property name="mailService"           inject="mailService@cbmailservices";
+    property name="slackWebhookUrl"       inject="coldbox:setting:slackWebhookUrl";
+    property name="appBaseUrl"            inject="coldbox:setting:appBaseUrl";
+    property name="unsubscribeSecret"     inject="coldbox:setting:notificationsUnsubscribeSecret";
 
     /**
      * Dispatch an event to its configured templates. Returns the
@@ -60,26 +63,36 @@ class singleton=true {
             if ( !len( r.type ?: "" ) || !len( r.id ?: "" ) ) continue;
             for ( var i = 1; i <= tmplRows.recordCount; i++ ) {
                 if ( tmplRows.recipient_type[ i ] != r.type ) continue;
-                // Phase 5c-1 covered inapp; Phase 5c-2 adds email.
-                // Slack lands in 5c-3. Any other channel is silently
-                // skipped — having an unrecognized row in the
-                // templates table should not crash dispatch.
-                if ( tmplRows.channel[ i ] != "inapp" && tmplRows.channel[ i ] != "email" ) continue;
+                var ch = tmplRows.channel[ i ];
+                // Phase 5c-1 covered inapp; 5c-2 added email; 5c-3
+                // adds slack. Any other channel is silently skipped
+                // so an unknown row in the templates table never
+                // crashes dispatch.
+                if ( ch != "inapp" && ch != "email" && ch != "slack" ) continue;
 
-                // Per-recipient opt-out check. Default is opt-in so
-                // missing rows deliver; an enabled=false row silences.
-                if ( !isChannelEnabled( r.type, r.id, arguments.eventKey, tmplRows.channel[ i ] ) ) continue;
+                // Per-recipient opt-out. Default opt-in: missing
+                // row = deliver; row with enabled=false = silence.
+                if ( !isChannelEnabled( r.type, r.id, arguments.eventKey, ch ) ) continue;
+
+                // Per-recipient context: per-channel placeholders
+                // ({{unsubscribeUrl}} for email, {{appBaseUrl}} for
+                // slack link rendering, etc.) get folded in here so
+                // the templates table stays generic and the URL
+                // shape lives in code.
+                var ctx = duplicate( arguments.context );
+                ctx.appBaseUrl     = toString( variables.appBaseUrl ?: "" );
+                ctx.unsubscribeUrl = buildUnsubscribeUrl( r.type, r.id, arguments.eventKey, ch );
 
                 var n = createNotification(
                     recipientType : r.type,
                     recipientId   : r.id,
                     eventKey      : arguments.eventKey,
-                    channel       : tmplRows.channel[ i ],
-                    title         : render( tmplRows.title_template[ i ], arguments.context ),
-                    body          : render( tmplRows.body_template[ i ],  arguments.context ),
-                    link          : len( tmplRows.link_template[ i ] ?: "" ) ? render( tmplRows.link_template[ i ], arguments.context ) : "",
-                    ticketId      : arguments.context.ticketId       ?: "",
-                    organizationId: arguments.context.organizationId ?: ""
+                    channel       : ch,
+                    title         : render( tmplRows.title_template[ i ], ctx ),
+                    body          : render( tmplRows.body_template[ i ],  ctx ),
+                    link          : len( tmplRows.link_template[ i ] ?: "" ) ? render( tmplRows.link_template[ i ], ctx ) : "",
+                    ticketId      : ctx.ticketId       ?: "",
+                    organizationId: ctx.organizationId ?: ""
                 );
                 if ( !isNull( n ) ) created.append( n );
             }
@@ -238,7 +251,166 @@ class singleton=true {
         n.save();
 
         if ( arguments.channel == "email" ) sendEmail( n );
+        if ( arguments.channel == "slack" ) sendSlack( n );
         return n;
+    }
+
+    /**
+     * Post a notification to the configured Slack incoming-webhook
+     * URL. Microsoft Teams accepts the same Slack-compatible payload
+     * through its own webhook, so the same code serves both via the
+     * SLACK_WEBHOOK_URL setting (despite the name).
+     *
+     * Skips silently when no webhook URL is configured so a dev
+     * stack with no Slack integration does not log noise on every
+     * dispatch. A failed POST flips the row to "failed".
+     */
+    private void function sendSlack( required any notification ){
+        var url = toString( variables.slackWebhookUrl ?: "" );
+        if ( !len( url ) ) {
+            arguments.notification.setStatus( "failed" );
+            arguments.notification.setErrorMessage( "SLACK_WEBHOOK_URL is not set" );
+            arguments.notification.save();
+            return;
+        }
+        var body = arguments.notification.getBody() ?: "";
+        if ( len( arguments.notification.getLink() ?: "" ) ) {
+            body &= char( 10 ) & arguments.notification.getLink();
+        }
+        var payload = jsonSerialize( { "text" : arguments.notification.getTitle() & char( 10 ) & body } );
+        try {
+            var conn = createObject( "java", "java.net.URL" ).init( url ).openConnection();
+            conn.setRequestMethod( "POST" );
+            conn.setRequestProperty( "Content-Type", "application/json" );
+            conn.setDoOutput( javaCast( "boolean", true ) );
+            conn.setConnectTimeout( javaCast( "int", 5000 ) );
+            conn.setReadTimeout( javaCast( "int", 5000 ) );
+            var os = conn.getOutputStream();
+            try {
+                os.write( payload.getBytes( "UTF-8" ) );
+                os.flush();
+            } finally {
+                os.close();
+            }
+            var code = conn.getResponseCode();
+            if ( code >= 200 && code < 300 ) {
+                arguments.notification.setStatus( "sent" );
+                arguments.notification.setSentAt( now() );
+            } else {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( "Slack webhook returned HTTP " & code );
+            }
+            arguments.notification.save();
+        } catch ( any e ) {
+            arguments.notification.setStatus( "failed" );
+            arguments.notification.setErrorMessage( e.message );
+            try { arguments.notification.save(); } catch ( any inner ) {}
+            writeLog(
+                text : "NotificationsService.sendSlack [#arguments.notification.getId()#] failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    // ---------------- Unsubscribe tokens ----------------
+
+    /**
+     * Build the signed unsubscribe URL for one (recipient, event,
+     * channel) tuple. The endpoint at /unsubscribe verifies the
+     * signature and flips the notification_preferences row.
+     */
+    public string function buildUnsubscribeUrl(
+        required string recipientType,
+        required string recipientId,
+        required string eventKey,
+        required string channel
+    ){
+        var payload = arguments.recipientType & ":" & arguments.recipientId & ":"
+                    & arguments.eventKey      & ":" & arguments.channel;
+        var sig = hmacSha256( payload, toString( variables.unsubscribeSecret ?: "" ) );
+        var token = toBase64Url( payload ) & "." & toBase64Url( sig );
+        return toString( variables.appBaseUrl ?: "" ) & "/unsubscribe?token=" & token;
+    }
+
+    /**
+     * Verify a token returned by buildUnsubscribeUrl. Returns the
+     * recipient/event/channel struct on success, or null when the
+     * signature does not match.
+     */
+    public any function verifyUnsubscribeToken( required string token ){
+        if ( !find( ".", arguments.token ) ) return javaCast( "null", "" );
+        var parts = listToArray( arguments.token, "." );
+        if ( parts.len() != 2 ) return javaCast( "null", "" );
+        var payload = fromBase64Url( parts[ 1 ] );
+        var sig     = fromBase64Url( parts[ 2 ] );
+        var expect  = hmacSha256( payload, toString( variables.unsubscribeSecret ?: "" ) );
+        if ( !constantTimeEquals( sig, expect ) ) return javaCast( "null", "" );
+        var fields = listToArray( payload, ":", true, false );
+        if ( fields.len() != 4 ) return javaCast( "null", "" );
+        return {
+            "recipientType" : fields[ 1 ],
+            "recipientId"   : fields[ 2 ],
+            "eventKey"      : fields[ 3 ],
+            "channel"       : fields[ 4 ]
+        };
+    }
+
+    private string function hmacSha256( required string text, required string key ){
+        return lCase( hmac( arguments.text, arguments.key, "HmacSHA256" ) );
+    }
+
+    private string function toBase64Url( required string text ){
+        var b64 = toBase64( arguments.text );
+        b64 = replace( b64, "+", "-", "all" );
+        b64 = replace( b64, "/", "_", "all" );
+        b64 = replace( b64, "=", "",  "all" );
+        return b64;
+    }
+
+    private string function fromBase64Url( required string text ){
+        var b64 = replace( arguments.text, "-", "+", "all" );
+        b64 = replace( b64, "_", "/", "all" );
+        // Re-pad to a multiple of 4. Java's Base64 decoder is picky
+        // about missing padding on some JVM versions.
+        var pad = ( 4 - ( len( b64 ) mod 4 ) ) mod 4;
+        for ( var i = 1; i <= pad; i++ ) b64 &= "=";
+        return toString( toBinary( b64 ), "UTF-8" );
+    }
+
+    private boolean function constantTimeEquals( required string a, required string b ){
+        if ( len( arguments.a ) != len( arguments.b ) ) return false;
+        // MessageDigest.isEqual is documented as a timing-attack-resistant
+        // byte-array compare. Cheaper than rolling our own and avoids
+        // per-character BIF calls.
+        var md = createObject( "java", "java.security.MessageDigest" );
+        return md.isEqual( arguments.a.getBytes( "UTF-8" ), arguments.b.getBytes( "UTF-8" ) );
+    }
+
+    // ---------------- Bounces ----------------
+
+    /**
+     * Record a bounce against a notification. Phase 5c-3 ships the
+     * data model + recorder; a future operator integration with the
+     * mail provider's bounce webhook calls this.
+     */
+    public void function recordBounce(
+        string notificationId = "",
+        required string recipientEmail,
+        required string kind,
+        string reason = ""
+    ){
+        queryExecute(
+            "INSERT INTO notification_bounces ( id, notification_id, recipient_email, kind, reason )
+             VALUES ( :id, :nid, :email, :kind, :reason )",
+            {
+                id     : newId(),
+                nid    : len( arguments.notificationId ) ? arguments.notificationId : javaCast( "null", "" ),
+                email  : arguments.recipientEmail,
+                kind   : arguments.kind,
+                reason : arguments.reason
+            }
+        );
     }
 
     /**
