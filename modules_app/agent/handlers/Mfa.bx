@@ -16,10 +16,11 @@
  */
 class {
 
-    property name="auth"       inject="AuthenticationService@cbauth";
-    property name="agentAuth"  inject="AgentAuthService@agent";
-    property name="totp"       inject="TotpService@agent";
-    property name="messagebox" inject="messagebox@cbmessagebox";
+    property name="auth"        inject="AuthenticationService@cbauth";
+    property name="agentAuth"   inject="AgentAuthService@agent";
+    property name="totp"        inject="TotpService@agent";
+    property name="rateLimiter" inject="RateLimiter@core";
+    property name="messagebox"  inject="messagebox@cbmessagebox";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
@@ -44,6 +45,20 @@ class {
             relocate( uri = "/agent/login" );
             return;
         }
+        // Throttle per-agent attempts. 8 in 5 minutes covers
+        // legitimate typos and the recovery-code fallback without
+        // letting an attacker burn through codes.
+        var limit = rateLimiter.check(
+            bucket        : "agent:mfa:verify",
+            key           : agentId,
+            limit         : 8,
+            windowSeconds : 300
+        );
+        if ( !limit.allowed ) {
+            messagebox.error( "Too many failed attempts. Wait a few minutes and try again." );
+            relocate( uri = "/agent/login/verify" );
+            return;
+        }
         var agent = agentAuth.retrieveUserById( agentId );
         if ( isNull( agent ) ) {
             clearPending();
@@ -51,6 +66,7 @@ class {
             return;
         }
         if ( totp.verifyCode( agent.getMfaSecret() ?: "", rc.code ) ) {
+            rateLimiter.reset( "agent:mfa:verify", agentId );
             return finishLogin( agent );
         }
         // Recovery-code fallback.
@@ -58,6 +74,7 @@ class {
         var consumed  = totp.consumeRecoveryCode( rawCodes, rc.code );
         if ( consumed.matched ) {
             updateAgentRecoveryCodes( agent, consumed.updatedHashes );
+            rateLimiter.reset( "agent:mfa:verify", agentId );
             return finishLogin( agent );
         }
         messagebox.error( "Invalid code. Try again, or use one of your recovery codes." );

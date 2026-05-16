@@ -1,0 +1,187 @@
+/**
+ * GdprService: per-contact data export + erasure.
+ *
+ * Two operations sit behind the admin UI:
+ *
+ *   exportForContact(id)  - returns a struct of every row we
+ *                           hold about the contact: profile,
+ *                           organization metadata, tickets they
+ *                           originated, messages they wrote,
+ *                           role assignments, notification
+ *                           preferences. Serialized to JSON for
+ *                           download.
+ *
+ *   eraseContact(id)      - pseudonymizes the contact in place
+ *                           rather than dropping rows. Email,
+ *                           name, phone, etc. are blanked or
+ *                           replaced with "erased-<id>" tokens
+ *                           so historical tickets keep their
+ *                           shape but no longer carry PII. Ticket
+ *                           messages from the contact have their
+ *                           body redacted to "[message deleted at
+ *                           request of subject]".
+ *
+ * A hard DELETE would orphan tickets (organization_id FK chain)
+ * and erase audit trails the provider may still need for
+ * compliance with their own customers. Pseudonymization is the
+ * pragmatic middle ground; the build plan documents it as the
+ * default GDPR posture.
+ *
+ * Every erasure writes an audit event with the original contact
+ * id so the provider can prove the request was honored.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    public struct function exportForContact( required string contactId ){
+        var out = {
+            "exported_at" : dateTimeFormat( now(), "yyyy-mm-dd'T'HH:nn:ss" ),
+            "contact_id"  : arguments.contactId
+        };
+
+        var profile = queryExecute(
+            "SELECT id, email, first_name, last_name,
+                    organization_id, office_id, is_active,
+                    last_login_at, created_at, updated_at
+             FROM   contacts
+             WHERE  id = :id",
+            { id : arguments.contactId }
+        );
+        if ( !profile.recordCount ) return out.append( { "error" : "Contact not found." } );
+
+        out[ "profile" ] = {
+            id               : profile.id[ 1 ],
+            email            : profile.email[ 1 ]      ?: "",
+            first_name       : profile.first_name[ 1 ] ?: "",
+            last_name        : profile.last_name[ 1 ]  ?: "",
+            organization_id  : profile.organization_id[ 1 ] ?: "",
+            office_id        : profile.office_id[ 1 ] ?: "",
+            is_active        : !!profile.is_active[ 1 ],
+            last_login_at    : toString( profile.last_login_at[ 1 ] ?: "" ),
+            created_at       : toString( profile.created_at[ 1 ] ),
+            updated_at       : toString( profile.updated_at[ 1 ] )
+        };
+
+        out[ "roles" ]    = queryToArray( "SELECT role_key, granted_at FROM contact_roles WHERE contact_id = :id", { id : arguments.contactId } );
+        out[ "tickets" ]  = queryToArray( "SELECT id, ticket_number, subject, status, priority, created_at, updated_at FROM tickets WHERE requester_contact_id = :id", { id : arguments.contactId } );
+        out[ "messages" ] = queryToArray( "SELECT id, ticket_id, body, is_internal, created_at FROM ticket_messages WHERE author_contact_id = :id", { id : arguments.contactId } );
+        out[ "notification_preferences" ] = queryToArray(
+            "SELECT event_key, channel, enabled, updated_at
+             FROM   notification_preferences
+             WHERE  recipient_type = 'contact' AND recipient_id = :id",
+            { id : arguments.contactId }
+        );
+
+        return out;
+    }
+
+    public struct function eraseContact(
+        required string contactId,
+        string actorAgentId = ""
+    ){
+        var probe = queryExecute(
+            "SELECT email, first_name, last_name FROM contacts WHERE id = :id",
+            { id : arguments.contactId }
+        );
+        if ( !probe.recordCount ) {
+            return { "ok" : false, "error" : "Contact not found." };
+        }
+        var originalEmail = probe.email[ 1 ] ?: "";
+
+        // Pseudonymize the contact. The id stays so FK chains in
+        // tickets / messages remain valid; everything humans use
+        // to identify the person is blanked.
+        // organization_id is NOT NULL on this schema so it stays
+        // attached; the row just becomes a faceless, deactivated
+        // tombstone within whatever org the contact originally
+        // belonged to. Tickets keep their FK chain intact.
+        queryExecute(
+            "UPDATE contacts
+             SET    email      = :email,
+                    first_name = NULL,
+                    last_name  = NULL,
+                    is_active  = FALSE,
+                    updated_at = NOW()
+             WHERE  id = :id",
+            {
+                id    : arguments.contactId,
+                email : "erased-" & arguments.contactId & "@deleted.invalid"
+            }
+        );
+
+        // Redact every message body the contact authored. Internal
+        // notes by agents are left alone; only the contact's own
+        // content is removed.
+        queryExecute(
+            "UPDATE ticket_messages
+             SET    body = '[message redacted at request of data subject]'
+             WHERE  author_contact_id = :id
+             AND    is_internal = FALSE",
+            { id : arguments.contactId }
+        );
+
+        // Drop accumulated notification preferences and stored
+        // role assignments — they no longer make sense for an
+        // erased account.
+        queryExecute(
+            "DELETE FROM notification_preferences WHERE recipient_type = 'contact' AND recipient_id = :id",
+            { id : arguments.contactId }
+        );
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.contactId } );
+
+        recordAudit(
+            "contact.erased",
+            arguments.contactId,
+            arguments.actorAgentId,
+            { "original_email" : originalEmail }
+        );
+
+        return { "ok" : true, "original_email" : originalEmail };
+    }
+
+    // ---------------- internals ----------------
+
+    private array function queryToArray( required string sql, struct params = {} ){
+        var rows = queryExecute( arguments.sql, arguments.params );
+        var out = [];
+        var cols = listToArray( rows.columnList );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var row = {};
+            for ( var c in cols ) {
+                row[ c ] = isNull( rows[ c ][ i ] ) ? "" : toString( rows[ c ][ i ] );
+            }
+            out.append( row );
+        }
+        return out;
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string entityId,
+        required string actorAgentId,
+        required struct metadata
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "contact",
+                entityId   : arguments.entityId,
+                metadata   : arguments.metadata
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "GdprService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

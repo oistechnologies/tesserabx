@@ -40,6 +40,11 @@ class {
         } );
         route( "kb" ).to( "Kb.index" );
 
+        // GDPR data subject requests.
+        route( "gdpr/export" ).withVerbs( "GET" ).to( "Gdpr.exportData" );
+        route( "gdpr/erase" ).withVerbs( "POST" ).to( "Gdpr.erase" );
+        route( "gdpr" ).to( "Gdpr.index" );
+
         // Outbound webhook subscriptions.
         route( "webhooks/new" ).withHandler( "Webhooks" ).toAction( {
             "GET"  : "newForm",

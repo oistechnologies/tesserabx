@@ -1,0 +1,107 @@
+/**
+ * /agent/admin/gdpr handler — per-contact data export + erasure.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*. Heavy
+ * lifting lives in GdprService@contacts; this handler routes
+ * search → preview → action.
+ */
+class {
+
+    property name="contacts"   inject="ContactsService@contacts";
+    property name="gdpr"       inject="GdprService@contacts";
+    property name="auth"       inject="AuthenticationService@cbauth";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.q = "";
+        prc.pageTitle = "Data subject requests";
+        prc.q         = rc.q;
+        prc.matches   = [];
+        if ( len( trim( rc.q ) ) ) {
+            prc.matches = lookup( rc.q );
+        }
+        event.setView( "gdpr/index" );
+    }
+
+    function exportData( event, rc, prc ){
+        param rc.contactId = "";
+        if ( !len( rc.contactId ) ) {
+            messagebox.error( "Contact id is required." );
+            relocate( uri = "/agent/admin/gdpr" );
+            return;
+        }
+        var data = gdpr.exportForContact( rc.contactId );
+        event.renderData(
+            type       = "json",
+            statusCode = 200,
+            data       = data
+        );
+        // Force a download in the browser; the JSON renders as
+        // application/json by default.
+        event.setHTTPHeader( name = "Content-Disposition", value = "attachment; filename=""contact-#rc.contactId#.json""" );
+    }
+
+    function erase( event, rc, prc ){
+        param rc.contactId = "";
+        param rc.confirm   = "";
+        if ( !len( rc.contactId ) ) {
+            messagebox.error( "Contact id is required." );
+            relocate( uri = "/agent/admin/gdpr" );
+            return;
+        }
+        if ( rc.confirm != "ERASE" ) {
+            messagebox.error( "Type ERASE in the confirm box to proceed." );
+            relocate( uri = "/agent/admin/gdpr?q=" & encodeForURL( rc.contactId ) );
+            return;
+        }
+        var result = gdpr.eraseContact( contactId : rc.contactId, actorAgentId : currentAgentId() );
+        if ( result.ok ) {
+            messagebox.info( "Contact erased. Tickets remain but identifying details and message bodies have been redacted." );
+        } else {
+            messagebox.error( "Erasure failed: " & ( result.error ?: "unknown" ) );
+        }
+        relocate( uri = "/agent/admin/gdpr" );
+    }
+
+    // ---------- internals ----------
+
+    private array function lookup( required string query ){
+        // Match on email, first/last name, or the literal id.
+        var pattern = "%" & trim( arguments.query ) & "%";
+        var rows = queryExecute(
+            "SELECT id, email, first_name, last_name, organization_id, is_active
+             FROM   contacts
+             WHERE  id = :id
+                OR  email      ILIKE :p
+                OR  first_name ILIKE :p
+                OR  last_name  ILIKE :p
+             ORDER BY email
+             LIMIT  20",
+            { id : trim( arguments.query ), p : pattern }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id              : rows.id[ i ],
+                email           : rows.email[ i ]      ?: "",
+                firstName       : rows.first_name[ i ] ?: "",
+                lastName        : rows.last_name[ i ]  ?: "",
+                organizationId  : rows.organization_id[ i ] ?: "",
+                isActive        : !!rows.is_active[ i ]
+            } );
+        }
+        return out;
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

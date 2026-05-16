@@ -1,0 +1,68 @@
+<bx:output>
+<div class="mb-3">
+    <h2 class="h5 mb-0">Data subject requests</h2>
+    <p class="text-body-secondary small mb-0">
+        Look up a contact by id, email, or name. Export returns a JSON
+        document of every row we hold about them. Erase pseudonymizes the
+        account in place — tickets and audit trails remain, but PII is
+        cleared and the contact's own message bodies are redacted.
+    </p>
+</div>
+
+<form method="get" action="/agent/admin/gdpr" class="card mb-3">
+    <div class="card-body">
+        <div class="input-group">
+            <input type="search" name="q" class="form-control" placeholder="alice@example.com or contact id"
+                   value="#encodeForHTMLAttribute( prc.q )#">
+            <button class="btn btn-primary" type="submit">Search</button>
+        </div>
+    </div>
+</form>
+
+<bx:if !len( prc.q )>
+    <p class="text-body-secondary small">Enter a query above to find a contact.</p>
+<bx:elseif !arrayLen( prc.matches )>
+    <p class="text-body-secondary small">No contacts match <code>#encodeForHTML( prc.q )#</code>.</p>
+<bx:else>
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:loop array="#prc.matches#" item="c">
+                        <tr>
+                            <td><code class="small">#encodeForHTML( c.email )#</code></td>
+                            <td>#encodeForHTML( trim( c.firstName & " " & c.lastName ) )#</td>
+                            <td>
+                                <bx:if c.isActive>
+                                    <span class="badge text-bg-success">Active</span>
+                                <bx:else>
+                                    <span class="badge text-bg-light text-black">Inactive</span>
+                                </bx:if>
+                            </td>
+                            <td class="text-end">
+                                <form method="get" action="/agent/admin/gdpr/export" class="d-inline">
+                                    <input type="hidden" name="contactId" value="#encodeForHTMLAttribute( c.id )#">
+                                    <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-download"></i> Export JSON</button>
+                                </form>
+                                <form method="post" action="/agent/admin/gdpr/erase" class="d-inline" onsubmit="var x = prompt('Type ERASE to confirm pseudonymization of this contact. Tickets remain but PII is cleared.'); if ( x !== 'ERASE' ) return false; this.querySelector('input[name=confirm]').value = x;">
+                                    <input type="hidden" name="contactId" value="#encodeForHTMLAttribute( c.id )#">
+                                    <input type="hidden" name="confirm" value="">
+                                    <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Erase</button>
+                                </form>
+                            </td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</bx:if>
+</bx:output>

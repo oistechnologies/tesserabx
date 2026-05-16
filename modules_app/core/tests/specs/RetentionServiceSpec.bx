@@ -1,0 +1,94 @@
+/**
+ * RetentionServiceSpec: seed a row past the window, prove the
+ * sweep removes it; seed a row within the window, prove the
+ * sweep leaves it alone.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "RetentionService@core" );
+    }
+
+    function run(){
+        describe( "RetentionService", function(){
+
+            it( "retentionKeys exposes a default for every sweep", function(){
+                var keys = variables.svc.retentionKeys();
+                expect( keys ).toHaveKey( "retention.notifications_days" );
+                expect( keys ).toHaveKey( "retention.audit_events_days" );
+                expect( keys ).toHaveKey( "retention.webhook_deliveries_days" );
+                expect( keys ).toHaveKey( "retention.ai_interactions_days" );
+                expect( keys ).toHaveKey( "retention.bulk_jobs_days" );
+            } );
+
+            it( "runOnce returns a per-sweep report struct", function(){
+                var report = variables.svc.runOnce();
+                expect( report ).toHaveKey( "sweeps" );
+                expect( report.sweeps ).toHaveKey( "notifications" );
+                expect( report.sweeps.notifications.ok ).toBeTrue();
+            } );
+
+            it( "prunes read notifications past the window", function(){
+                // Seed: one read notification 100 days old, one read 1 day old.
+                var oldId   = createUUID();
+                var freshId = createUUID();
+                queryExecute(
+                    "INSERT INTO notifications
+                        ( id, recipient_type, recipient_id, event_key, channel,
+                          title, body, status, sent_at, read_at, created_at )
+                     VALUES
+                        ( :id, 'agent', :rid, 'spec.read', 'inapp',
+                          't', 'b', 'read',
+                          NOW() - interval '100 days',
+                          NOW() - interval '100 days',
+                          NOW() - interval '100 days' ),
+                        ( :fid, 'agent', :rid, 'spec.read', 'inapp',
+                          't', 'b', 'read',
+                          NOW() - interval '1 day',
+                          NOW() - interval '1 day',
+                          NOW() - interval '1 day' )",
+                    { id : oldId, fid : freshId, rid : createUUID() }
+                );
+
+                variables.svc.runOnce();
+
+                var stillThere = queryExecute(
+                    "SELECT id FROM notifications WHERE id IN ( :a, :b )",
+                    { a : oldId, b : freshId }
+                );
+                var ids = [];
+                for ( var i = 1; i <= stillThere.recordCount; i++ ) ids.append( stillThere.id[ i ] );
+                expect( ids ).notToInclude( oldId );
+                expect( ids ).toInclude( freshId );
+
+                queryExecute( "DELETE FROM notifications WHERE id IN ( :a, :b )", { a : oldId, b : freshId } );
+            } );
+
+            it( "leaves unread notifications alone even when old", function(){
+                var id = createUUID();
+                queryExecute(
+                    "INSERT INTO notifications
+                        ( id, recipient_type, recipient_id, event_key, channel,
+                          title, body, status, sent_at, created_at )
+                     VALUES
+                        ( :id, 'agent', :rid, 'spec.unread', 'inapp',
+                          't', 'b', 'sent',
+                          NOW() - interval '999 days',
+                          NOW() - interval '999 days' )",
+                    { id : id, rid : createUUID() }
+                );
+                variables.svc.runOnce();
+                var stillThere = queryExecute(
+                    "SELECT COUNT(*) AS n FROM notifications WHERE id = :id",
+                    { id : id }
+                );
+                expect( val( stillThere.n[ 1 ] ) ).toBe( 1 );
+                queryExecute( "DELETE FROM notifications WHERE id = :id", { id : id } );
+            } );
+
+        } );
+    }
+
+}

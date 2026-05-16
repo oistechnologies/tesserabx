@@ -1,0 +1,157 @@
+/**
+ * RetentionService: scheduled cleanup of high-volume history
+ * tables so unbounded growth does not blow up Postgres.
+ *
+ * Retention windows are read from app_settings so the admin
+ * can tune them per environment without a redeploy. Each
+ * window defaults conservatively (long enough that ops teams
+ * still have visibility into recent activity).
+ *
+ * The runOnce() method orchestrates every individual sweep
+ * and is what the scheduler calls each night. Per-sweep
+ * failures are isolated so a slow table cannot starve the
+ * rest of the job.
+ */
+class singleton=true {
+
+    property name="wirebox"  inject="wirebox";
+    property name="settings" inject="SettingsService@admin";
+
+    /**
+     * Catalog of retention settings the admin can tune.
+     */
+    public struct function retentionKeys(){
+        return {
+            "retention.notifications_days"      : { "label" : "Read notifications kept (days)",    "default" : "60",  "type" : "integer" },
+            "retention.audit_events_days"       : { "label" : "Audit events kept (days)",         "default" : "365", "type" : "integer" },
+            "retention.webhook_deliveries_days" : { "label" : "Webhook deliveries kept (days)",   "default" : "30",  "type" : "integer" },
+            "retention.ai_interactions_days"    : { "label" : "AI interactions kept (days)",      "default" : "30",  "type" : "integer" },
+            "retention.bulk_jobs_days"          : { "label" : "Completed cbq jobs kept (days)",   "default" : "14",  "type" : "integer" }
+        };
+    }
+
+    /**
+     * Run every configured sweep and return a per-table report.
+     * Called once per day by the scheduler; safe to invoke
+     * manually from the admin UI for an ad-hoc cleanup.
+     */
+    public struct function runOnce(){
+        var report = {
+            "started_at"  : dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" ),
+            "sweeps"      : {}
+        };
+        report.sweeps[ "notifications" ]      = safeSweep( "notifications",
+            settings.getInteger( "retention.notifications_days", 60 ),
+            ( days ) => sweepNotifications( days ) );
+        report.sweeps[ "audit_events" ]       = safeSweep( "audit_events",
+            settings.getInteger( "retention.audit_events_days", 365 ),
+            ( days ) => sweepAuditEvents( days ) );
+        report.sweeps[ "webhook_deliveries" ] = safeSweep( "webhook_deliveries",
+            settings.getInteger( "retention.webhook_deliveries_days", 30 ),
+            ( days ) => sweepWebhookDeliveries( days ) );
+        report.sweeps[ "ai_interactions" ]    = safeSweep( "ai_interactions",
+            settings.getInteger( "retention.ai_interactions_days", 30 ),
+            ( days ) => sweepAiInteractions( days ) );
+        report.sweeps[ "cbq_jobs" ]           = safeSweep( "cbq_jobs",
+            settings.getInteger( "retention.bulk_jobs_days", 14 ),
+            ( days ) => sweepCbqJobs( days ) );
+        report.completed_at = dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" );
+        return report;
+    }
+
+    // ---------------- per-table sweeps ----------------
+
+    /**
+     * Read-status in-app notifications older than the window.
+     * Unread notifications are left alone — they are the agent's
+     * inbox state and should not disappear unread.
+     */
+    private numeric function sweepNotifications( required numeric days ){
+        if ( arguments.days <= 0 ) return 0;
+        return deleteAndCount(
+            "DELETE FROM notifications
+             WHERE  channel = 'inapp'
+             AND    status  = 'read'
+             AND    ( read_at IS NOT NULL AND read_at < NOW() - cast( :d AS interval ) )",
+            toString( int( arguments.days ) ) & " days"
+        );
+    }
+
+    private numeric function sweepAuditEvents( required numeric days ){
+        if ( arguments.days <= 0 ) return 0;
+        return deleteAndCount(
+            "DELETE FROM audit_events
+             WHERE  occurred_at < NOW() - cast( :d AS interval )",
+            toString( int( arguments.days ) ) & " days"
+        );
+    }
+
+    private numeric function sweepWebhookDeliveries( required numeric days ){
+        if ( arguments.days <= 0 ) return 0;
+        return deleteAndCount(
+            "DELETE FROM webhook_deliveries
+             WHERE  completed_at IS NOT NULL
+             AND    completed_at < NOW() - cast( :d AS interval )",
+            toString( int( arguments.days ) ) & " days"
+        );
+    }
+
+    private numeric function sweepAiInteractions( required numeric days ){
+        if ( arguments.days <= 0 ) return 0;
+        return deleteAndCount(
+            "DELETE FROM ai_interactions
+             WHERE  created_at < NOW() - cast( :d AS interval )",
+            toString( int( arguments.days ) ) & " days"
+        );
+    }
+
+    /**
+     * Completed cbq jobs (status sent / failed past the window).
+     * Pending and reserved jobs are never touched.
+     */
+    private numeric function sweepCbqJobs( required numeric days ){
+        if ( arguments.days <= 0 ) return 0;
+        var cutoff = ( getTickCount() / 1000 ) - ( arguments.days * 86400 );
+        return deleteAndCount(
+            "DELETE FROM cbq_jobs
+             WHERE  ( ""completedDate"" IS NOT NULL OR ""failedDate"" IS NOT NULL )
+             AND    COALESCE( ""completedDate"", ""failedDate"" ) < cast( :d AS bigint )",
+            toString( int( cutoff ) )
+        );
+    }
+
+    // ---------------- internals ----------------
+
+    /**
+     * Run the DELETE and report how many rows it touched. The
+     * probe is a SELECT COUNT that mirrors the DELETE's WHERE
+     * clause so the number reported matches what was actually
+     * removed. BoxLang's queryExecute does not surface DELETE
+     * row counts (see memory feedback_boxlang_delete_returning),
+     * so we do count-then-delete instead.
+     */
+    private numeric function deleteAndCount( required string sql, required string param ){
+        var countSql = replaceNoCase( arguments.sql, "DELETE FROM", "SELECT COUNT(*) AS n FROM" );
+        var probe = queryExecute( countSql, { d : arguments.param } );
+        var n = val( probe.n[ 1 ] );
+        if ( n > 0 ) {
+            queryExecute( arguments.sql, { d : arguments.param } );
+        }
+        return n;
+    }
+
+    private struct function safeSweep( required string label, required numeric days, required any fn ){
+        try {
+            var n = arguments.fn( arguments.days );
+            return { "deleted" : n, "days" : arguments.days, "ok" : true };
+        } catch ( any e ) {
+            writeLog(
+                text : "RetentionService.sweep[#arguments.label#] failed: " & e.message,
+                log  : "tesserabx-scheduler",
+                type : "warning"
+            );
+            return { "deleted" : 0, "days" : arguments.days, "ok" : false, "error" : e.message };
+        }
+    }
+
+}

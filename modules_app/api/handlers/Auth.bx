@@ -15,6 +15,7 @@ class {
 
     property name="agentAuthService" inject="AgentAuthService@agent";
     property name="jwt"              inject="JwtService@cbsecurity";
+    property name="rateLimiter"      inject="RateLimiter@core";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.paramValue( "format", "json" );
@@ -26,6 +27,24 @@ class {
 
         if ( !len( rc.email ) || !len( rc.password ) ) {
             return badRequest( event, "email and password are required" );
+        }
+
+        // Throttle brute-force attempts by remote IP. 10 attempts
+        // per 15 minutes is enough for a forgetful human and far
+        // below what an automated guesser needs.
+        var limit = rateLimiter.check(
+            bucket        : "api:auth:login",
+            key           : remoteIp(),
+            limit         : 10,
+            windowSeconds : 900
+        );
+        if ( !limit.allowed ) {
+            event.setHTTPHeader( name = "Retry-After", value = limit.retryAfter );
+            return event.renderData(
+                type = "json",
+                statusCode = 429,
+                data = { error : "Too many sign-in attempts. Try again in a few minutes." }
+            );
         }
 
         try {
@@ -102,6 +121,18 @@ class {
             statusCode = 500,
             data       = { error : arguments.message }
         );
+    }
+
+    private string function remoteIp(){
+        // X-Forwarded-For when a reverse proxy fronts us; CGI remote
+        // addr otherwise. We take the first non-empty token of XFF
+        // so a chain of proxies does not all share the same bucket.
+        var xff = cgi.http_x_forwarded_for ?: "";
+        if ( len( xff ) ) {
+            var first = trim( listFirst( xff ) );
+            if ( len( first ) ) return first;
+        }
+        return cgi.remote_addr ?: "unknown";
     }
 
 }
