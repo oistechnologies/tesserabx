@@ -62,6 +62,14 @@ class {
         binder.map( "CustomFieldsService@tickets" )
               .to( "#moduleMapping#.models.CustomFieldsService" )
               .asSingleton();
+        binder.map( "BulkActionsService@tickets" )
+              .to( "#moduleMapping#.models.BulkActionsService" )
+              .asSingleton();
+        // BulkTicketActionJob is NOT a singleton; each dispatch gets
+        // a fresh instance so the per-call setters do not bleed across
+        // queued jobs.
+        binder.map( "BulkTicketActionJob@tickets" )
+              .to( "#moduleMapping#.models.jobs.BulkTicketActionJob" );
     }
 
     function onUnload(){}

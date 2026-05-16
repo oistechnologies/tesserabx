@@ -56,6 +56,9 @@ class {
         route( "tickets/:id/draft-kb-article" ).withVerbs( "POST" ).to( "Tickets.draftKbArticle" );
         route( "tickets/:id/check-tone" ).withVerbs( "POST" ).to( "Tickets.checkTone" );
         route( "tickets/:id/custom-fields" ).withVerbs( "POST" ).to( "Tickets.saveCustomFields" );
+        // Bulk actions: enqueues a cbq job so a multi-hundred ticket
+        // run does not block the redirect-back-to-list response.
+        route( "tickets/bulk" ).withVerbs( "POST" ).to( "Tickets.bulk" );
         route( "tickets/:id" ).to( "Tickets.show" );
         route( "tickets" ).withHandler( "Tickets" ).toAction( {
             "GET"  : "index",

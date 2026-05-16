@@ -1,0 +1,101 @@
+/**
+ * BulkTicketActionJob: apply one action across many tickets.
+ *
+ * Enqueued by BulkActionsService when an agent submits a bulk
+ * operation from /agent/tickets. Runs on the cbq worker so a
+ * thousand-ticket close does not block the request handler.
+ *
+ * Each per-ticket op delegates to TicketsService; per-ticket
+ * failures are logged and counted but do not abort the rest of
+ * the batch (so a single bad ticket cannot poison a 500-row run).
+ */
+class extends="cbq.models.Jobs.AbstractJob" {
+
+    /**
+     * Required by the cbq AbstractJob contract. cbq serializes the
+     * `properties` struct (via getMemento / applyMemento), NOT the
+     * individual `variables.x` slots that auto-generated setters
+     * would write to. So callers feed the data in via
+     * `setProperties({...})` and we read it back here via
+     * `getProperties()`.
+     */
+    public void function handle(){
+        var ctx = {
+            ts        : getInstance( "TicketsService@tickets" ),
+            props     : getProperties(),
+            succeeded : 0,
+            failed    : 0
+        };
+        ctx.action  = ctx.props.action       ?: "";
+        ctx.ids     = ctx.props.ticketIds    ?: [];
+        ctx.params  = ctx.props.params       ?: {};
+        ctx.actorId = ctx.props.actorAgentId ?: "";
+
+        for ( var ticketId in ctx.ids ) {
+            try {
+                applyOne( ctx.ts, ctx.action, ticketId, ctx.params, ctx.actorId );
+                ctx.succeeded++;
+            } catch ( any e ) {
+                ctx.failed++;
+                writeLog(
+                    text : "BulkTicketActionJob [#ctx.action#] failed for ticket [#ticketId#]: " & e.message,
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+            }
+        }
+
+        writeLog(
+            text : "BulkTicketActionJob [#ctx.action#] complete: succeeded=#ctx.succeeded# failed=#ctx.failed# total=#ctx.ids.len()# actor=#ctx.actorId#",
+            log  : "tesserabx",
+            type : "info"
+        );
+    }
+
+    private void function applyOne(
+        required any ts,
+        required string action,
+        required string ticketId,
+        required struct p,
+        required string actorId
+    ){
+        switch ( arguments.action ) {
+            case "assign":
+                arguments.ts.assignToAgent( {
+                    ticketId : arguments.ticketId,
+                    agentId  : arguments.p.assignedToAgentId ?: "",
+                    actorId  : arguments.actorId
+                } );
+                return;
+
+            case "change_status":
+                arguments.ts.changeStatus( {
+                    ticketId  : arguments.ticketId,
+                    status    : arguments.p.status ?: "",
+                    actorType : "agent",
+                    actorId   : arguments.actorId
+                } );
+                return;
+
+            case "add_tag":
+                var tagName = trim( arguments.p.tag ?: "" );
+                if ( !len( tagName ) ) {
+                    throw( type : "BulkTicketActionJob.InvalidParams", message : "tag is required for add_tag" );
+                }
+                arguments.ts.applyTagsByName(
+                    ticketId  : arguments.ticketId,
+                    tagNames  : [ tagName ],
+                    actorType : "agent",
+                    actorId   : arguments.actorId
+                );
+                return;
+
+            default:
+                throw(
+                    type    : "BulkTicketActionJob.UnknownAction",
+                    message : "Unknown bulk action: " & arguments.action
+                );
+        }
+    }
+
+}

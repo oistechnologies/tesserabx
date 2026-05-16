@@ -1,0 +1,146 @@
+/**
+ * BulkActionsServiceSpec: enqueue + sync-dispatch happy paths.
+ *
+ * We run the job through the `sync` cbq connection so the spec
+ * does not need a running worker container; the handler logic
+ * still goes through the real BulkTicketActionJob.handle() so
+ * any regression in the per-ticket dispatch surfaces here.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc  = getController().getWireBox().getInstance( "BulkActionsService@tickets" );
+        variables.tsvc = getController().getWireBox().getInstance( "TicketsService@tickets" );
+    }
+
+    function run(){
+        describe( "BulkActionsService", function(){
+
+            it( "listActions returns the wired actions", function(){
+                var actions = variables.svc.listActions();
+                expect( actions ).toBeArray();
+                var keys = [];
+                for ( var a in actions ) keys.append( a.key );
+                expect( keys ).toInclude( "assign" );
+                expect( keys ).toInclude( "change_status" );
+                expect( keys ).toInclude( "add_tag" );
+            } );
+
+            it( "rejects an unknown action key", function(){
+                expect( function(){
+                    variables.svc.enqueue( action : "destroy_universe", ticketIds : [ "x" ] );
+                } ).toThrow();
+            } );
+
+            it( "rejects an empty ticket list", function(){
+                expect( function(){
+                    variables.svc.enqueue( action : "assign", ticketIds : [] );
+                } ).toThrow();
+            } );
+
+            it( "change_status moves every ticket through the sync connection", function(){
+                var agentId  = seedAgent();
+                var tickets  = [ seedTicket(), seedTicket() ];
+                var ids      = [];
+                for ( var t in tickets ) ids.append( t.getId() );
+
+                variables.svc.enqueue(
+                    action       : "change_status",
+                    ticketIds    : ids,
+                    params       : { status : "open" },
+                    actorAgentId : agentId,
+                    connection   : "sync"
+                );
+
+                for ( var id in ids ) {
+                    var reloaded = variables.tsvc.getTicket( id );
+                    expect( reloaded.getStatus() ).toBe( "open" );
+                }
+
+                cleanupTickets( ids );
+                cleanupAgent( agentId );
+            } );
+
+            it( "assign sets assigned_to_agent_id on every ticket", function(){
+                var actorId   = seedAgent();
+                var assigneeId = seedAgent();
+                var ticket    = seedTicket();
+
+                variables.svc.enqueue(
+                    action       : "assign",
+                    ticketIds    : [ ticket.getId() ],
+                    params       : { assignedToAgentId : assigneeId },
+                    actorAgentId : actorId,
+                    connection   : "sync"
+                );
+
+                var reloaded = variables.tsvc.getTicket( ticket.getId() );
+                expect( reloaded.getAssignedToAgentId() ).toBe( assigneeId );
+
+                cleanupTickets( [ ticket.getId() ] );
+                cleanupAgent( actorId );
+                cleanupAgent( assigneeId );
+            } );
+
+            it( "isolates per-ticket failures; the rest of the batch still applies", function(){
+                var actorId = seedAgent();
+                var good    = seedTicket();
+                var bogusId = "00000000-0000-0000-0000-000000000000";
+
+                variables.svc.enqueue(
+                    action       : "change_status",
+                    ticketIds    : [ bogusId, good.getId() ],
+                    params       : { status : "open" },
+                    actorAgentId : actorId,
+                    connection   : "sync"
+                );
+
+                var reloaded = variables.tsvc.getTicket( good.getId() );
+                expect( reloaded.getStatus() ).toBe( "open" );
+
+                cleanupTickets( [ good.getId() ] );
+                cleanupAgent( actorId );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function seedAgent(){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, 'x', FALSE, TRUE )",
+            { id : id, email : "bulk-spec-" & id & "@example.com" }
+        );
+        return id;
+    }
+
+    private any function seedTicket(){
+        return variables.tsvc.createAccountlessTicket( {
+            subject          : "bulk-spec-" & createUUID(),
+            originatingEmail : "bulk-spec-" & createUUID() & "@example.com",
+            firstMessage     : "test",
+            source           : "spec"
+        } );
+    }
+
+    private void function cleanupTickets( required array ticketIds ){
+        for ( var id in arguments.ticketIds ) {
+            queryExecute( "DELETE FROM ticket_custom_field_values WHERE ticket_id = :id", { id : id } );
+            queryExecute( "DELETE FROM ticket_events  WHERE ticket_id = :id", { id : id } );
+            queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : id } );
+            queryExecute( "DELETE FROM ticket_tags    WHERE ticket_id = :id", { id : id } );
+            queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : id } );
+        }
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.agentId } );
+    }
+
+}

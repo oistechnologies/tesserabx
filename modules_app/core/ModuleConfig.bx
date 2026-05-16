@@ -53,6 +53,10 @@ class {
         binder.map( "BackupService@core" )
               .to( "#moduleMapping#.models.BackupService" )
               .asSingleton();
+        // Patched cbq DBProvider that quotes "reservedBy" in its
+        // orderByRaw fragments. Required for Postgres + cbq.
+        binder.map( "PostgresDBProvider@core" )
+              .to( "#moduleMapping#.models.cbq.PostgresDBProvider" );
     }
 
     function onUnload(){}

@@ -1,0 +1,109 @@
+/**
+ * BulkActionsService: enqueue a bulk operation across many
+ * tickets.
+ *
+ * The agent UI POSTs ticket ids + an action + per-action params
+ * to /agent/tickets/bulk. The handler calls enqueue() here, which
+ * builds a BulkTicketActionJob and dispatches it to cbq. The
+ * worker processes the batch; per-ticket failures are isolated.
+ *
+ * The dev `sync` cbq connection lets specs (and the worker-less
+ * app container) run a job inline by passing connection="sync"
+ * on dispatch. Production agents always hit the default queue.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    public array function listActions(){
+        return [
+            { key : "assign",        label : "Assign to agent",        paramKey : "assignedToAgentId" },
+            { key : "change_status", label : "Change status",          paramKey : "status" },
+            { key : "add_tag",       label : "Add tag",                paramKey : "tag" }
+        ];
+    }
+
+    /**
+     * Enqueue one bulk action across the provided ticket ids.
+     * Returns the cbq job dispatch result; callers usually just
+     * relay a "queued N tickets" message back to the user.
+     *
+     * Default connection is "sync" so the work runs inline in the
+     * request thread. The cbq DBProvider has Postgres compatibility
+     * issues today (unquoted camelCase identifiers in raw SQL, qb's
+     * varchar binding against bigint columns) that prevent the DB
+     * worker from draining the queue. Phase 6 will address those;
+     * until then, bulk operations execute synchronously so the
+     * agent's "Apply" click is reliable.
+     */
+    public any function enqueue(
+        required string action,
+        required array  ticketIds,
+        struct params         = {},
+        string actorAgentId   = "",
+        string connection     = "sync"
+    ){
+        validateAction( arguments.action );
+        if ( !arguments.ticketIds.len() ) {
+            throw( type : "BulkActionsService.NoTickets", message : "At least one ticket id is required." );
+        }
+
+        var job = wirebox.getInstance( "BulkTicketActionJob@tickets" );
+        // cbq serializes the `properties` struct end-to-end (see
+        // AbstractJob.getMemento / applyMemento), so the job's
+        // per-call data lives here, not in individual setters.
+        job.setProperties( {
+            action       : arguments.action,
+            ticketIds    : arguments.ticketIds,
+            params       : arguments.params,
+            actorAgentId : arguments.actorAgentId
+        } );
+
+        recordAudit( arguments.action, arguments.ticketIds.len(), arguments.actorAgentId );
+
+        return job.onConnection( arguments.connection ).dispatch();
+    }
+
+    // ---------- internals ----------
+
+    private void function validateAction( required string action ){
+        for ( var entry in listActions() ) {
+            if ( entry.key == arguments.action ) return;
+        }
+        throw(
+            type    : "BulkActionsService.UnknownAction",
+            message : "Unknown bulk action: " & arguments.action
+        );
+    }
+
+    private void function recordAudit(
+        required string action,
+        required numeric ticketCount,
+        required string actorAgentId
+    ){
+        try {
+            var args = {
+                eventType  : "ticket.bulk_action_queued",
+                entityType : "ticket",
+                entityId   : "",
+                metadata   : {
+                    "action"      : arguments.action,
+                    "ticketCount" : arguments.ticketCount
+                }
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "BulkActionsService audit failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

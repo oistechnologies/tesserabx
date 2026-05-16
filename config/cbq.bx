@@ -19,7 +19,12 @@ class {
         var isWorker = ( getSystemSetting( "WORKER_MODE", "false" ) == "true" );
 
         newConnection( "default" )
-            .setProvider( "DBProvider@cbq" )
+            // PostgresDBProvider is our patched cbq DBProvider — it
+            // quotes "reservedBy" in the orderByRaw fragment so the
+            // worker's reservation query matches the case-preserved
+            // column. The shipped cbq DBProvider folds to lowercase
+            // and the queue never drains.
+            .setProvider( "PostgresDBProvider@core" )
             .markAsDefault( true );
 
         newConnection( "sync" )

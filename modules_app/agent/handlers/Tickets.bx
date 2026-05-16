@@ -14,6 +14,8 @@ class {
 
     property name="ticketsService"        inject="TicketsService@tickets";
     property name="customFieldsService"   inject="CustomFieldsService@tickets";
+    property name="bulkActionsService"    inject="BulkActionsService@tickets";
+    property name="rbacService"           inject="RbacService@agent";
     property name="contactsService"       inject="ContactsService@contacts";
     property name="channelsService"       inject="ChannelsService@channels";
     property name="slaService"            inject="SlaService@sla";
@@ -44,6 +46,8 @@ class {
         prc.statuses      = ticketsService.listStatuses();
         prc.priorities    = ticketsService.listPriorities();
         prc.organizations = contactsService.listOrganizations();
+        prc.assignableAgents = rbacService.listAgentsWithRoles();
+        prc.bulkActions   = bulkActionsService.listActions();
         prc.tickets       = ticketsService.listTickets(
             status            : rc.status,
             priority          : rc.priority,
@@ -342,6 +346,46 @@ class {
         } );
         messagebox.info( len( rc.agentId ) ? "Ticket assigned." : "Ticket unassigned." );
         relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    function bulk( event, rc, prc ){
+        param rc.ticketIds = "";
+        param rc.action    = "";
+        var ids = listToArray( rc.ticketIds, "," );
+        // Drop any empty entries that survive a stray comma.
+        var cleanIds = [];
+        for ( var id in ids ) {
+            var t = trim( id );
+            if ( len( t ) ) cleanIds.append( t );
+        }
+        if ( !cleanIds.len() ) {
+            messagebox.error( "Select at least one ticket." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !len( rc.action ) ) {
+            messagebox.error( "Choose a bulk action." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+
+        var params = {
+            assignedToAgentId : rc.assignedToAgentId ?: "",
+            status            : rc.status ?: "",
+            tag               : rc.tag ?: ""
+        };
+        try {
+            bulkActionsService.enqueue(
+                action       : rc.action,
+                ticketIds    : cleanIds,
+                params       : params,
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( cleanIds.len() & " ticket(s) updated (" & rc.action & ")." );
+        } catch ( any e ) {
+            messagebox.error( "Bulk action failed: " & e.message );
+        }
+        relocate( uri = "/agent/tickets" );
     }
 
     function saveCustomFields( event, rc, prc ){

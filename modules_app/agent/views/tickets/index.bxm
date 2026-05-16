@@ -54,11 +54,64 @@
     </div>
 </form>
 
+<div id="bulkBar" class="card mb-2 d-none">
+    <div class="card-body py-2">
+        <form id="bulkForm" method="post" action="/agent/tickets/bulk" class="row g-2 align-items-end">
+            <input type="hidden" name="ticketIds" id="bulkTicketIds" value="">
+
+            <div class="col-auto pe-0">
+                <span class="badge text-bg-primary" id="bulkSelectionCount">0 selected</span>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label small mb-1" for="bulkAction">Action</label>
+                <select class="form-select form-select-sm" id="bulkAction" name="action">
+                    <option value="">-- choose --</option>
+                    <bx:loop array="#prc.bulkActions#" item="ba">
+                        <option value="#encodeForHTMLAttribute( ba.key )#">#encodeForHTML( ba.label )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+
+            <div class="col-md-4 bulk-param-assign d-none">
+                <label class="form-label small mb-1" for="assignedToAgentId">Assign to</label>
+                <select class="form-select form-select-sm" id="assignedToAgentId" name="assignedToAgentId">
+                    <option value="">-- unassign --</option>
+                    <bx:loop array="#prc.assignableAgents#" item="a">
+                        <bx:if a.isActive>
+                            <option value="#encodeForHTMLAttribute( a.id )#">#encodeForHTML( a.email )#</option>
+                        </bx:if>
+                    </bx:loop>
+                </select>
+            </div>
+
+            <div class="col-md-3 bulk-param-status d-none">
+                <label class="form-label small mb-1" for="bulkStatus">Status</label>
+                <select class="form-select form-select-sm" id="bulkStatus" name="status">
+                    <bx:loop array="#prc.statuses#" item="s">
+                        <option value="#encodeForHTMLAttribute( s )#">#encodeForHTML( s )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+
+            <div class="col-md-3 bulk-param-tag d-none">
+                <label class="form-label small mb-1" for="bulkTag">Tag name</label>
+                <input type="text" class="form-control form-control-sm" id="bulkTag" name="tag" placeholder="e.g. escalated">
+            </div>
+
+            <div class="col text-end">
+                <button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-lightning"></i> Apply</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-body p-0">
         <table class="table table-hover mb-0 align-middle">
             <thead>
                 <tr>
+                    <th style="width: 2.5rem;"><input type="checkbox" id="bulkSelectAll" class="form-check-input"></th>
                     <th>##</th>
                     <th>Subject</th>
                     <th>Organization</th>
@@ -70,11 +123,12 @@
             </thead>
             <tbody>
                 <bx:if !arrayLen( prc.tickets )>
-                    <tr><td colspan="7" class="text-center text-body-secondary py-4">No tickets match.</td></tr>
+                    <tr><td colspan="8" class="text-center text-body-secondary py-4">No tickets match.</td></tr>
                 </bx:if>
                 <bx:loop array="#prc.tickets#" item="t">
                     <bx:set sla = prc.slaByTicketId[ t.getId() ] ?: { status : "none" } >
                     <tr>
+                        <td><input type="checkbox" class="form-check-input bulk-row" value="#encodeForHTMLAttribute( t.getId() )#"></td>
                         <td class="text-body-secondary">##<a href="/agent/tickets/#encodeForURL( t.getId() )#" class="link-secondary">#t.getTicketNumber()#</a></td>
                         <td><a href="/agent/tickets/#encodeForURL( t.getId() )#">#encodeForHTML( t.getSubject() )#</a></td>
                         <td>
@@ -103,4 +157,47 @@
         </table>
     </div>
 </div>
+
+<script>
+    (function(){
+        var rows      = document.querySelectorAll('.bulk-row');
+        var selectAll = document.getElementById('bulkSelectAll');
+        var bar       = document.getElementById('bulkBar');
+        var count     = document.getElementById('bulkSelectionCount');
+        var idsInput  = document.getElementById('bulkTicketIds');
+        var actionSel = document.getElementById('bulkAction');
+        var paramAssign = document.querySelector('.bulk-param-assign');
+        var paramStatus = document.querySelector('.bulk-param-status');
+        var paramTag    = document.querySelector('.bulk-param-tag');
+
+        function syncSelection(){
+            var ids = [];
+            rows.forEach(function(r){ if ( r.checked ) ids.push(r.value); });
+            idsInput.value = ids.join(',');
+            count.textContent = ids.length + ' selected';
+            if ( ids.length ) bar.classList.remove('d-none');
+            else bar.classList.add('d-none');
+        }
+
+        function syncActionInputs(){
+            paramAssign.classList.add('d-none');
+            paramStatus.classList.add('d-none');
+            paramTag.classList.add('d-none');
+            switch ( actionSel.value ) {
+                case 'assign':        paramAssign.classList.remove('d-none'); break;
+                case 'change_status': paramStatus.classList.remove('d-none'); break;
+                case 'add_tag':       paramTag.classList.remove('d-none');    break;
+            }
+        }
+
+        rows.forEach(function(r){ r.addEventListener('change', syncSelection); });
+        if ( selectAll ) {
+            selectAll.addEventListener('change', function(){
+                rows.forEach(function(r){ r.checked = selectAll.checked; });
+                syncSelection();
+            });
+        }
+        if ( actionSel ) actionSel.addEventListener('change', syncActionInputs);
+    })();
+</script>
 </bx:output>
