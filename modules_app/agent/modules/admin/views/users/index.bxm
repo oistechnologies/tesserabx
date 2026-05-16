@@ -1,0 +1,97 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">Provider users</h2>
+    <form method="get" action="/agent/admin/users" class="form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" id="includeInactive" name="includeInactive" value="true" onchange="this.form.submit()"<bx:if ( prc.includeInactive ?: "" ) eq "true" or ( prc.includeInactive ?: false ) eq true> checked</bx:if>>
+        <label class="form-check-label small" for="includeInactive">Show deactivated</label>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Name</th>
+                    <th>Roles</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.agents )>
+                    <tr><td colspan="5" class="text-center text-body-secondary py-4">No agents to show.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.agents#" item="a">
+                    <tr>
+                        <td>
+                            <code>#encodeForHTML( a.email )#</code>
+                            <bx:if a.id eq prc.currentAgentId><span class="badge text-bg-info ms-1">you</span></bx:if>
+                        </td>
+                        <td>#encodeForHTML( trim( a.firstName & " " & a.lastName ) )#</td>
+                        <td>
+                            <bx:loop array="#a.roles#" item="rk">
+                                <form method="post" action="/agent/admin/users/revoke" class="d-inline" onsubmit="return confirm('Revoke #encodeForHTMLAttribute( rk )# from #encodeForHTMLAttribute( a.email )#?');">
+                                    <input type="hidden" name="agentId" value="#encodeForHTMLAttribute( a.id )#">
+                                    <input type="hidden" name="roleKey" value="#encodeForHTMLAttribute( rk )#">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary me-1 mb-1" title="Click to revoke">
+                                        #encodeForHTML( rk )# <i class="bi bi-x"></i>
+                                    </button>
+                                </form>
+                            </bx:loop>
+                            <bx:if !arrayLen( a.roles )>
+                                <span class="text-body-secondary small">no roles</span>
+                            </bx:if>
+                        </td>
+                        <td>
+                            <bx:if a.isActive>
+                                <span class="badge text-bg-success">Active</span>
+                            <bx:else>
+                                <span class="badge text-bg-light text-black">Deactivated</span>
+                            </bx:if>
+                        </td>
+                        <td class="text-end">
+                            <form method="post" action="/agent/admin/users/grant" class="d-inline">
+                                <input type="hidden" name="agentId" value="#encodeForHTMLAttribute( a.id )#">
+                                <div class="input-group input-group-sm d-inline-flex" style="width: auto;">
+                                    <select name="roleKey" class="form-select form-select-sm">
+                                        <bx:loop array="#prc.roleCatalog#" item="r">
+                                            <option value="#encodeForHTMLAttribute( r.key )#"<bx:if arrayFindNoCase( a.roles, r.key )> disabled</bx:if>>#encodeForHTML( r.label )#</option>
+                                        </bx:loop>
+                                    </select>
+                                    <button class="btn btn-outline-primary" type="submit">Grant</button>
+                                </div>
+                            </form>
+                            <bx:if a.isActive and a.id neq prc.currentAgentId>
+                                <form method="post" action="/agent/admin/users/deactivate" class="d-inline ms-1" onsubmit="return confirm('Deactivate this agent? They will not be able to log in.');">
+                                    <input type="hidden" name="agentId" value="#encodeForHTMLAttribute( a.id )#">
+                                    <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
+                                </form>
+                            </bx:if>
+                            <bx:if !a.isActive>
+                                <form method="post" action="/agent/admin/users/activate" class="d-inline ms-1">
+                                    <input type="hidden" name="agentId" value="#encodeForHTMLAttribute( a.id )#">
+                                    <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
+                                </form>
+                            </bx:if>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-body">
+        <h3 class="h6">Available roles</h3>
+        <dl class="row small mb-0">
+            <bx:loop array="#prc.roleCatalog#" item="r">
+                <dt class="col-sm-3">#encodeForHTML( r.label )# <code class="text-body-secondary">#encodeForHTML( r.key )#</code></dt>
+                <dd class="col-sm-9">#encodeForHTML( r.description )#</dd>
+            </bx:loop>
+        </dl>
+    </div>
+</div>
+</bx:output>

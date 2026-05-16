@@ -42,12 +42,33 @@ class
 
     /**
      * Roles for cbsecurity firewall rule matching. Every Agent has
-     * "agent". Admin-flagged agents also get "agent-admin" which
-     * gates /agent/admin/*.
+     * "agent". Additional role keys live in agent_roles, managed
+     * through RbacService. The is_admin column is the legacy fallback
+     * (used by seeders and a handful of older specs); if no
+     * agent_roles row exists for the agent and is_admin is true,
+     * the agent still gets "agent-admin" so /agent/admin remains
+     * reachable during the RBAC backfill.
      */
     public array function getRoles(){
         var roles = [ "agent" ];
-        if ( getIsAdmin() ) {
+        var theId = getId();
+        if ( !isNull( theId ) && len( theId ) ) {
+            try {
+                var rows = queryExecute(
+                    "SELECT role_key FROM agent_roles WHERE agent_id = :aid",
+                    { aid : theId }
+                );
+                for ( var i = 1; i <= rows.recordCount; i++ ) {
+                    var key = rows.role_key[ i ];
+                    if ( !arrayFindNoCase( roles, key ) ) roles.append( key );
+                }
+            } catch ( any e ) {
+                // Schema not yet migrated (very early app boot, test
+                // bootstrap, etc.); fall through to the is_admin
+                // fallback so the firewall does not lock us out.
+            }
+        }
+        if ( getIsAdmin() && !arrayFindNoCase( roles, "agent-admin" ) ) {
             roles.append( "agent-admin" );
         }
         return roles;

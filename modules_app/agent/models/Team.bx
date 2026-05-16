@@ -1,0 +1,20 @@
+/**
+ * Team: a named group of agents.
+ *
+ * Membership lives in team_members. TeamsService is the only place
+ * outside this class that writes here or to team_members.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="teams"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="description";
+    property name="isActive"   column="is_active";
+    property name="createdAt"  column="created_at";
+    property name="updatedAt"  column="updated_at";
+
+}

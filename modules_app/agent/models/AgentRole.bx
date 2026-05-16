@@ -1,0 +1,19 @@
+/**
+ * AgentRole: one (agent, role_key) assignment.
+ *
+ * Parallels Contact's role rows. RbacService is the only place
+ * outside the entity that writes here.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="agent_roles"
+    accessors="true"
+{
+
+    property name="id";
+    property name="agentId"           column="agent_id";
+    property name="roleKey"           column="role_key";
+    property name="grantedByAgentId"  column="granted_by_agent_id";
+    property name="grantedAt"         column="granted_at";
+
+}

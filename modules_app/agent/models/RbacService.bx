@@ -1,0 +1,264 @@
+/**
+ * RbacService: grant, revoke, and list the role assignments for
+ * provider-side Agent accounts.
+ *
+ * The role catalog is held here in code (not in a roles table)
+ * because the set is small, slow-moving, and tightly coupled to
+ * cbsecurity rule strings. Adding a new role means adding it to
+ * `roleCatalog()` and wiring the relevant cbsecurity rule.
+ *
+ * Writes go through grantRole / revokeRole only. Reads are by
+ * agent (listRoles) or batched across all agents (listAgentsWithRoles)
+ * for the admin user-management UI.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    /**
+     * The full set of role keys provider agents can hold, with a
+     * human label and description for the admin UI. Order is the
+     * display order in the picker.
+     */
+    public array function roleCatalog(){
+        return [
+            {
+                key         : "agent-admin",
+                label       : "Administrator",
+                description : "Full access to /agent/admin, including RBAC, blacklist, knowledge-base authoring, and scheduled exports."
+            },
+            {
+                key         : "agent-supervisor",
+                label       : "Supervisor",
+                description : "Reserved for future use: oversight across teams without full admin authority."
+            }
+        ];
+    }
+
+    /**
+     * Read every role_key assigned to one agent. Returns an array
+     * of strings, e.g. [ "agent-admin" ]. The Agent entity calls
+     * this through its getRoles() so the firewall sees an
+     * up-to-date set on every request.
+     */
+    public array function listRoles( required string agentId ){
+        if ( !len( arguments.agentId ) ) return [];
+        var rows = queryExecute(
+            "SELECT role_key FROM agent_roles WHERE agent_id = :aid ORDER BY role_key",
+            { aid : arguments.agentId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.role_key[ i ] );
+        return out;
+    }
+
+    /**
+     * Grant role_key to agentId. Idempotent (ON CONFLICT DO NOTHING).
+     * actorAgentId is recorded for audit and may be empty for system
+     * grants. Returns true if a new row was inserted, false if the
+     * grant already existed.
+     */
+    public boolean function grantRole(
+        required string agentId,
+        required string roleKey,
+        string actorAgentId = ""
+    ){
+        validateRoleKey( arguments.roleKey );
+        var existing = queryExecute(
+            "SELECT id FROM agent_roles WHERE agent_id = :aid AND role_key = :rk",
+            { aid : arguments.agentId, rk : arguments.roleKey }
+        );
+        if ( existing.recordCount ) return false;
+
+        queryExecute(
+            "INSERT INTO agent_roles ( id, agent_id, role_key, granted_by_agent_id, granted_at )
+             VALUES ( :id, :aid, :rk, :gby, NOW() )",
+            {
+                id  : createUUID(),
+                aid : arguments.agentId,
+                rk  : arguments.roleKey,
+                gby : len( arguments.actorAgentId ) ? arguments.actorAgentId : javaCast( "null", "" )
+            }
+        );
+
+        // Mirror to is_admin so legacy specs and the cbauth login
+        // path that still references that column keep working. The
+        // column is the cached truth for one specific role; the
+        // agent_roles table is the authority for the full set.
+        if ( arguments.roleKey == "agent-admin" ) {
+            queryExecute(
+                "UPDATE agents SET is_admin = TRUE, updated_at = NOW() WHERE id = :aid",
+                { aid : arguments.agentId }
+            );
+        }
+
+        recordAudit( "agent.role_granted", arguments.agentId, arguments.roleKey, arguments.actorAgentId );
+        return true;
+    }
+
+    /**
+     * Revoke role_key from agentId. Idempotent. The admin UI
+     * prevents revoking your own last agent-admin role; that guard
+     * lives at the handler level so the service stays useful for
+     * the seeder and admin tools.
+     */
+    public boolean function revokeRole(
+        required string agentId,
+        required string roleKey,
+        string actorAgentId = ""
+    ){
+        var existing = queryExecute(
+            "SELECT id FROM agent_roles WHERE agent_id = :aid AND role_key = :rk",
+            { aid : arguments.agentId, rk : arguments.roleKey }
+        );
+        if ( !existing.recordCount ) return false;
+        queryExecute(
+            "DELETE FROM agent_roles WHERE agent_id = :aid AND role_key = :rk",
+            { aid : arguments.agentId, rk : arguments.roleKey }
+        );
+
+        if ( arguments.roleKey == "agent-admin" ) {
+            // Only clear is_admin when no other agent-admin row
+            // remains for this agent (defensive; the unique
+            // constraint should make this redundant).
+            var rest = queryExecute(
+                "SELECT COUNT(*) AS n FROM agent_roles WHERE agent_id = :aid AND role_key = 'agent-admin'",
+                { aid : arguments.agentId }
+            );
+            if ( val( rest.n[ 1 ] ) == 0 ) {
+                queryExecute(
+                    "UPDATE agents SET is_admin = FALSE, updated_at = NOW() WHERE id = :aid",
+                    { aid : arguments.agentId }
+                );
+            }
+        }
+
+        recordAudit( "agent.role_revoked", arguments.agentId, arguments.roleKey, arguments.actorAgentId );
+        return true;
+    }
+
+    /**
+     * One row per agent, with their roles collapsed into a string
+     * array. Used by the /agent/admin/users index. Filters out
+     * deactivated accounts unless `includeInactive` is true so the
+     * default view stays uncluttered.
+     */
+    public array function listAgentsWithRoles( boolean includeInactive = false ){
+        var sql = "
+            SELECT a.id,
+                   a.email,
+                   a.first_name,
+                   a.last_name,
+                   a.is_active,
+                   a.is_admin,
+                   COALESCE(
+                       ARRAY_REMOVE( ARRAY_AGG( DISTINCT ar.role_key ORDER BY ar.role_key ), NULL ),
+                       ARRAY[]::TEXT[]
+                   ) AS role_keys
+            FROM   agents a
+            LEFT JOIN agent_roles ar ON ar.agent_id = a.id
+        ";
+        if ( !arguments.includeInactive ) sql &= " WHERE a.is_active = TRUE ";
+        sql &= " GROUP BY a.id, a.email, a.first_name, a.last_name, a.is_active, a.is_admin
+                 ORDER BY a.email ";
+
+        var rows = queryExecute( sql );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var keys = rows.role_keys[ i ];
+            // Postgres ARRAY arrives as a Java array-ish list. Normalize
+            // into a plain CFML array of strings.
+            var keyList = [];
+            if ( !isNull( keys ) ) {
+                if ( isArray( keys ) ) {
+                    for ( var k in keys ) if ( !isNull( k ) && len( k ) ) keyList.append( toString( k ) );
+                } else if ( len( toString( keys ) ) ) {
+                    // Some JDBC drivers serialize as "{a,b}"; strip and split.
+                    var s = toString( keys );
+                    if ( left( s, 1 ) == "{" ) s = mid( s, 2, len( s ) - 2 );
+                    if ( len( s ) ) {
+                        for ( var k in listToArray( s, "," ) ) if ( len( trim( k ) ) ) keyList.append( trim( k ) );
+                    }
+                }
+            }
+            out.append( {
+                id        : rows.id[ i ],
+                email     : rows.email[ i ],
+                firstName : rows.first_name[ i ] ?: "",
+                lastName  : rows.last_name[ i ]  ?: "",
+                isActive  : !!rows.is_active[ i ],
+                isAdmin   : !!rows.is_admin[ i ],
+                roles     : keyList
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Set an agent's active flag. Locked accounts cannot log in but
+     * keep their history. Mirrors the soft-delete pattern used on
+     * Contact accounts.
+     */
+    public void function setAgentActive(
+        required string agentId,
+        required boolean active,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "UPDATE agents SET is_active = cast( :a as boolean ), updated_at = NOW() WHERE id = :aid",
+            {
+                aid : arguments.agentId,
+                a   : ( arguments.active ? "true" : "false" )
+            }
+        );
+        recordAudit(
+            arguments.active ? "agent.activated" : "agent.deactivated",
+            arguments.agentId,
+            "",
+            arguments.actorAgentId
+        );
+    }
+
+    // ---------- internals ----------
+
+    private void function validateRoleKey( required string roleKey ){
+        for ( var entry in roleCatalog() ) {
+            if ( entry.key == arguments.roleKey ) return;
+        }
+        throw(
+            type    : "RbacService.UnknownRole",
+            message : "Unknown agent role: " & arguments.roleKey
+        );
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string targetAgentId,
+        required string roleKey,
+        required string actorAgentId
+    ){
+        try {
+            var meta = {};
+            if ( len( arguments.roleKey ) ) meta.roleKey = arguments.roleKey;
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "agent",
+                entityId   : arguments.targetAgentId,
+                metadata   : meta
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "RbacService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

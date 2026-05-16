@@ -55,11 +55,23 @@ class {
     function onLoad(){
         binder.map( "Agent@agent" )
               .to( "#moduleMapping#.models.Agent" );
+        binder.map( "AgentRole@agent" )
+              .to( "#moduleMapping#.models.AgentRole" );
+        binder.map( "Team@agent" )
+              .to( "#moduleMapping#.models.Team" );
+        binder.map( "TeamMember@agent" )
+              .to( "#moduleMapping#.models.TeamMember" );
         binder.map( "AgentAuthService@agent" )
               .to( "#moduleMapping#.models.AgentAuthService" )
               .asSingleton();
         binder.map( "AgentSecurityRules@agent" )
               .to( "#moduleMapping#.models.AgentSecurityRules" )
+              .asSingleton();
+        binder.map( "RbacService@agent" )
+              .to( "#moduleMapping#.models.RbacService" )
+              .asSingleton();
+        binder.map( "TeamsService@agent" )
+              .to( "#moduleMapping#.models.TeamsService" )
               .asSingleton();
     }
 

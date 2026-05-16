@@ -1,0 +1,118 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">
+        <bx:if prc.isNew>New team
+        <bx:else>#encodeForHTML( prc.team.name )#
+            <bx:if !prc.team.isActive><span class="badge text-bg-light text-black ms-2">inactive</span></bx:if>
+        </bx:if>
+    </h2>
+    <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/teams"><i class="bi bi-arrow-left"></i> Back to teams</a>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-lg-5">
+        <div class="card">
+            <div class="card-header"><strong>Details</strong></div>
+            <div class="card-body">
+                <form method="post" action="<bx:if prc.isNew>/agent/admin/teams/new<bx:else>/agent/admin/teams/#encodeForHTMLAttribute( prc.team.id )#</bx:if>">
+                    <div class="mb-2">
+                        <label class="form-label" for="name">Name</label>
+                        <input type="text" id="name" name="name" class="form-control" required value="#encodeForHTMLAttribute( prc.team.name )#">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="description">Description</label>
+                        <textarea id="description" name="description" class="form-control" rows="3">#encodeForHTML( prc.team.description )#</textarea>
+                    </div>
+                    <button class="btn btn-primary" type="submit">
+                        <bx:if prc.isNew>Create team<bx:else>Save changes</bx:if>
+                    </button>
+                </form>
+
+                <bx:if !prc.isNew>
+                    <hr>
+                    <bx:if prc.team.isActive>
+                        <form method="post" action="/agent/admin/teams/#encodeForHTMLAttribute( prc.team.id )#/deactivate" onsubmit="return confirm('Deactivate this team? Members stay but the team is hidden from new routing.');">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate team</button>
+                        </form>
+                    <bx:else>
+                        <form method="post" action="/agent/admin/teams/#encodeForHTMLAttribute( prc.team.id )#/activate">
+                            <button class="btn btn-sm btn-outline-success" type="submit">Reactivate team</button>
+                        </form>
+                    </bx:if>
+                </bx:if>
+            </div>
+        </div>
+    </div>
+
+    <bx:if !prc.isNew>
+        <div class="col-12 col-lg-7">
+            <div class="card">
+                <div class="card-header"><strong>Members</strong></div>
+                <div class="card-body">
+                    <form method="post" action="/agent/admin/teams/#encodeForHTMLAttribute( prc.team.id )#/members" class="row g-2 mb-3">
+                        <div class="col-sm-6">
+                            <select name="agentId" class="form-select form-select-sm" required>
+                                <option value="">-- pick an agent --</option>
+                                <bx:loop array="#prc.agents#" item="a">
+                                    <bx:set alreadyMember = false>
+                                    <bx:loop array="#prc.members#" item="m">
+                                        <bx:if m.agentId eq a.id><bx:set alreadyMember = true></bx:if>
+                                    </bx:loop>
+                                    <bx:if !alreadyMember and a.isActive>
+                                        <option value="#encodeForHTMLAttribute( a.id )#">#encodeForHTML( a.email )#</option>
+                                    </bx:if>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="col-sm-3">
+                            <select name="roleInTeam" class="form-select form-select-sm">
+                                <option value="member">Member</option>
+                                <option value="lead">Lead</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-3 text-end">
+                            <button class="btn btn-sm btn-primary w-100" type="submit">Add</button>
+                        </div>
+                    </form>
+
+                    <table class="table table-sm mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Agent</th>
+                                <th>Role in team</th>
+                                <th class="text-end"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <bx:if !arrayLen( prc.members )>
+                                <tr><td colspan="3" class="text-center text-body-secondary py-3">No members yet.</td></tr>
+                            </bx:if>
+                            <bx:loop array="#prc.members#" item="m">
+                                <tr>
+                                    <td>
+                                        <code>#encodeForHTML( m.email )#</code>
+                                        <bx:if !m.isActive><span class="badge text-bg-light text-black ms-1">deactivated</span></bx:if>
+                                    </td>
+                                    <td>
+                                        <bx:if m.roleInTeam eq "lead">
+                                            <span class="badge text-bg-primary">Lead</span>
+                                        <bx:else>
+                                            <span class="badge text-bg-secondary">Member</span>
+                                        </bx:if>
+                                    </td>
+                                    <td class="text-end">
+                                        <form method="post" action="/agent/admin/teams/#encodeForHTMLAttribute( prc.team.id )#/members/remove" class="d-inline" onsubmit="return confirm('Remove this member?');">
+                                            <input type="hidden" name="agentId" value="#encodeForHTMLAttribute( m.agentId )#">
+                                            <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </bx:if>
+</div>
+</bx:output>

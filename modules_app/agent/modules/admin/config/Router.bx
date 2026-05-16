@@ -40,6 +40,31 @@ class {
         } );
         route( "kb" ).to( "Kb.index" );
 
+        // Provider-user RBAC. Most-specific writes first; the index
+        // is the only GET on /users.
+        route( "users/grant" ).withVerbs( "POST" ).to( "Users.grant" );
+        route( "users/revoke" ).withVerbs( "POST" ).to( "Users.revoke" );
+        route( "users/activate" ).withVerbs( "POST" ).to( "Users.activate" );
+        route( "users/deactivate" ).withVerbs( "POST" ).to( "Users.deactivate" );
+        route( "users" ).to( "Users.index" );
+
+        // Teams + membership. Most-specific patterns first so
+        // /teams/new and /teams/:id/members do not collide with
+        // /teams/:id.
+        route( "teams/new" ).withHandler( "Teams" ).toAction( {
+            "GET"  : "newForm",
+            "POST" : "create"
+        } );
+        route( "teams/:id/members/remove" ).withVerbs( "POST" ).to( "Teams.removeMember" );
+        route( "teams/:id/members" ).withVerbs( "POST" ).to( "Teams.addMember" );
+        route( "teams/:id/activate" ).withVerbs( "POST" ).to( "Teams.activate" );
+        route( "teams/:id/deactivate" ).withVerbs( "POST" ).to( "Teams.deactivate" );
+        route( "teams/:id" ).withHandler( "Teams" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "teams" ).to( "Teams.index" );
+
         // Scheduled report exports. Most-specific routes first so
         // /exports/new and /exports/:id/* do not collide with /:id.
         route( "exports/new" ).withHandler( "Exports" ).toAction( {

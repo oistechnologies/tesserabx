@@ -1,0 +1,114 @@
+/**
+ * TeamsServiceSpec: CRUD + membership coverage.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "TeamsService@agent" );
+    }
+
+    function run(){
+        describe( "TeamsService", function(){
+
+            it( "createTeam inserts and findTeam reads back", function(){
+                var teamId = variables.svc.createTeam( name : uniqueName( "spec-team" ), description : "spec" );
+                var team   = variables.svc.findTeam( teamId );
+                expect( team ).notToBeNull();
+                expect( team.name ).toInclude( "spec-team" );
+                expect( team.isActive ).toBeTrue();
+                cleanupTeam( teamId );
+            } );
+
+            it( "createTeam rejects an empty name", function(){
+                expect( function(){ variables.svc.createTeam( name : "" ); } ).toThrow();
+            } );
+
+            it( "updateTeam mutates only the supplied fields", function(){
+                var teamId = variables.svc.createTeam( name : uniqueName( "spec-team" ), description : "before" );
+                variables.svc.updateTeam( id : teamId, description : "after" );
+                expect( variables.svc.findTeam( teamId ).description ).toBe( "after" );
+                cleanupTeam( teamId );
+            } );
+
+            it( "setTeamActive flips and surfaces in listTeams", function(){
+                var teamId = variables.svc.createTeam( name : uniqueName( "spec-team" ) );
+                variables.svc.setTeamActive( id : teamId, active : false );
+                expect( variables.svc.findTeam( teamId ).isActive ).toBeFalse();
+                cleanupTeam( teamId );
+            } );
+
+            it( "addMember is idempotent and updates role_in_team on re-add", function(){
+                var teamId  = variables.svc.createTeam( name : uniqueName( "spec-team" ) );
+                var agentId = seedAgent();
+                expect( variables.svc.addMember( teamId, agentId, "member" ) ).toBeTrue();
+                expect( variables.svc.addMember( teamId, agentId, "lead" ) ).toBeFalse();
+                var members = variables.svc.listMembers( teamId );
+                expect( members.len() ).toBe( 1 );
+                expect( members[ 1 ].roleInTeam ).toBe( "lead" );
+                cleanupTeam( teamId );
+                cleanupAgent( agentId );
+            } );
+
+            it( "removeMember drops the row and returns false when no row existed", function(){
+                var teamId  = variables.svc.createTeam( name : uniqueName( "spec-team" ) );
+                var agentId = seedAgent();
+                variables.svc.addMember( teamId, agentId );
+                expect( variables.svc.removeMember( teamId, agentId ) ).toBeTrue();
+                expect( variables.svc.removeMember( teamId, agentId ) ).toBeFalse();
+                expect( variables.svc.listMembers( teamId ).len() ).toBe( 0 );
+                cleanupTeam( teamId );
+                cleanupAgent( agentId );
+            } );
+
+            it( "listTeams reports the current member count", function(){
+                var teamId   = variables.svc.createTeam( name : uniqueName( "spec-team" ) );
+                var agentA   = seedAgent();
+                var agentB   = seedAgent();
+                variables.svc.addMember( teamId, agentA );
+                variables.svc.addMember( teamId, agentB );
+                var teams = variables.svc.listTeams();
+                var hit;
+                for ( var t in teams ) if ( t.id == teamId ) hit = t;
+                expect( hit ).notToBeNull();
+                expect( hit.memberCount ).toBe( 2 );
+                cleanupTeam( teamId );
+                cleanupAgent( agentA );
+                cleanupAgent( agentB );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function uniqueName( required string prefix ){
+        return arguments.prefix & "-" & createUUID();
+    }
+
+    private string function seedAgent(){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, 'x', FALSE, TRUE )",
+            {
+                id    : id,
+                email : "teams-spec-" & id & "@example.com"
+            }
+        );
+        return id;
+    }
+
+    private void function cleanupTeam( required string teamId ){
+        queryExecute( "DELETE FROM team_members WHERE team_id = :id", { id : arguments.teamId } );
+        queryExecute( "DELETE FROM teams WHERE id = :id", { id : arguments.teamId } );
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM team_members WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.agentId } );
+    }
+
+}

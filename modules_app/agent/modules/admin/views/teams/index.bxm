@@ -1,0 +1,44 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">Teams</h2>
+    <a class="btn btn-primary btn-sm" href="/agent/admin/teams/new"><i class="bi bi-plus-lg"></i> New team</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th class="text-center">Members</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.teams )>
+                    <tr><td colspan="5" class="text-center text-body-secondary py-4">No teams yet. Create one to start grouping agents.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.teams#" item="t">
+                    <tr>
+                        <td><strong>#encodeForHTML( t.name )#</strong></td>
+                        <td><small class="text-body-secondary">#encodeForHTML( t.description )#</small></td>
+                        <td class="text-center">#t.memberCount#</td>
+                        <td>
+                            <bx:if t.isActive>
+                                <span class="badge text-bg-success">Active</span>
+                            <bx:else>
+                                <span class="badge text-bg-light text-black">Inactive</span>
+                            </bx:if>
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="/agent/admin/teams/#encodeForHTMLAttribute( t.id )#">Manage</a>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

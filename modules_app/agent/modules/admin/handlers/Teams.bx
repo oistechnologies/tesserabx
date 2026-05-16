@@ -1,0 +1,135 @@
+/**
+ * /agent/admin/teams handler.
+ *
+ * CRUD over Team plus membership management. Admin-only via the
+ * cbSecurity rule on /agent/admin/*. All writes go through
+ * TeamsService.
+ */
+class {
+
+    property name="teamsService" inject="TeamsService@agent";
+    property name="rbacService"  inject="RbacService@agent";
+    property name="messagebox"   inject="messagebox@cbmessagebox";
+    property name="auth"         inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Teams";
+        prc.teams     = teamsService.listTeams();
+        event.setView( "teams/index" );
+    }
+
+    function newForm( event, rc, prc ){
+        prc.pageTitle = "New team";
+        prc.team      = { id : "", name : "", description : "", isActive : true };
+        prc.isNew     = true;
+        prc.members   = [];
+        prc.agents    = [];
+        event.setView( "teams/edit" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.name        = "";
+        param rc.description = "";
+        try {
+            var id = teamsService.createTeam(
+                name         : rc.name,
+                description  : rc.description,
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Team created." );
+            relocate( uri = "/agent/admin/teams/" & id );
+        } catch ( any e ) {
+            messagebox.error( "Could not create team: " & e.message );
+            relocate( uri = "/agent/admin/teams/new" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        param rc.id = "";
+        var team = teamsService.findTeam( rc.id );
+        if ( isNull( team ) ) {
+            messagebox.error( "Team not found." );
+            relocate( uri = "/agent/admin/teams" );
+            return;
+        }
+        prc.pageTitle = "Edit team";
+        prc.team      = team;
+        prc.isNew     = false;
+        prc.members   = teamsService.listMembers( rc.id );
+        prc.agents    = rbacService.listAgentsWithRoles();
+        event.setView( "teams/edit" );
+    }
+
+    function update( event, rc, prc ){
+        param rc.id          = "";
+        param rc.name        = "";
+        param rc.description = "";
+        teamsService.updateTeam(
+            id           : rc.id,
+            name         : rc.name,
+            description  : rc.description,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Team updated." );
+        relocate( uri = "/agent/admin/teams/" & rc.id );
+    }
+
+    function activate( event, rc, prc ){
+        param rc.id = "";
+        teamsService.setTeamActive( id : rc.id, active : true, actorAgentId : currentAgentId() );
+        messagebox.info( "Team activated." );
+        relocate( uri = "/agent/admin/teams/" & rc.id );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.id = "";
+        teamsService.setTeamActive( id : rc.id, active : false, actorAgentId : currentAgentId() );
+        messagebox.info( "Team deactivated." );
+        relocate( uri = "/agent/admin/teams/" & rc.id );
+    }
+
+    function addMember( event, rc, prc ){
+        param rc.id         = "";
+        param rc.agentId    = "";
+        param rc.roleInTeam = "member";
+        if ( !len( rc.agentId ) ) {
+            messagebox.error( "Pick an agent to add." );
+            relocate( uri = "/agent/admin/teams/" & rc.id );
+            return;
+        }
+        teamsService.addMember(
+            teamId       : rc.id,
+            agentId      : rc.agentId,
+            roleInTeam   : rc.roleInTeam,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Member added." );
+        relocate( uri = "/agent/admin/teams/" & rc.id );
+    }
+
+    function removeMember( event, rc, prc ){
+        param rc.id      = "";
+        param rc.agentId = "";
+        teamsService.removeMember(
+            teamId       : rc.id,
+            agentId      : rc.agentId,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Member removed." );
+        relocate( uri = "/agent/admin/teams/" & rc.id );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

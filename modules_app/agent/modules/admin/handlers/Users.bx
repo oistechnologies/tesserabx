@@ -1,0 +1,109 @@
+/**
+ * /agent/admin/users handler.
+ *
+ * Lists every Agent account, surfaces their role assignments, and
+ * lets admins grant or revoke roles and activate or deactivate
+ * accounts. Admin-only via the cbSecurity rule on /agent/admin/*.
+ *
+ * All writes route through RbacService; the handler never touches
+ * agent_roles or the agents table directly.
+ */
+class {
+
+    property name="rbacService" inject="RbacService@agent";
+    property name="messagebox"  inject="messagebox@cbmessagebox";
+    property name="auth"        inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.includeInactive = false;
+        prc.pageTitle       = "Users";
+        prc.agents          = rbacService.listAgentsWithRoles(
+            includeInactive = ( rc.includeInactive == "true" || rc.includeInactive == "1" || rc.includeInactive == true )
+        );
+        prc.roleCatalog     = rbacService.roleCatalog();
+        prc.includeInactive = rc.includeInactive;
+        prc.currentAgentId  = currentAgentId();
+        event.setView( "users/index" );
+    }
+
+    function grant( event, rc, prc ){
+        param rc.agentId = "";
+        param rc.roleKey = "";
+        try {
+            rbacService.grantRole(
+                agentId      : rc.agentId,
+                roleKey      : rc.roleKey,
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Role granted." );
+        } catch ( any e ) {
+            messagebox.error( "Could not grant role: " & e.message );
+        }
+        relocate( uri = "/agent/admin/users" );
+    }
+
+    function revoke( event, rc, prc ){
+        param rc.agentId = "";
+        param rc.roleKey = "";
+        // Last-admin safety: don't let the signed-in agent revoke
+        // their own agent-admin role. That would 403 themselves on
+        // the very page that just succeeded.
+        if ( rc.roleKey == "agent-admin" && rc.agentId == currentAgentId() ) {
+            messagebox.error( "You cannot revoke your own administrator role." );
+            relocate( uri = "/agent/admin/users" );
+            return;
+        }
+        try {
+            rbacService.revokeRole(
+                agentId      : rc.agentId,
+                roleKey      : rc.roleKey,
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Role revoked." );
+        } catch ( any e ) {
+            messagebox.error( "Could not revoke role: " & e.message );
+        }
+        relocate( uri = "/agent/admin/users" );
+    }
+
+    function activate( event, rc, prc ){
+        param rc.agentId = "";
+        rbacService.setAgentActive(
+            agentId      : rc.agentId,
+            active       : true,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "User activated." );
+        relocate( uri = "/agent/admin/users?includeInactive=true" );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.agentId = "";
+        if ( rc.agentId == currentAgentId() ) {
+            messagebox.error( "You cannot deactivate your own account." );
+            relocate( uri = "/agent/admin/users" );
+            return;
+        }
+        rbacService.setAgentActive(
+            agentId      : rc.agentId,
+            active       : false,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "User deactivated." );
+        relocate( uri = "/agent/admin/users" );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

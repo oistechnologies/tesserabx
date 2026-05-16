@@ -1,0 +1,108 @@
+/**
+ * RbacServiceSpec: grant, revoke, listAgentsWithRoles, plus the
+ * is_admin mirror that keeps legacy login paths intact.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "RbacService@agent" );
+    }
+
+    function run(){
+        describe( "RbacService", function(){
+
+            it( "lists the role catalog with the documented entries", function(){
+                var catalog = variables.svc.roleCatalog();
+                expect( catalog ).toBeArray();
+                expect( catalog.len() ).toBeGTE( 1 );
+                var keys = [];
+                for ( var entry in catalog ) keys.append( entry.key );
+                expect( keys ).toInclude( "agent-admin" );
+            } );
+
+            it( "grantRole adds the row and is idempotent", function(){
+                var agentId = seedAgent();
+                expect( variables.svc.grantRole( agentId, "agent-admin" ) ).toBeTrue();
+                expect( variables.svc.grantRole( agentId, "agent-admin" ) ).toBeFalse();
+                expect( variables.svc.listRoles( agentId ) ).toInclude( "agent-admin" );
+                cleanupAgent( agentId );
+            } );
+
+            it( "grantRole mirrors agent-admin onto the is_admin column", function(){
+                var agentId = seedAgent( asAdmin = false );
+                variables.svc.grantRole( agentId, "agent-admin" );
+                var rows = queryExecute( "SELECT is_admin FROM agents WHERE id = :id", { id : agentId } );
+                expect( !!rows.is_admin[ 1 ] ).toBeTrue();
+                cleanupAgent( agentId );
+            } );
+
+            it( "revokeRole removes the row and clears the mirrored is_admin column", function(){
+                var agentId = seedAgent( asAdmin = true );
+                variables.svc.grantRole( agentId, "agent-admin" );
+                expect( variables.svc.revokeRole( agentId, "agent-admin" ) ).toBeTrue();
+                expect( variables.svc.listRoles( agentId ) ).notToInclude( "agent-admin" );
+                var rows = queryExecute( "SELECT is_admin FROM agents WHERE id = :id", { id : agentId } );
+                expect( !!rows.is_admin[ 1 ] ).toBeFalse();
+                cleanupAgent( agentId );
+            } );
+
+            it( "rejects an unknown role key", function(){
+                var agentId = seedAgent();
+                expect( function(){
+                    variables.svc.grantRole( agentId, "totally-made-up-role" );
+                } ).toThrow();
+                cleanupAgent( agentId );
+            } );
+
+            it( "listAgentsWithRoles returns a row per agent with the role keys collapsed", function(){
+                var agentId = seedAgent();
+                variables.svc.grantRole( agentId, "agent-admin" );
+                var rows = variables.svc.listAgentsWithRoles();
+                var found = false;
+                for ( var r in rows ) {
+                    if ( r.id == agentId ) {
+                        found = true;
+                        expect( r.roles ).toInclude( "agent-admin" );
+                        expect( r.isActive ).toBeTrue();
+                    }
+                }
+                expect( found ).toBeTrue();
+                cleanupAgent( agentId );
+            } );
+
+            it( "setAgentActive flips the is_active flag", function(){
+                var agentId = seedAgent();
+                variables.svc.setAgentActive( agentId, false );
+                var rows = queryExecute( "SELECT is_active FROM agents WHERE id = :id", { id : agentId } );
+                expect( !!rows.is_active[ 1 ] ).toBeFalse();
+                variables.svc.setAgentActive( agentId, true );
+                cleanupAgent( agentId );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function seedAgent( boolean asAdmin = false ){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, 'x', cast( :ad as boolean ), TRUE )",
+            {
+                id    : id,
+                email : "rbac-spec-" & id & "@example.com",
+                ad    : ( arguments.asAdmin ? "true" : "false" )
+            }
+        );
+        return id;
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.agentId } );
+    }
+
+}

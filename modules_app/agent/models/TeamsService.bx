@@ -1,0 +1,241 @@
+/**
+ * TeamsService: CRUD over Team + TeamMember.
+ *
+ * Teams group agents for routing and reporting. This is the only
+ * place outside the entities themselves that writes to `teams` or
+ * `team_members`.
+ *
+ * The admin UI calls these methods; future automation (round-robin
+ * within a team, team-scoped views) will too.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    /**
+     * Every team plus a member count. Used by the index view.
+     * Deactivated teams are still listed so admins can reactivate
+     * them, with the `is_active` flag surfaced.
+     */
+    public array function listTeams(){
+        var rows = queryExecute(
+            "SELECT t.id, t.name, t.description, t.is_active, t.created_at,
+                    COALESCE( COUNT( tm.id ), 0 ) AS member_count
+             FROM   teams t
+             LEFT JOIN team_members tm ON tm.team_id = t.id
+             GROUP BY t.id, t.name, t.description, t.is_active, t.created_at
+             ORDER BY t.is_active DESC, t.name"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id          : rows.id[ i ],
+                name        : rows.name[ i ],
+                description : rows.description[ i ] ?: "",
+                isActive    : !!rows.is_active[ i ],
+                createdAt   : rows.created_at[ i ],
+                memberCount : val( rows.member_count[ i ] )
+            } );
+        }
+        return out;
+    }
+
+    public any function findTeam( required string id ){
+        if ( !len( arguments.id ) ) return javaCast( "null", "" );
+        var rows = queryExecute(
+            "SELECT id, name, description, is_active FROM teams WHERE id = :id",
+            { id : arguments.id }
+        );
+        if ( !rows.recordCount ) return javaCast( "null", "" );
+        return {
+            id          : rows.id[ 1 ],
+            name        : rows.name[ 1 ],
+            description : rows.description[ 1 ] ?: "",
+            isActive    : !!rows.is_active[ 1 ]
+        };
+    }
+
+    public string function createTeam(
+        required string name,
+        string description = "",
+        string actorAgentId = ""
+    ){
+        if ( !len( trim( arguments.name ) ) ) {
+            throw( type : "TeamsService.InvalidName", message : "Team name is required." );
+        }
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO teams ( id, name, description, is_active, created_at, updated_at )
+             VALUES ( :id, :n, :d, TRUE, NOW(), NOW() )",
+            {
+                id : id,
+                n  : trim( arguments.name ),
+                d  : len( arguments.description ) ? arguments.description : javaCast( "null", "" )
+            }
+        );
+        recordAudit( "team.created", id, arguments.actorAgentId, { "name" : arguments.name } );
+        return id;
+    }
+
+    public void function updateTeam(
+        required string id,
+        string name,
+        string description,
+        string actorAgentId = ""
+    ){
+        var sets = [];
+        var binds = { id : arguments.id };
+        if ( structKeyExists( arguments, "name" ) && len( trim( arguments.name ?: "" ) ) ) {
+            sets.append( "name = :n" );
+            binds.n = trim( arguments.name );
+        }
+        if ( structKeyExists( arguments, "description" ) ) {
+            sets.append( "description = :d" );
+            binds.d = len( arguments.description ?: "" ) ? arguments.description : javaCast( "null", "" );
+        }
+        if ( !sets.len() ) return;
+        sets.append( "updated_at = NOW()" );
+        queryExecute(
+            "UPDATE teams SET " & sets.toList() & " WHERE id = :id",
+            binds
+        );
+        recordAudit( "team.updated", arguments.id, arguments.actorAgentId, {} );
+    }
+
+    public void function setTeamActive(
+        required string id,
+        required boolean active,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "UPDATE teams SET is_active = cast( :a as boolean ), updated_at = NOW() WHERE id = :id",
+            { id : arguments.id, a : ( arguments.active ? "true" : "false" ) }
+        );
+        recordAudit(
+            arguments.active ? "team.activated" : "team.deactivated",
+            arguments.id,
+            arguments.actorAgentId,
+            {}
+        );
+    }
+
+    /**
+     * One row per member: agent identity + role_in_team. Used by
+     * the team detail view to render the membership table.
+     */
+    public array function listMembers( required string teamId ){
+        var rows = queryExecute(
+            "SELECT tm.id, tm.agent_id, tm.role_in_team, tm.joined_at,
+                    a.email, a.first_name, a.last_name, a.is_active
+             FROM   team_members tm
+             JOIN   agents a ON a.id = tm.agent_id
+             WHERE  tm.team_id = :tid
+             ORDER BY a.email",
+            { tid : arguments.teamId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id         : rows.id[ i ],
+                agentId    : rows.agent_id[ i ],
+                roleInTeam : rows.role_in_team[ i ] ?: "member",
+                joinedAt   : rows.joined_at[ i ],
+                email      : rows.email[ i ],
+                firstName  : rows.first_name[ i ] ?: "",
+                lastName   : rows.last_name[ i ]  ?: "",
+                isActive   : !!rows.is_active[ i ]
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Add agentId to teamId. Idempotent: if the agent is already on
+     * the team this only updates role_in_team. Returns true if a new
+     * row was inserted, false if the membership already existed.
+     */
+    public boolean function addMember(
+        required string teamId,
+        required string agentId,
+        string roleInTeam = "member",
+        string actorAgentId = ""
+    ){
+        var existing = queryExecute(
+            "SELECT id FROM team_members WHERE team_id = :tid AND agent_id = :aid",
+            { tid : arguments.teamId, aid : arguments.agentId }
+        );
+        if ( existing.recordCount ) {
+            queryExecute(
+                "UPDATE team_members SET role_in_team = :rit WHERE id = :id",
+                { id : existing.id[ 1 ], rit : arguments.roleInTeam }
+            );
+            return false;
+        }
+        queryExecute(
+            "INSERT INTO team_members ( id, team_id, agent_id, role_in_team, joined_at )
+             VALUES ( :id, :tid, :aid, :rit, NOW() )",
+            {
+                id  : createUUID(),
+                tid : arguments.teamId,
+                aid : arguments.agentId,
+                rit : arguments.roleInTeam
+            }
+        );
+        recordAudit( "team.member_added", arguments.teamId, arguments.actorAgentId, {
+            "agentId"    : arguments.agentId,
+            "roleInTeam" : arguments.roleInTeam
+        } );
+        return true;
+    }
+
+    public boolean function removeMember(
+        required string teamId,
+        required string agentId,
+        string actorAgentId = ""
+    ){
+        var existing = queryExecute(
+            "SELECT id FROM team_members WHERE team_id = :tid AND agent_id = :aid",
+            { tid : arguments.teamId, aid : arguments.agentId }
+        );
+        if ( !existing.recordCount ) return false;
+        queryExecute(
+            "DELETE FROM team_members WHERE team_id = :tid AND agent_id = :aid",
+            { tid : arguments.teamId, aid : arguments.agentId }
+        );
+        recordAudit( "team.member_removed", arguments.teamId, arguments.actorAgentId, {
+            "agentId" : arguments.agentId
+        } );
+        return true;
+    }
+
+    // ---------- internals ----------
+
+    private void function recordAudit(
+        required string eventType,
+        required string teamId,
+        required string actorAgentId,
+        required struct metadata
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "team",
+                entityId   : arguments.teamId,
+                metadata   : arguments.metadata
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "TeamsService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}
