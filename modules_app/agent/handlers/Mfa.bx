@@ -1,0 +1,195 @@
+/**
+ * agent:Mfa handler — TOTP enrollment, login challenge, and the
+ * one-time recovery-codes display.
+ *
+ * Routes ride on /agent/login/verify (challenge after a
+ * password-only login) and /agent/mfa/setup (enrollment for
+ * agents who do not yet have MFA enabled). Admin reset lives in
+ * the admin module's Users handler.
+ *
+ * Session storage:
+ *   - tesserabx_pending_mfa_agent_id : set when a password
+ *     succeeds but MFA is still required; cleared on challenge
+ *     success or session timeout.
+ *   - flash.totp_recovery_codes : the plaintext codes shown
+ *     exactly once after enrollment confirms.
+ */
+class {
+
+    property name="auth"       inject="AuthenticationService@cbauth";
+    property name="agentAuth"  inject="AgentAuthService@agent";
+    property name="totp"       inject="TotpService@agent";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    // ---------- Two-step login: the second step ----------
+
+    function verifyForm( event, rc, prc ){
+        var agentId = pendingAgentId();
+        if ( !len( agentId ) ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        prc.pageTitle = "Two-factor verification";
+        event.setView( "mfa/verify" );
+    }
+
+    function verifySubmit( event, rc, prc ){
+        param rc.code = "";
+        var agentId = pendingAgentId();
+        if ( !len( agentId ) ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        var agent = agentAuth.retrieveUserById( agentId );
+        if ( isNull( agent ) ) {
+            clearPending();
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        if ( totp.verifyCode( agent.getMfaSecret() ?: "", rc.code ) ) {
+            return finishLogin( agent );
+        }
+        // Recovery-code fallback.
+        var rawCodes  = parseRecoveryCodes( agent.getMfaRecoveryCodes() ?: "" );
+        var consumed  = totp.consumeRecoveryCode( rawCodes, rc.code );
+        if ( consumed.matched ) {
+            updateAgentRecoveryCodes( agent, consumed.updatedHashes );
+            return finishLogin( agent );
+        }
+        messagebox.error( "Invalid code. Try again, or use one of your recovery codes." );
+        relocate( uri = "/agent/login/verify" );
+    }
+
+    // ---------- Enrollment ----------
+
+    function setupForm( event, rc, prc ){
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        var agent = auth.getUser();
+        if ( agent.getMfaEnabled() ) {
+            messagebox.info( "MFA is already enabled. Ask an administrator to reset it if you need to re-enroll." );
+            relocate( uri = "/agent" );
+            return;
+        }
+        // Generate + persist a draft secret on first visit. The
+        // agent might leave the page; on return we reuse it so the
+        // QR they already scanned stays valid.
+        var secret = agent.getMfaSecret() ?: "";
+        if ( !len( secret ) ) {
+            secret = totp.generateSecret();
+            // Targeted UPDATE; Quick's save() re-binds every column
+            // (including timestamp fields) as varchar, which Postgres
+            // rejects with "is of type timestamp but expression is of
+            // type character varying".
+            queryExecute(
+                "UPDATE agents SET mfa_secret = :s, updated_at = NOW() WHERE id = :id",
+                { id : agent.getId(), s : secret }
+            );
+            agent.setMfaSecret( secret );
+        }
+        prc.pageTitle = "Set up two-factor authentication";
+        prc.secret    = secret;
+        prc.otpauth   = totp.buildOtpauthUrl( secret, agent.getEmail() );
+        event.setView( "mfa/setup" );
+    }
+
+    function setupSubmit( event, rc, prc ){
+        param rc.code = "";
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        var agent = auth.getUser();
+        var secret = agent.getMfaSecret() ?: "";
+        if ( !len( secret ) || !totp.verifyCode( secret, rc.code ) ) {
+            messagebox.error( "That code did not match. Try again." );
+            relocate( uri = "/agent/mfa/setup" );
+            return;
+        }
+
+        // Generate and persist recovery codes; show the plaintext
+        // exactly once via flash, then redirect to the
+        // recovery-codes view.
+        var codes  = totp.generateRecoveryCodes();
+        var hashed = totp.hashRecoveryCodes( codes );
+        queryExecute(
+            "UPDATE agents
+             SET    mfa_enabled        = TRUE,
+                    mfa_enrolled_at    = NOW(),
+                    mfa_recovery_codes = cast( :rc as json ),
+                    updated_at         = NOW()
+             WHERE  id = :id",
+            { id : agent.getId(), rc : jsonSerialize( hashed ) }
+        );
+
+        flash.put( "totp_recovery_codes", codes );
+        relocate( uri = "/agent/mfa/recovery-codes" );
+    }
+
+    function recoveryCodes( event, rc, prc ){
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        var codes = flash.get( "totp_recovery_codes", [] );
+        if ( !isArray( codes ) || !codes.len() ) {
+            messagebox.info( "Recovery codes have already been displayed once. Ask an administrator to reset MFA if you lost them." );
+            relocate( uri = "/agent" );
+            return;
+        }
+        prc.pageTitle = "Save your recovery codes";
+        prc.codes     = codes;
+        event.setView( "mfa/recovery-codes" );
+    }
+
+    // ---------- internals ----------
+
+    private string function pendingAgentId(){
+        var s = sessionGet();
+        return s.tesserabx_pending_mfa_agent_id ?: "";
+    }
+
+    private void function clearPending(){
+        var s = sessionGet();
+        s.tesserabx_pending_mfa_agent_id = "";
+    }
+
+    /**
+     * Convenience accessor for the underlying CFML session struct.
+     * Wrapped so any future migration off raw `session` (e.g. to
+     * a cbstorages-backed store) only touches one place.
+     */
+    private struct function sessionGet(){
+        return session;
+    }
+
+    private array function parseRecoveryCodes( required string raw ){
+        if ( !len( arguments.raw ) ) return [];
+        try {
+            var arr = jsonDeserialize( arguments.raw );
+            return isArray( arr ) ? arr : [];
+        } catch ( any e ) {
+            return [];
+        }
+    }
+
+    private void function updateAgentRecoveryCodes( required any agent, required array hashed ){
+        queryExecute(
+            "UPDATE agents SET mfa_recovery_codes = cast( :rc as json ), updated_at = NOW() WHERE id = :id",
+            { id : arguments.agent.getId(), rc : jsonSerialize( arguments.hashed ) }
+        );
+    }
+
+    private any function finishLogin( required any agent ){
+        auth.login( arguments.agent );
+        clearPending();
+        relocate( uri = "/agent" );
+    }
+
+}

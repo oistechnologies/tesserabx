@@ -15,14 +15,18 @@ class
 
     property name="id";
     property name="email";
-    property name="passwordHash" column="password_hash";
-    property name="firstName"    column="first_name";
-    property name="lastName"     column="last_name";
-    property name="isActive"     column="is_active";
-    property name="isAdmin"      column="is_admin";
-    property name="lastLoginAt"  column="last_login_at";
-    property name="createdAt"    column="created_at";
-    property name="updatedAt"    column="updated_at";
+    property name="passwordHash"      column="password_hash";
+    property name="firstName"         column="first_name";
+    property name="lastName"          column="last_name";
+    property name="isActive"          column="is_active";
+    property name="isAdmin"           column="is_admin";
+    property name="lastLoginAt"       column="last_login_at";
+    property name="mfaSecret"         column="mfa_secret";
+    property name="mfaEnabled"        column="mfa_enabled";
+    property name="mfaEnrolledAt"     column="mfa_enrolled_at";
+    property name="mfaRecoveryCodes"  column="mfa_recovery_codes";
+    property name="createdAt"         column="created_at";
+    property name="updatedAt"         column="updated_at";
 
     // No global scopes. Agents see across organizations.
 

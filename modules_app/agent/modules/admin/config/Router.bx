@@ -95,6 +95,7 @@ class {
         route( "users/revoke" ).withVerbs( "POST" ).to( "Users.revoke" );
         route( "users/activate" ).withVerbs( "POST" ).to( "Users.activate" );
         route( "users/deactivate" ).withVerbs( "POST" ).to( "Users.deactivate" );
+        route( "users/reset-mfa" ).withVerbs( "POST" ).to( "Users.resetMfa" );
         route( "users" ).to( "Users.index" );
 
         // Teams + membership. Most-specific patterns first so

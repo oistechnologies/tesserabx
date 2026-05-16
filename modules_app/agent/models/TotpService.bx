@@ -1,0 +1,230 @@
+/**
+ * TotpService: RFC 6238 TOTP for the agent MFA enrollment path.
+ *
+ * Pure implementation (no external library): 20-byte secrets,
+ * base32 encoded for compatibility with every authenticator app
+ * (Google Authenticator, 1Password, Authy, etc.), HMAC-SHA1 over
+ * the 30-second time window, dynamic-truncation to a 6-digit
+ * code. The verify() helper accepts a +/- 1 step skew so a user
+ * who taps "enter" the moment the timer flips still succeeds.
+ *
+ * Recovery codes: 10 codes per enrollment, each a 10-char
+ * uppercase alphanumeric. Stored as bcrypt hashes in an array
+ * (jsonb in the DB). consumeRecoveryCode() finds the matching
+ * hash, blanks it, and returns the updated array.
+ */
+class singleton=true {
+
+    property name="bcrypt" inject="@BCrypt";
+
+    /**
+     * 20 random bytes (160 bits), base32 encoded. Matches the
+     * Google Authenticator standard.
+     */
+    public string function generateSecret(){
+        var rng  = createObject( "java", "java.security.SecureRandom" ).init();
+        var bytes = newByteArray( 20 );
+        rng.nextBytes( bytes );
+        return base32Encode( bytes );
+    }
+
+    /**
+     * Build the otpauth:// URL the authenticator app turns into
+     * the rotating code. Embedded in a QR code at enrollment.
+     *
+     * @secret  base32 secret returned by generateSecret()
+     * @label   the human-readable account name (we use email)
+     * @issuer  the platform label that shows in the app
+     */
+    public string function buildOtpauthUrl(
+        required string secret,
+        required string label,
+        string issuer = "TesseraBX"
+    ){
+        return "otpauth://totp/"
+             & encodeForURL( arguments.issuer & ":" & arguments.label )
+             & "?secret=" & arguments.secret
+             & "&issuer=" & encodeForURL( arguments.issuer )
+             & "&algorithm=SHA1&digits=6&period=30";
+    }
+
+    /**
+     * Verify a 6-digit code against the secret, allowing a +/- 1
+     * step (30s) skew. Returns true on match.
+     */
+    public boolean function verifyCode( required string secret, required string code ){
+        var clean = trim( replace( arguments.code, " ", "", "all" ) );
+        if ( !reFind( "^\d{6}$", clean ) ) return false;
+        var now = int( getTickCount() / 1000 );
+        var step = int( now / 30 );
+        for ( var offset = -1; offset <= 1; offset++ ) {
+            if ( generateCode( arguments.secret, step + offset ) == clean ) return true;
+        }
+        return false;
+    }
+
+    // ---------------- Recovery codes ----------------
+
+    public array function generateRecoveryCodes( numeric count = 10 ){
+        var out = [];
+        var rng = createObject( "java", "java.security.SecureRandom" ).init();
+        for ( var i = 1; i <= arguments.count; i++ ) {
+            out.append( randomCode( 10, rng ) );
+        }
+        return out;
+    }
+
+    /**
+     * Hash an array of plaintext recovery codes for storage.
+     * Returns an array of bcrypt hashes in the same order.
+     */
+    public array function hashRecoveryCodes( required array codes ){
+        var out = [];
+        for ( var c in arguments.codes ) {
+            out.append( bcrypt.hashPassword( c ) );
+        }
+        return out;
+    }
+
+    /**
+     * Find a matching hash for the provided plaintext code, blank
+     * that slot, and return { matched: bool, updatedHashes: [...] }.
+     * The caller persists updatedHashes after a successful match.
+     */
+    public struct function consumeRecoveryCode(
+        required array storedHashes,
+        required string code
+    ){
+        var clean = uCase( trim( arguments.code ) );
+        var updated = duplicate( arguments.storedHashes );
+        for ( var i = 1; i <= updated.len(); i++ ) {
+            var hash = updated[ i ] ?: "";
+            if ( !len( hash ) ) continue;
+            if ( bcrypt.checkPassword( clean, hash ) ) {
+                updated[ i ] = "";
+                return { matched : true, updatedHashes : updated };
+            }
+        }
+        return { matched : false, updatedHashes : arguments.storedHashes };
+    }
+
+    // ---------------- internals ----------------
+
+    /**
+     * Compute the 6-digit TOTP for a given step counter. Public
+     * helper for tests; production code goes through verifyCode.
+     */
+    public string function generateCode( required string secret, required numeric step ){
+        var keyBytes = base32Decode( arguments.secret );
+        // Counter as 8-byte big-endian.
+        var counter = createObject( "java", "java.nio.ByteBuffer" ).allocate( 8 );
+        counter.putLong( javaCast( "long", arguments.step ) );
+        var counterBytes = counter.array();
+
+        var mac = createObject( "java", "javax.crypto.Mac" ).getInstance( "HmacSHA1" );
+        var keySpec = createObject( "java", "javax.crypto.spec.SecretKeySpec" )
+            .init( keyBytes, "HmacSHA1" );
+        mac.init( keySpec );
+        var hash = mac.doFinal( counterBytes );
+
+        // Dynamic truncation per RFC 4226. The last byte's low
+        // nibble is the offset; four bytes from there form a
+        // 31-bit integer (top bit masked).
+        var lastByte = bitAnd( hash[ 20 ], 15 );
+        var offset = lastByte + 1; // 1-based array indexing in CFML
+        var bin = bitOr(
+            bitOr(
+                bitOr(
+                    bitSHLN( bitAnd( hash[ offset     ], 127 ), 24 ),
+                    bitSHLN( bitAnd( hash[ offset + 1 ], 255 ), 16 )
+                ),
+                bitSHLN( bitAnd( hash[ offset + 2 ], 255 ), 8 )
+            ),
+            bitAnd( hash[ offset + 3 ], 255 )
+        );
+        var code = bin % 1000000;
+        // Zero-pad to 6 digits.
+        return reReplace( "000000" & code, "^.*?(\d{6})$", "\1" );
+    }
+
+    private string function randomCode( required numeric length, required any rng ){
+        var alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var out = "";
+        for ( var i = 1; i <= arguments.length; i++ ) {
+            out &= mid( alphabet, arguments.rng.nextInt( alphabet.len() ) + 1, 1 );
+        }
+        return out;
+    }
+
+    /**
+     * Encodes a Java byte[] into RFC 4648 base32 (no padding).
+     * Accepts either a Java byte[] or a CFML array of unsigned
+     * ints (for callers that built the data byte-by-byte).
+     */
+    private string function base32Encode( required any bytes ){
+        var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        var out = "";
+        var buffer = 0;
+        var bitsLeft = 0;
+        var size = isArray( arguments.bytes ) ? arrayLen( arguments.bytes ) : arrayLen( arguments.bytes );
+        for ( var i = 1; i <= size; i++ ) {
+            var b = arguments.bytes[ i ];
+            if ( b < 0 ) b = b + 256; // Java byte → unsigned int
+            buffer = bitOr( bitSHLN( buffer, 8 ), bitAnd( b, 255 ) );
+            bitsLeft += 8;
+            while ( bitsLeft >= 5 ) {
+                var idx = bitAnd( bitSHRN( buffer, bitsLeft - 5 ), 31 );
+                out &= mid( alphabet, idx + 1, 1 );
+                bitsLeft -= 5;
+            }
+        }
+        if ( bitsLeft > 0 ) {
+            var idx = bitAnd( bitSHLN( buffer, 5 - bitsLeft ), 31 );
+            out &= mid( alphabet, idx + 1, 1 );
+        }
+        return out;
+    }
+
+    /**
+     * Allocate a Java byte[] of the requested size, filled with
+     * zeros. Used by callers that need to hand a buffer to a
+     * Java API (SecureRandom.nextBytes, etc.).
+     */
+    private any function newByteArray( required numeric size ){
+        return createObject( "java", "java.lang.reflect.Array" )
+            .newInstance(
+                createObject( "java", "java.lang.Byte" ).TYPE,
+                javaCast( "int", arguments.size )
+            );
+    }
+
+    private any function base32Decode( required string encoded ){
+        var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        var clean = uCase( replace( arguments.encoded, "=", "", "all" ) );
+        var bytes = [];
+        var buffer = 0;
+        var bitsLeft = 0;
+        for ( var i = 1; i <= len( clean ); i++ ) {
+            var ch = mid( clean, i, 1 );
+            var idx = find( ch, alphabet ) - 1;
+            if ( idx < 0 ) continue;
+            buffer = bitOr( bitSHLN( buffer, 5 ), idx );
+            bitsLeft += 5;
+            if ( bitsLeft >= 8 ) {
+                bitsLeft -= 8;
+                bytes.append( bitAnd( bitSHRN( buffer, bitsLeft ), 255 ) );
+            }
+        }
+        // Java byte[] from int array (-128..127 range).
+        var len = bytes.len();
+        var byteArrayClass = createObject( "java", "java.lang.reflect.Array" );
+        var byteArr = byteArrayClass.newInstance( createObject( "java", "java.lang.Byte" ).TYPE, javaCast( "int", len ) );
+        for ( var i = 1; i <= len; i++ ) {
+            var b = bytes[ i ];
+            if ( b > 127 ) b = b - 256;
+            byteArrayClass.setByte( byteArr, javaCast( "int", i - 1 ), javaCast( "byte", b ) );
+        }
+        return byteArr;
+    }
+
+}

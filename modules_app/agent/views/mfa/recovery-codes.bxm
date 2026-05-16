@@ -1,0 +1,31 @@
+<bx:output>
+<div class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-6">
+        <div class="card border-warning">
+            <div class="card-body">
+                <h2 class="h4 mb-2">Save your recovery codes</h2>
+                <p class="text-body-secondary">
+                    Each code below works exactly once if you lose access to your authenticator app.
+                    They will not be shown again. Store them in a password manager or print them now.
+                </p>
+
+                <div class="bg-light text-black border rounded p-3 my-3 font-monospace fs-5">
+                    <bx:loop array="#prc.codes#" item="c">
+                        <div>#encodeForHTML( c )#</div>
+                    </bx:loop>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('codesText').innerText)">
+                        <i class="bi bi-clipboard"></i> Copy to clipboard
+                    </button>
+                    <a class="btn btn-primary" href="/agent">I've saved them, continue</a>
+                </div>
+                <div id="codesText" class="visually-hidden">
+                    <bx:loop array="#prc.codes#" item="c">#c#&##10;</bx:loop>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

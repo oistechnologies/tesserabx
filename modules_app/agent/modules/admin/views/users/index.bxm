@@ -15,13 +15,14 @@
                     <th>Email</th>
                     <th>Name</th>
                     <th>Roles</th>
+                    <th>MFA</th>
                     <th>Status</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <bx:if !arrayLen( prc.agents )>
-                    <tr><td colspan="5" class="text-center text-body-secondary py-4">No agents to show.</td></tr>
+                    <tr><td colspan="6" class="text-center text-body-secondary py-4">No agents to show.</td></tr>
                 </bx:if>
                 <bx:loop array="#prc.agents#" item="a">
                     <tr>
@@ -42,6 +43,17 @@
                             </bx:loop>
                             <bx:if !arrayLen( a.roles )>
                                 <span class="text-body-secondary small">no roles</span>
+                            </bx:if>
+                        </td>
+                        <td>
+                            <bx:if a.mfaEnabled>
+                                <span class="badge text-bg-success">Enrolled</span>
+                                <form method="post" action="/agent/admin/users/reset-mfa" class="d-inline ms-1" onsubmit="return confirm('Reset MFA for #encodeForHTMLAttribute( a.email )#? They will be prompted to enroll again on their next sign-in.');">
+                                    <input type="hidden" name="agentId" value="#encodeForHTMLAttribute( a.id )#">
+                                    <button type="submit" class="btn btn-link btn-sm p-0 align-baseline" title="Reset MFA">reset</button>
+                                </form>
+                            <bx:else>
+                                <span class="badge text-bg-warning">Not enrolled</span>
                             </bx:if>
                         </td>
                         <td>

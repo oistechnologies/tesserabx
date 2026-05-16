@@ -17,8 +17,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         describe( "WebhooksService", function(){
 
             afterEach( function( currentSpec ){
-                queryExecute( "DELETE FROM webhook_deliveries WHERE subscription_id IN ( SELECT id FROM webhook_subscriptions WHERE name LIKE 'spec-%%' )" );
-                queryExecute( "DELETE FROM webhook_subscriptions WHERE name LIKE 'spec-%%'" );
+                queryExecute( "DELETE FROM webhook_deliveries WHERE subscription_id IN ( SELECT id FROM webhook_subscriptions WHERE name LIKE 'spec-%' )" );
+                queryExecute( "DELETE FROM webhook_subscriptions WHERE name LIKE 'spec-%'" );
             } );
 
             it( "eventCatalog includes ticket.created and friends", function(){
@@ -80,50 +80,49 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.svc.findSubscription( id ).isActive ).toBeFalse();
             } );
 
-            it( "dispatchForEvent records a delivery row for matching subscriptions", function(){
-                // A target URL that fails fast (rejected by DNS / network)
-                // is good enough — the dispatcher catches and records
-                // the failure rather than crashing the caller.
+            it( "dispatchForEvent records a delivery row for the matching subscription", function(){
                 var id = variables.svc.createSubscription(
                     name      : "spec-" & createUUID(),
                     targetUrl : "http://127.0.0.1:1/nope",
                     eventKeys : "ticket.created"
                 );
-                var deliveryIds = variables.svc.dispatchForEvent(
+                variables.svc.dispatchForEvent(
                     eventKey : "ticket.created",
                     payload  : { "ticket" : { "id" : "fake" } }
                 );
-                expect( deliveryIds.len() ).toBe( 1 );
+                // Filter to this spec's subscription only — other
+                // wildcard subs in the DB (left over from manual
+                // UI testing, for example) also receive every event.
                 var deliveries = variables.svc.listDeliveriesForSubscription( id );
                 expect( deliveries.len() ).toBe( 1 );
                 expect( deliveries[ 1 ].status ).toBeIn( [ "failed", "sent" ] );
                 expect( deliveries[ 1 ].eventKey ).toBe( "ticket.created" );
             } );
 
-            it( "dispatchForEvent skips subscriptions that do not match the event", function(){
-                variables.svc.createSubscription(
+            it( "dispatchForEvent skips a subscription that does not match the event", function(){
+                var id = variables.svc.createSubscription(
                     name      : "spec-" & createUUID(),
                     targetUrl : "http://127.0.0.1:1/nope",
                     eventKeys : "ticket.status_changed"
                 );
-                var deliveryIds = variables.svc.dispatchForEvent(
+                variables.svc.dispatchForEvent(
                     eventKey : "ticket.created",
                     payload  : { "ticket" : { "id" : "x" } }
                 );
-                expect( deliveryIds.len() ).toBe( 0 );
+                expect( variables.svc.listDeliveriesForSubscription( id ).len() ).toBe( 0 );
             } );
 
             it( "wildcard subscriptions receive every event", function(){
-                variables.svc.createSubscription(
+                var id = variables.svc.createSubscription(
                     name      : "spec-" & createUUID(),
                     targetUrl : "http://127.0.0.1:1/nope",
                     eventKeys : "*"
                 );
-                var ids = variables.svc.dispatchForEvent(
+                variables.svc.dispatchForEvent(
                     eventKey : "ticket.message_added",
                     payload  : { "message" : { "id" : "x" } }
                 );
-                expect( ids.len() ).toBe( 1 );
+                expect( variables.svc.listDeliveriesForSubscription( id ).len() ).toBe( 1 );
             } );
 
         } );

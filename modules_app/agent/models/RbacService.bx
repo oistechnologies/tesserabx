@@ -152,6 +152,7 @@ class singleton=true {
                    a.last_name,
                    a.is_active,
                    a.is_admin,
+                   a.mfa_enabled,
                    COALESCE(
                        ARRAY_REMOVE( ARRAY_AGG( DISTINCT ar.role_key ORDER BY ar.role_key ), NULL ),
                        ARRAY[]::TEXT[]
@@ -160,7 +161,7 @@ class singleton=true {
             LEFT JOIN agent_roles ar ON ar.agent_id = a.id
         ";
         if ( !arguments.includeInactive ) sql &= " WHERE a.is_active = TRUE ";
-        sql &= " GROUP BY a.id, a.email, a.first_name, a.last_name, a.is_active, a.is_admin
+        sql &= " GROUP BY a.id, a.email, a.first_name, a.last_name, a.is_active, a.is_admin, a.mfa_enabled
                  ORDER BY a.email ";
 
         var rows = queryExecute( sql );
@@ -183,13 +184,14 @@ class singleton=true {
                 }
             }
             out.append( {
-                id        : rows.id[ i ],
-                email     : rows.email[ i ],
-                firstName : rows.first_name[ i ] ?: "",
-                lastName  : rows.last_name[ i ]  ?: "",
-                isActive  : !!rows.is_active[ i ],
-                isAdmin   : !!rows.is_admin[ i ],
-                roles     : keyList
+                id         : rows.id[ i ],
+                email      : rows.email[ i ],
+                firstName  : rows.first_name[ i ] ?: "",
+                lastName   : rows.last_name[ i ]  ?: "",
+                isActive   : !!rows.is_active[ i ],
+                isAdmin    : !!rows.is_admin[ i ],
+                mfaEnabled : !!rows.mfa_enabled[ i ],
+                roles      : keyList
             } );
         }
         return out;

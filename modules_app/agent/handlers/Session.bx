@@ -21,14 +21,27 @@ class {
         param rc.email    = "";
         param rc.password = "";
 
-        if ( agentAuth.isValidCredentials( rc.email, rc.password ) ) {
-            auth.login( agentAuth.retrieveUserByUsername( rc.email ) );
-            relocate( uri = "/agent" );
+        if ( !agentAuth.isValidCredentials( rc.email, rc.password ) ) {
+            messagebox.error( "Invalid email or password." );
+            relocate( uri = "/agent/login" );
             return;
         }
 
-        messagebox.error( "Invalid email or password." );
-        relocate( uri = "/agent/login" );
+        var agent = agentAuth.retrieveUserByUsername( rc.email );
+        if ( !!agent.getMfaEnabled() ) {
+            // Password ok, MFA challenge required. The pending id
+            // lives in session until the second-step verify clears
+            // it; we DO NOT call auth.login until the code matches.
+            session.tesserabx_pending_mfa_agent_id = agent.getId();
+            relocate( uri = "/agent/login/verify" );
+            return;
+        }
+
+        // Password ok, no MFA yet. cbauth login goes through so the
+        // agent can reach /agent/mfa/setup; enforcement on the rest
+        // of /agent kicks in once enrolled.
+        auth.login( agent );
+        relocate( uri = "/agent/mfa/setup" );
     }
 
     function delete( event, rc, prc ){

@@ -17,11 +17,22 @@ class {
         route( "/" ).to( "Home.index" );
 
         // Auth
+        route( "login/verify" ).withHandler( "Mfa" ).toAction( {
+            "GET"  : "verifyForm",
+            "POST" : "verifySubmit"
+        } );
         route( "login" ).withHandler( "Session" ).toAction( {
             "GET"  : "new",
             "POST" : "create"
         } );
         route( "logout" ).to( "Session.delete" );
+
+        // MFA enrollment + recovery-codes display.
+        route( "mfa/setup" ).withHandler( "Mfa" ).toAction( {
+            "GET"  : "setupForm",
+            "POST" : "setupSubmit"
+        } );
+        route( "mfa/recovery-codes" ).to( "Mfa.recoveryCodes" );
 
         // Unauthorized landing (the 403 page hit by non-admin agents
         // trying to reach /agent/admin/*).

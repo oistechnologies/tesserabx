@@ -1,0 +1,90 @@
+/**
+ * TotpServiceSpec: base32 round-trip, TOTP code generation
+ * against known RFC 6238 vectors, and recovery-code consume.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "TotpService@agent" );
+    }
+
+    function run(){
+        describe( "TotpService", function(){
+
+            it( "generateSecret returns a 32-char base32 string", function(){
+                var secret = variables.svc.generateSecret();
+                expect( secret ).toHaveLength( 32 );
+                expect( secret ).toMatch( "^[A-Z2-7]+$" );
+            } );
+
+            it( "two consecutive secrets differ", function(){
+                expect( variables.svc.generateSecret() ).notToBe( variables.svc.generateSecret() );
+            } );
+
+            it( "buildOtpauthUrl encodes the issuer and label", function(){
+                var u = variables.svc.buildOtpauthUrl( "JBSWY3DPEHPK3PXP", "alice@example.com" );
+                expect( u ).toInclude( "otpauth://totp/" );
+                expect( u ).toInclude( "secret=JBSWY3DPEHPK3PXP" );
+                expect( u ).toInclude( "issuer=TesseraBX" );
+                expect( u ).toInclude( "algorithm=SHA1" );
+                expect( u ).toInclude( "digits=6" );
+                expect( u ).toInclude( "period=30" );
+            } );
+
+            it( "generateCode matches RFC 6238 vector for shared secret '12345678901234567890' at T=59", function(){
+                // Vector from RFC 6238 Appendix B: secret is the ascii
+                // bytes "12345678901234567890", base32 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ".
+                // At unix time 59 (step = floor(59/30) = 1), SHA1
+                // TOTP = 287082.
+                expect( variables.svc.generateCode( "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", 1 ) ).toBe( "287082" );
+            } );
+
+            it( "verifyCode accepts the current step", function(){
+                var secret = variables.svc.generateSecret();
+                var now = int( getTickCount() / 1000 );
+                var step = int( now / 30 );
+                var code = variables.svc.generateCode( secret, step );
+                expect( variables.svc.verifyCode( secret, code ) ).toBeTrue();
+            } );
+
+            it( "verifyCode rejects gibberish", function(){
+                var secret = variables.svc.generateSecret();
+                expect( variables.svc.verifyCode( secret, "000000" ) ).toBeFalse();
+                expect( variables.svc.verifyCode( secret, "abc"    ) ).toBeFalse();
+                expect( variables.svc.verifyCode( secret, ""       ) ).toBeFalse();
+            } );
+
+            it( "generateRecoveryCodes returns ten unique 10-char codes", function(){
+                var codes = variables.svc.generateRecoveryCodes();
+                expect( codes.len() ).toBe( 10 );
+                var seen = {};
+                for ( var c in codes ) {
+                    expect( c ).toHaveLength( 10 );
+                    seen[ c ] = true;
+                }
+                expect( seen.count() ).toBe( 10 );
+            } );
+
+            it( "consumeRecoveryCode finds and blanks the matching slot", function(){
+                var codes  = variables.svc.generateRecoveryCodes();
+                var hashed = variables.svc.hashRecoveryCodes( codes );
+                var first  = codes[ 1 ];
+                var result = variables.svc.consumeRecoveryCode( hashed, first );
+                expect( result.matched ).toBeTrue();
+                expect( result.updatedHashes[ 1 ] ).toBe( "" );
+                // The same code cannot be consumed a second time.
+                var second = variables.svc.consumeRecoveryCode( result.updatedHashes, first );
+                expect( second.matched ).toBeFalse();
+            } );
+
+            it( "consumeRecoveryCode rejects an unknown code", function(){
+                var hashed = variables.svc.hashRecoveryCodes( variables.svc.generateRecoveryCodes() );
+                expect( variables.svc.consumeRecoveryCode( hashed, "NOT-IN-LIST" ).matched ).toBeFalse();
+            } );
+
+        } );
+    }
+
+}

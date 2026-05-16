@@ -81,6 +81,27 @@ class {
         relocate( uri = "/agent/admin/users?includeInactive=true" );
     }
 
+    function resetMfa( event, rc, prc ){
+        param rc.agentId = "";
+        if ( !len( rc.agentId ) ) {
+            messagebox.error( "Agent id is required." );
+            relocate( uri = "/agent/admin/users" );
+            return;
+        }
+        queryExecute(
+            "UPDATE agents
+             SET    mfa_enabled         = FALSE,
+                    mfa_secret          = NULL,
+                    mfa_enrolled_at     = NULL,
+                    mfa_recovery_codes  = NULL,
+                    updated_at          = NOW()
+             WHERE  id = :id",
+            { id : rc.agentId }
+        );
+        messagebox.info( "MFA reset. The user will be prompted to enroll on next sign-in." );
+        relocate( uri = "/agent/admin/users" );
+    }
+
     function deactivate( event, rc, prc ){
         param rc.agentId = "";
         if ( rc.agentId == currentAgentId() ) {

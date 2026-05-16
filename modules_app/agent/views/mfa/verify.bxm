@@ -1,0 +1,31 @@
+<bx:output>
+<div class="row justify-content-center">
+    <div class="col-12 col-md-6 col-lg-5">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h4 mb-3">Two-factor verification</h2>
+                <p class="text-body-secondary small">
+                    Open your authenticator app and enter the current 6-digit code.
+                    If you've lost your device, paste one of your recovery codes instead.
+                </p>
+                <form method="post" action="/agent/login/verify">
+                    <div class="mb-3">
+                        <label class="form-label" for="code">Code</label>
+                        <input type="text"
+                               id="code"
+                               name="code"
+                               class="form-control form-control-lg text-center font-monospace"
+                               required
+                               autocomplete="one-time-code"
+                               autofocus
+                               placeholder="123456 or recovery code">
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Verify</button>
+                </form>
+                <hr>
+                <a href="/agent/logout" class="small text-body-secondary">Sign in as a different user</a>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>
