@@ -1,0 +1,114 @@
+/**
+ * /agent/admin/webhooks handler.
+ *
+ * CRUD over outbound webhook subscriptions plus a recent-
+ * deliveries view per subscription. Admin-only via the
+ * cbSecurity rule on /agent/admin/*. All writes route through
+ * WebhooksService@api.
+ */
+class {
+
+    property name="webhooks"   inject="WebhooksService@api";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+    property name="auth"       inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle     = "Webhooks";
+        prc.subscriptions = webhooks.listSubscriptions();
+        prc.eventCatalog  = webhooks.eventCatalog();
+        event.setView( "webhooks/index" );
+    }
+
+    function newForm( event, rc, prc ){
+        prc.pageTitle    = "New webhook";
+        prc.sub          = { id : "", name : "", targetUrl : "", eventKeys : "", secret : "", isActive : true };
+        prc.isNew        = true;
+        prc.eventCatalog = webhooks.eventCatalog();
+        prc.deliveries   = [];
+        event.setView( "webhooks/edit" );
+    }
+
+    function create( event, rc, prc ){
+        try {
+            var id = webhooks.createSubscription(
+                name         : rc.name ?: "",
+                targetUrl    : rc.targetUrl ?: "",
+                eventKeys    : rc.eventKeys ?: "",
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Webhook created. A signing secret has been generated; copy it from the edit screen now." );
+            relocate( uri = "/agent/admin/webhooks/" & id );
+        } catch ( any e ) {
+            messagebox.error( "Could not create webhook: " & e.message );
+            relocate( uri = "/agent/admin/webhooks/new" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        param rc.id = "";
+        var sub = webhooks.findSubscription( rc.id );
+        if ( isNull( sub ) ) {
+            messagebox.error( "Webhook not found." );
+            relocate( uri = "/agent/admin/webhooks" );
+            return;
+        }
+        prc.pageTitle    = "Edit webhook";
+        prc.sub          = sub;
+        prc.isNew        = false;
+        prc.eventCatalog = webhooks.eventCatalog();
+        prc.deliveries   = webhooks.listDeliveriesForSubscription( sub.id, 20 );
+        event.setView( "webhooks/edit" );
+    }
+
+    function update( event, rc, prc ){
+        param rc.id = "";
+        try {
+            webhooks.updateSubscription(
+                id           : rc.id,
+                name         : rc.name ?: "",
+                targetUrl    : rc.targetUrl ?: "",
+                eventKeys    : rc.eventKeys ?: "",
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Webhook updated." );
+        } catch ( any e ) {
+            messagebox.error( "Could not update webhook: " & e.message );
+        }
+        relocate( uri = "/agent/admin/webhooks/" & rc.id );
+    }
+
+    function activate( event, rc, prc ){
+        param rc.id = "";
+        webhooks.setActive( id : rc.id, active : true, actorAgentId : currentAgentId() );
+        messagebox.info( "Webhook activated." );
+        relocate( uri = "/agent/admin/webhooks/" & rc.id );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.id = "";
+        webhooks.setActive( id : rc.id, active : false, actorAgentId : currentAgentId() );
+        messagebox.info( "Webhook deactivated. Future events will not be delivered until you reactivate it." );
+        relocate( uri = "/agent/admin/webhooks/" & rc.id );
+    }
+
+    function remove( event, rc, prc ){
+        param rc.id = "";
+        webhooks.deleteSubscription( id : rc.id, actorAgentId : currentAgentId() );
+        messagebox.info( "Webhook deleted." );
+        relocate( uri = "/agent/admin/webhooks" );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

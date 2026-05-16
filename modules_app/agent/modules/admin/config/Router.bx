@@ -40,6 +40,20 @@ class {
         } );
         route( "kb" ).to( "Kb.index" );
 
+        // Outbound webhook subscriptions.
+        route( "webhooks/new" ).withHandler( "Webhooks" ).toAction( {
+            "GET"  : "newForm",
+            "POST" : "create"
+        } );
+        route( "webhooks/:id/activate" ).withVerbs( "POST" ).to( "Webhooks.activate" );
+        route( "webhooks/:id/deactivate" ).withVerbs( "POST" ).to( "Webhooks.deactivate" );
+        route( "webhooks/:id/delete" ).withVerbs( "POST" ).to( "Webhooks.remove" );
+        route( "webhooks/:id" ).withHandler( "Webhooks" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "webhooks" ).to( "Webhooks.index" );
+
         // Ticket workflow (status catalog + transitions).
         route( "workflow/new" ).withHandler( "Workflow" ).toAction( {
             "GET"  : "newForm",

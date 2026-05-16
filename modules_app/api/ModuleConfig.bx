@@ -25,11 +25,25 @@ class {
         routes = [
             { pattern : "/v1/:handler/:action?" }
         ];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors = [
+            {
+                class      : "#moduleMapping#.interceptors.WebhookDispatchInterceptor",
+                name       : "WebhookDispatchInterceptor",
+                properties : {}
+            }
+        ];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "WebhookSubscription@api" )
+              .to( "#moduleMapping#.models.WebhookSubscription" );
+        binder.map( "WebhookDelivery@api" )
+              .to( "#moduleMapping#.models.WebhookDelivery" );
+        binder.map( "WebhooksService@api" )
+              .to( "#moduleMapping#.models.WebhooksService" )
+              .asSingleton();
+    }
     function onUnload(){}
 
 }

@@ -1,0 +1,55 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h5 mb-0">Outbound webhooks</h2>
+        <p class="text-body-secondary small mb-0">
+            POST a signed JSON payload to a third-party URL whenever a matching event fires.
+            Payloads carry an <code>X-TesseraBX-Signature</code> header (HMAC-SHA256, hex)
+            so recipients can verify authenticity.
+        </p>
+    </div>
+    <a class="btn btn-primary btn-sm" href="/agent/admin/webhooks/new"><i class="bi bi-plus-lg"></i> New webhook</a>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Target URL</th>
+                    <th>Events</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.subscriptions )>
+                    <tr><td colspan="5" class="text-center text-body-secondary py-4">No webhooks yet. Add one to start delivering events.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.subscriptions#" item="s">
+                    <tr>
+                        <td><strong>#encodeForHTML( s.name )#</strong></td>
+                        <td><code class="small">#encodeForHTML( s.targetUrl )#</code></td>
+                        <td>
+                            <bx:loop array="#listToArray( s.eventKeys, ',' )#" item="k">
+                                <span class="badge text-bg-secondary me-1">#encodeForHTML( trim( k ) )#</span>
+                            </bx:loop>
+                        </td>
+                        <td>
+                            <bx:if s.isActive>
+                                <span class="badge text-bg-success">Active</span>
+                            <bx:else>
+                                <span class="badge text-bg-light text-black">Inactive</span>
+                            </bx:if>
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="/agent/admin/webhooks/#encodeForHTMLAttribute( s.id )#">Edit</a>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

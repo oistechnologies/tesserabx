@@ -1,0 +1,20 @@
+/**
+ * WebhookSubscription: one outbound integration target.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="webhook_subscriptions"
+    accessors="true"
+{
+
+    property name="id";
+    property name="name";
+    property name="targetUrl"          column="target_url";
+    property name="eventKeys"          column="event_keys";
+    property name="secret";
+    property name="isActive"           column="is_active";
+    property name="createdByAgentId"   column="created_by_agent_id";
+    property name="createdAt"          column="created_at";
+    property name="updatedAt"          column="updated_at";
+
+}

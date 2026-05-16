@@ -1,0 +1,140 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">
+        <bx:if prc.isNew>New webhook
+        <bx:else>Edit: #encodeForHTML( prc.sub.name )#
+            <bx:if !prc.sub.isActive><span class="badge text-bg-light text-black ms-2">inactive</span></bx:if>
+        </bx:if>
+    </h2>
+    <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/webhooks"><i class="bi bi-arrow-left"></i> Back</a>
+</div>
+
+<form id="webhookForm" method="post" action="<bx:if prc.isNew>/agent/admin/webhooks/new<bx:else>/agent/admin/webhooks/#encodeForHTMLAttribute( prc.sub.id )#</bx:if>">
+    <input type="hidden" id="eventKeysInput" name="eventKeys" value="#encodeForHTMLAttribute( prc.sub.eventKeys )#">
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header"><strong>Details</strong></div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="name">Name</label>
+                        <input type="text" id="name" name="name" class="form-control" required value="#encodeForHTMLAttribute( prc.sub.name )#" placeholder="e.g. Zapier - ticket created">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="targetUrl">Target URL</label>
+                        <input type="url" id="targetUrl" name="targetUrl" class="form-control" required value="#encodeForHTMLAttribute( prc.sub.targetUrl )#" placeholder="https://hooks.example.com/tesserabx">
+                    </div>
+                    <bx:if !prc.isNew>
+                        <div class="mb-3">
+                            <label class="form-label">Signing secret</label>
+                            <div class="input-group">
+                                <input type="text" id="secret" class="form-control" value="#encodeForHTMLAttribute( prc.sub.secret )#" readonly>
+                                <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('secret').value)">Copy</button>
+                            </div>
+                            <div class="form-text small">Use this to verify <code>X-TesseraBX-Signature</code> on incoming payloads. HMAC-SHA256 over the raw request body.</div>
+                        </div>
+                    </bx:if>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header"><strong>Events</strong></div>
+                <div class="card-body">
+                    <p class="text-body-secondary small mb-2">Tick the events that should fire this webhook. Pick "All events" to subscribe to everything.</p>
+                    <div class="d-flex flex-column gap-1">
+                        <bx:set currentKeys = listToArray( prc.sub.eventKeys, "," ).map( ( k ) => trim( k ) ) >
+                        <label class="border rounded px-2 py-1">
+                            <input type="checkbox" class="form-check-input me-1 wh-event" value="*"<bx:if arrayFindNoCase( currentKeys, "*" )> checked</bx:if>>
+                            <strong>All events</strong> <small class="text-body-secondary">(<code>*</code>)</small>
+                        </label>
+                        <bx:loop array="#prc.eventCatalog#" item="e">
+                            <label class="border rounded px-2 py-1">
+                                <input type="checkbox" class="form-check-input me-1 wh-event" value="#encodeForHTMLAttribute( e.key )#"<bx:if arrayFindNoCase( currentKeys, e.key )> checked</bx:if>>
+                                #encodeForHTML( e.label )# <code class="small text-body-secondary">#encodeForHTML( e.key )#</code>
+                            </label>
+                        </bx:loop>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">
+            <bx:if prc.isNew>Create webhook<bx:else>Save changes</bx:if>
+        </button>
+        <bx:if !prc.isNew>
+            <bx:if prc.sub.isActive>
+                <form method="post" action="/agent/admin/webhooks/#encodeForHTMLAttribute( prc.sub.id )#/deactivate" class="d-inline" onsubmit="return confirm('Stop dispatching events to this URL?');">
+                    <button class="btn btn-outline-danger" type="submit">Deactivate</button>
+                </form>
+            <bx:else>
+                <form method="post" action="/agent/admin/webhooks/#encodeForHTMLAttribute( prc.sub.id )#/activate" class="d-inline">
+                    <button class="btn btn-outline-success" type="submit">Activate</button>
+                </form>
+            </bx:if>
+            <form method="post" action="/agent/admin/webhooks/#encodeForHTMLAttribute( prc.sub.id )#/delete" class="d-inline" onsubmit="return confirm('Delete this webhook and its delivery history?');">
+                <button class="btn btn-outline-danger" type="submit">Delete</button>
+            </form>
+        </bx:if>
+    </div>
+</form>
+
+<bx:if !prc.isNew>
+    <div class="card mt-4">
+        <div class="card-header"><strong>Recent deliveries</strong></div>
+        <div class="card-body p-0">
+            <table class="table table-sm mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Event</th>
+                        <th>Status</th>
+                        <th>HTTP</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:if !arrayLen( prc.deliveries )>
+                        <tr><td colspan="5" class="text-center text-body-secondary py-3">No deliveries yet.</td></tr>
+                    </bx:if>
+                    <bx:loop array="#prc.deliveries#" item="d">
+                        <tr>
+                            <td><small>#encodeForHTML( dateTimeFormat( d.scheduledAt, "yyyy-mm-dd HH:nn:ss" ) )#</small></td>
+                            <td><code class="small">#encodeForHTML( d.eventKey )#</code></td>
+                            <td>
+                                <bx:if d.status eq "sent">
+                                    <span class="badge text-bg-success">sent</span>
+                                <bx:elseif d.status eq "failed">
+                                    <span class="badge text-bg-danger">failed</span>
+                                <bx:else>
+                                    <span class="badge text-bg-secondary">#encodeForHTML( d.status )#</span>
+                                </bx:if>
+                            </td>
+                            <td>#encodeForHTML( d.statusCode )#</td>
+                            <td><small class="text-body-secondary">#encodeForHTML( left( d.errorMessage, 200 ) )#</small></td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</bx:if>
+</bx:output>
+
+<script>
+    (function(){
+        var form = document.getElementById('webhookForm');
+        if ( !form ) return;
+        form.addEventListener('submit', function(){
+            var keys = [];
+            document.querySelectorAll('.wh-event').forEach(function(cb){
+                if ( cb.checked ) keys.push(cb.value);
+            });
+            document.getElementById('eventKeysInput').value = keys.join(',');
+        });
+    })();
+</script>

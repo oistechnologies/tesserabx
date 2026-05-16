@@ -1,0 +1,24 @@
+/**
+ * WebhookDelivery: one attempted POST to a subscriber's target URL.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="webhook_deliveries"
+    accessors="true"
+{
+
+    property name="id";
+    property name="subscriptionId"  column="subscription_id";
+    property name="eventKey"        column="event_key";
+    property name="targetUrl"       column="target_url";
+    property name="payloadJson"     column="payload_json";
+    property name="status";
+    property name="statusCode"      column="status_code";
+    property name="responseBody"    column="response_body";
+    property name="errorMessage"    column="error_message";
+    property name="attemptCount"    column="attempt_count";
+    property name="scheduledAt"     column="scheduled_at";
+    property name="sentAt"          column="sent_at";
+    property name="completedAt"     column="completed_at";
+
+}

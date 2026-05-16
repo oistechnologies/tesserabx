@@ -1,0 +1,378 @@
+/**
+ * WebhooksService: subscription CRUD + outbound dispatch.
+ *
+ * Interceptors call dispatchForEvent(eventKey, payload). The
+ * service finds every active subscription whose event_keys list
+ * includes eventKey (or "*"), signs the payload with the
+ * subscription's secret, POSTs to its target URL, and records a
+ * webhook_deliveries row with the outcome.
+ *
+ * Synchronous for now (consistent with the rest of TesseraBX's
+ * 6e-deferred cbq path). Per-subscription failures do not
+ * propagate — the originating ticket save must not be blocked
+ * by a slow or broken external endpoint.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    /**
+     * The catalog of event keys other modules can fire here. The
+     * admin UI uses this to render multi-select; the dispatcher
+     * accepts any string but rejects unknown keys from new
+     * subscriptions to keep typos out of production config.
+     */
+    public array function eventCatalog(){
+        return [
+            { key : "ticket.created",         label : "Ticket created" },
+            { key : "ticket.status_changed",  label : "Ticket status changed" },
+            { key : "ticket.message_added",   label : "Message added to ticket" },
+            { key : "ticket.assigned",        label : "Ticket assigned to agent" }
+        ];
+    }
+
+    // ---------------- Subscription CRUD ----------------
+
+    public array function listSubscriptions( boolean activeOnly = false ){
+        var sql = "SELECT id, name, target_url, event_keys, secret, is_active, created_at
+                   FROM   webhook_subscriptions";
+        if ( arguments.activeOnly ) sql &= " WHERE is_active = TRUE";
+        sql &= " ORDER BY name";
+        var rows = queryExecute( sql );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id            : rows.id[ i ],
+                name          : rows.name[ i ],
+                targetUrl     : rows.target_url[ i ],
+                eventKeys     : rows.event_keys[ i ] ?: "",
+                secret        : rows.secret[ i ]     ?: "",
+                isActive      : !!rows.is_active[ i ],
+                createdAt     : rows.created_at[ i ]
+            } );
+        }
+        return out;
+    }
+
+    public any function findSubscription( required string id ){
+        if ( !len( arguments.id ) ) return javaCast( "null", "" );
+        for ( var s in listSubscriptions() ) {
+            if ( s.id == arguments.id ) return s;
+        }
+        return javaCast( "null", "" );
+    }
+
+    public string function createSubscription(
+        required string name,
+        required string targetUrl,
+        required string eventKeys,
+        string secret = "",
+        string actorAgentId = ""
+    ){
+        if ( !len( trim( arguments.name ) ) ) throw( type : "WebhooksService.InvalidName", message : "Subscription name is required." );
+        if ( !len( trim( arguments.targetUrl ) ) ) throw( type : "WebhooksService.InvalidUrl", message : "Target URL is required." );
+        if ( !reFind( "^https?://", arguments.targetUrl ) ) {
+            throw( type : "WebhooksService.InvalidUrl", message : "Target URL must start with http:// or https://." );
+        }
+        validateEventKeys( arguments.eventKeys );
+        var sec = len( arguments.secret ) ? arguments.secret : generateSecret();
+        var id  = createUUID();
+        queryExecute(
+            "INSERT INTO webhook_subscriptions
+                ( id, name, target_url, event_keys, secret, is_active, created_by_agent_id, created_at, updated_at )
+             VALUES
+                ( :id, :n, :u, :ek, :s, TRUE, :a, NOW(), NOW() )",
+            {
+                id : id,
+                n  : trim( arguments.name ),
+                u  : trim( arguments.targetUrl ),
+                ek : arguments.eventKeys,
+                s  : sec,
+                a  : len( arguments.actorAgentId ) ? arguments.actorAgentId : javaCast( "null", "" )
+            }
+        );
+        recordAudit( "webhook_subscription.created", id, arguments.actorAgentId, { "name" : arguments.name } );
+        return id;
+    }
+
+    public void function updateSubscription(
+        required string id,
+        string name,
+        string targetUrl,
+        string eventKeys,
+        string actorAgentId = ""
+    ){
+        var sets = [];
+        var binds = { id : arguments.id };
+        if ( structKeyExists( arguments, "name" ) && len( trim( arguments.name ?: "" ) ) ) {
+            sets.append( "name = :n" ); binds.n = trim( arguments.name );
+        }
+        if ( structKeyExists( arguments, "targetUrl" ) && len( trim( arguments.targetUrl ?: "" ) ) ) {
+            if ( !reFind( "^https?://", arguments.targetUrl ) ) {
+                throw( type : "WebhooksService.InvalidUrl", message : "Target URL must start with http:// or https://." );
+            }
+            sets.append( "target_url = :u" ); binds.u = trim( arguments.targetUrl );
+        }
+        if ( structKeyExists( arguments, "eventKeys" ) ) {
+            validateEventKeys( arguments.eventKeys );
+            sets.append( "event_keys = :ek" ); binds.ek = arguments.eventKeys;
+        }
+        if ( !sets.len() ) return;
+        sets.append( "updated_at = NOW()" );
+        queryExecute( "UPDATE webhook_subscriptions SET " & sets.toList() & " WHERE id = :id", binds );
+        recordAudit( "webhook_subscription.updated", arguments.id, arguments.actorAgentId, {} );
+    }
+
+    public void function setActive(
+        required string id,
+        required boolean active,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "UPDATE webhook_subscriptions SET is_active = cast( :a as boolean ), updated_at = NOW() WHERE id = :id",
+            { id : arguments.id, a : ( arguments.active ? "true" : "false" ) }
+        );
+        recordAudit(
+            arguments.active ? "webhook_subscription.activated" : "webhook_subscription.deactivated",
+            arguments.id,
+            arguments.actorAgentId,
+            {}
+        );
+    }
+
+    public void function deleteSubscription( required string id, string actorAgentId = "" ){
+        queryExecute( "DELETE FROM webhook_subscriptions WHERE id = :id", { id : arguments.id } );
+        recordAudit( "webhook_subscription.deleted", arguments.id, arguments.actorAgentId, {} );
+    }
+
+    // ---------------- Dispatch ----------------
+
+    /**
+     * Match every active subscription whose event_keys list
+     * includes `eventKey` (or "*"), POST the signed payload, and
+     * record the outcome. Returns the array of delivery ids
+     * created.
+     *
+     * Per-subscription failures are isolated: a slow or broken
+     * endpoint cannot block the originating event.
+     */
+    public array function dispatchForEvent(
+        required string eventKey,
+        required struct payload
+    ){
+        var subs = listSubscriptions( activeOnly : true );
+        var deliveryIds = [];
+        for ( var s in subs ) {
+            if ( !subscriptionMatches( s, arguments.eventKey ) ) continue;
+            try {
+                deliveryIds.append( deliverOne( s, arguments.eventKey, arguments.payload ) );
+            } catch ( any e ) {
+                writeLog(
+                    text : "WebhooksService dispatch [#s.id#/#arguments.eventKey#] crashed: " & e.message,
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+            }
+        }
+        return deliveryIds;
+    }
+
+    public array function listDeliveriesForSubscription(
+        required string subscriptionId,
+        numeric limit = 50
+    ){
+        var rows = queryExecute(
+            "SELECT id, event_key, target_url, status, status_code, error_message, attempt_count,
+                    scheduled_at, sent_at, completed_at
+             FROM   webhook_deliveries
+             WHERE  subscription_id = :sid
+             ORDER BY scheduled_at DESC
+             LIMIT  cast( :lim as integer )",
+            { sid : arguments.subscriptionId, lim : toString( int( arguments.limit ) ) }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id            : rows.id[ i ],
+                eventKey      : rows.event_key[ i ],
+                targetUrl     : rows.target_url[ i ],
+                status        : rows.status[ i ],
+                statusCode    : rows.status_code[ i ] ?: "",
+                errorMessage  : rows.error_message[ i ] ?: "",
+                attemptCount  : val( rows.attempt_count[ i ] ),
+                scheduledAt   : rows.scheduled_at[ i ],
+                sentAt        : rows.sent_at[ i ]      ?: "",
+                completedAt   : rows.completed_at[ i ] ?: ""
+            } );
+        }
+        return out;
+    }
+
+    // ---------------- internals ----------------
+
+    private boolean function subscriptionMatches( required struct sub, required string eventKey ){
+        var raw = arguments.sub.eventKeys ?: "";
+        if ( !len( raw ) ) return false;
+        for ( var k in listToArray( raw, "," ) ) {
+            var t = trim( k );
+            if ( t == "*" || t == arguments.eventKey ) return true;
+        }
+        return false;
+    }
+
+    private string function deliverOne(
+        required struct sub,
+        required string eventKey,
+        required struct payload
+    ){
+        var deliveryId = createUUID();
+        var envelope = {
+            "event"      : arguments.eventKey,
+            "id"         : deliveryId,
+            "delivered_at": dateTimeFormat( now(), "yyyy-mm-dd'T'HH:nn:ssXXX" ),
+            "data"       : arguments.payload
+        };
+        var body      = jsonSerialize( envelope );
+        var signature = lCase( hmac( body, arguments.sub.secret, "HmacSHA256" ) );
+
+        queryExecute(
+            "INSERT INTO webhook_deliveries
+                ( id, subscription_id, event_key, target_url, payload_json, status, attempt_count, scheduled_at )
+             VALUES
+                ( :id, :sid, :ek, :u, :p, 'pending', cast( :ac as integer ), NOW() )",
+            {
+                id  : deliveryId,
+                sid : arguments.sub.id,
+                ek  : arguments.eventKey,
+                u   : arguments.sub.targetUrl,
+                p   : body,
+                ac  : "1"
+            }
+        );
+
+        var statusCode  = 0;
+        var responseTxt = "";
+        var errorMsg    = "";
+        try {
+            // `url` is a reserved scope name in BoxLang/CFML; a local
+            // var of that name resolves to the URL scope (a struct)
+            // instead, so .openConnection() throws "method not found".
+            var targetUrlObj = createObject( "java", "java.net.URL" ).init( arguments.sub.targetUrl );
+            var conn = targetUrlObj.openConnection();
+            conn.setRequestMethod( "POST" );
+            conn.setRequestProperty( "Content-Type",            "application/json" );
+            conn.setRequestProperty( "X-TesseraBX-Event",       arguments.eventKey );
+            conn.setRequestProperty( "X-TesseraBX-Signature",   "sha256=" & signature );
+            conn.setRequestProperty( "X-TesseraBX-Delivery-Id", deliveryId );
+            conn.setRequestProperty( "User-Agent",              "TesseraBX-Webhooks/1.0" );
+            conn.setDoOutput( javaCast( "boolean", true ) );
+            conn.setConnectTimeout( javaCast( "int", 5000 ) );
+            conn.setReadTimeout( javaCast( "int", 10000 ) );
+            var os = conn.getOutputStream();
+            try {
+                os.write( body.getBytes( "UTF-8" ) );
+                os.flush();
+            } finally {
+                os.close();
+            }
+            statusCode = conn.getResponseCode();
+            // Best-effort response read; OK to fail on non-2xx
+            // where the stream is the error stream.
+            try {
+                var is = ( statusCode >= 200 && statusCode < 300 )
+                    ? conn.getInputStream()
+                    : conn.getErrorStream();
+                if ( !isNull( is ) ) {
+                    var scanner = createObject( "java", "java.util.Scanner" )
+                        .init( is, "UTF-8" )
+                        .useDelimiter( "\A" );
+                    responseTxt = scanner.hasNext() ? scanner.next() : "";
+                    is.close();
+                }
+            } catch ( any inner ) {}
+        } catch ( any e ) {
+            errorMsg = e.message;
+        }
+
+        var finalStatus = ( statusCode >= 200 && statusCode < 300 ) ? "sent" : "failed";
+        if ( !statusCode && len( errorMsg ) ) finalStatus = "failed";
+
+        queryExecute(
+            "UPDATE webhook_deliveries
+             SET    status        = :st,
+                    status_code   = cast( :sc as integer ),
+                    response_body = :rb,
+                    error_message = :em,
+                    sent_at       = NOW(),
+                    completed_at  = NOW()
+             WHERE  id = :id",
+            {
+                id : deliveryId,
+                st : finalStatus,
+                sc : toString( int( statusCode ) ),
+                rb : left( responseTxt, 2000 ),
+                em : left( errorMsg, 2000 )
+            }
+        );
+
+        return deliveryId;
+    }
+
+    private void function validateEventKeys( required string eventKeys ){
+        if ( !len( trim( arguments.eventKeys ) ) ) {
+            throw( type : "WebhooksService.InvalidEventKeys", message : "At least one event_key is required." );
+        }
+        var allowed = [ "*" ];
+        for ( var entry in eventCatalog() ) allowed.append( entry.key );
+        for ( var k in listToArray( arguments.eventKeys, "," ) ) {
+            var t = trim( k );
+            if ( !len( t ) ) continue;
+            if ( !arrayFindNoCase( allowed, t ) ) {
+                throw(
+                    type    : "WebhooksService.UnknownEventKey",
+                    message : "Unknown event_key: " & t & ". Allowed: *, " & eventCatalog().map( ( e ) => e.key ).toList( ", " )
+                );
+            }
+        }
+    }
+
+    private string function generateSecret(){
+        // 64 hex chars (256 bits) from four UUIDs concatenated and
+        // stripped — ample entropy for HMAC signing. Java SecureRandom
+        // would be technically purer but the BoxLang byte-array
+        // round-trip is brittle and createUUID() already uses
+        // SecureRandom under the hood on the JVM.
+        var pool = "";
+        for ( var i = 1; i <= 4; i++ ) pool &= replace( createUUID(), "-", "", "all" );
+        return lCase( left( pool, 64 ) );
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string entityId,
+        required string actorAgentId,
+        required struct metadata
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "webhook_subscription",
+                entityId   : arguments.entityId,
+                metadata   : arguments.metadata
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "WebhooksService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

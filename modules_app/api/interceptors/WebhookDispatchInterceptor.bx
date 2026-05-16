@@ -1,0 +1,74 @@
+/**
+ * WebhookDispatchInterceptor: forwards every interesting ticket
+ * event to WebhooksService.dispatchForEvent, which fans out to
+ * matching subscriptions.
+ *
+ * Failures here are swallowed: a slow or broken subscriber must
+ * not block the originating event's caller. The dispatcher
+ * records its own per-delivery failures in webhook_deliveries.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onTicketCreated( event, interceptData, rc, prc ){
+        safeDispatch( "ticket.created", arguments.interceptData );
+    }
+
+    function onTicketMessageAdded( event, interceptData, rc, prc ){
+        safeDispatch( "ticket.message_added", arguments.interceptData );
+    }
+
+    function onTicketStatusChanged( event, interceptData, rc, prc ){
+        safeDispatch( "ticket.status_changed", arguments.interceptData );
+    }
+
+    private void function safeDispatch( required string eventKey, required struct interceptData ){
+        try {
+            var payload = buildPayload( arguments.interceptData );
+            if ( !structIsEmpty( payload ) ) {
+                wirebox.getInstance( "WebhooksService@api" )
+                    .dispatchForEvent( eventKey : arguments.eventKey, payload : payload );
+            }
+        } catch ( any e ) {
+            writeLog(
+                text : "WebhookDispatchInterceptor [#arguments.eventKey#] failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private struct function buildPayload( required struct interceptData ){
+        var out = {};
+        if ( structKeyExists( arguments.interceptData, "ticket" ) ) {
+            var t = arguments.interceptData.ticket;
+            out.ticket = {
+                "id"                   : t.getId(),
+                "ticket_number"        : t.getTicketNumber(),
+                "subject"              : t.getSubject(),
+                "status"               : t.getStatus(),
+                "priority"             : t.getPriority(),
+                "organization_id"      : t.getOrganizationId()     ?: "",
+                "requester_contact_id" : t.getRequesterContactId() ?: "",
+                "originating_email"    : t.getOriginatingEmail()   ?: "",
+                "assigned_to_agent_id" : t.getAssignedToAgentId()  ?: "",
+                "updated_at"           : toString( t.getUpdatedAt() ?: "" )
+            };
+        }
+        if ( structKeyExists( arguments.interceptData, "from" ) ) out.from = arguments.interceptData.from;
+        if ( structKeyExists( arguments.interceptData, "to"   ) ) out.to   = arguments.interceptData.to;
+        if ( structKeyExists( arguments.interceptData, "message" ) ) {
+            var m = arguments.interceptData.message;
+            out.message = {
+                "id"          : m.getId(),
+                "body"        : m.getBody() ?: "",
+                "is_internal" : !!m.getIsInternal()
+            };
+        }
+        return out;
+    }
+
+}
