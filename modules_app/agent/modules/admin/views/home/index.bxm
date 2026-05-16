@@ -10,6 +10,7 @@
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/users"><i class="bi bi-people"></i> Users &amp; roles</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/teams"><i class="bi bi-diagram-3"></i> Teams</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/settings"><i class="bi bi-sliders"></i> Settings</a>
+                <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/custom-fields"><i class="bi bi-input-cursor"></i> Custom fields</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/audit"><i class="bi bi-journal-text"></i> Audit log</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/blacklist"><i class="bi bi-shield-x"></i> Inbound blacklist</a>
                 <a class="btn btn-outline-primary me-2 mb-1" href="/agent/admin/kb"><i class="bi bi-book"></i> Knowledge base</a>

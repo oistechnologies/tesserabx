@@ -1,0 +1,157 @@
+/**
+ * CustomFieldsServiceSpec: definition CRUD + value upsert.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "CustomFieldsService@tickets" );
+        variables.tsvc = getController().getWireBox().getInstance( "TicketsService@tickets" );
+    }
+
+    function run(){
+        describe( "CustomFieldsService", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute( "DELETE FROM custom_field_definitions WHERE key LIKE 'spec_%'" );
+            } );
+
+            it( "createDefinition inserts a row that listDefinitions surfaces", function(){
+                var id = variables.svc.createDefinition(
+                    entityType : "ticket",
+                    key        : "spec_text_" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                    label      : "Customer reference",
+                    fieldType  : "text"
+                );
+                var defs = variables.svc.listDefinitions( entityType : "ticket" );
+                var found = false;
+                for ( var d in defs ) if ( d.id == id ) found = true;
+                expect( found ).toBeTrue();
+            } );
+
+            it( "rejects an invalid field_type", function(){
+                expect( function(){
+                    variables.svc.createDefinition(
+                        entityType : "ticket",
+                        key        : "spec_bad",
+                        label      : "Bad",
+                        fieldType  : "made-up"
+                    );
+                } ).toThrow();
+            } );
+
+            it( "rejects an invalid key shape", function(){
+                expect( function(){
+                    variables.svc.createDefinition(
+                        entityType : "ticket",
+                        key        : "Has Spaces",
+                        label      : "x",
+                        fieldType  : "text"
+                    );
+                } ).toThrow();
+            } );
+
+            it( "parseOptions splits the textarea into a clean array", function(){
+                var raw = "Tier 1" & char( 10 ) & "Tier 2" & char( 10 ) & char( 10 ) & "Tier 3";
+                var opts = variables.svc.parseOptions( raw );
+                expect( opts ).toBe( [ "Tier 1", "Tier 2", "Tier 3" ] );
+            } );
+
+            it( "setDefinitionActive flips the flag", function(){
+                var id = variables.svc.createDefinition(
+                    entityType : "ticket",
+                    key        : "spec_toggle_" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                    label      : "Toggle",
+                    fieldType  : "text"
+                );
+                variables.svc.setDefinitionActive( id, false );
+                var active = variables.svc.listDefinitions( entityType : "ticket", activeOnly : true );
+                var found = false;
+                for ( var d in active ) if ( d.id == id ) found = true;
+                expect( found ).toBeFalse();
+            } );
+
+            it( "setValuesForTicket upserts the right typed column per field type", function(){
+                var ticket = variables.tsvc.createAccountlessTicket( {
+                    subject          : "cf-spec-" & createUUID(),
+                    originatingEmail : "cf-spec-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+
+                var textKey = "spec_text_" & lCase( replace( createUUID(), "-", "", "all" ) );
+                var numKey  = "spec_num_"  & lCase( replace( createUUID(), "-", "", "all" ) );
+                var boolKey = "spec_bool_" & lCase( replace( createUUID(), "-", "", "all" ) );
+
+                var textDefId = variables.svc.createDefinition( entityType : "ticket", key : textKey, label : "T", fieldType : "text" );
+                var numDefId  = variables.svc.createDefinition( entityType : "ticket", key : numKey,  label : "N", fieldType : "number" );
+                var boolDefId = variables.svc.createDefinition( entityType : "ticket", key : boolKey, label : "B", fieldType : "boolean" );
+
+                variables.svc.setValuesForTicket(
+                    ticketId : ticket.getId(),
+                    values   : {
+                        "#textDefId#" : "hello",
+                        "#numDefId#"  : "42.5",
+                        "#boolDefId#" : "true"
+                    }
+                );
+
+                var loaded = variables.svc.getValuesForTicket( ticket.getId() );
+                expect( loaded.len() ).toBeGTE( 3 );
+                for ( var row in loaded ) {
+                    if ( row.definition.id == textDefId ) {
+                        expect( row.value.valueText ).toBe( "hello" );
+                    } else if ( row.definition.id == numDefId ) {
+                        expect( toString( row.value.valueNumber ) ).toInclude( "42.5" );
+                    } else if ( row.definition.id == boolDefId ) {
+                        expect( row.value.valueBoolean ).toBeTrue();
+                    }
+                }
+
+                // Second call updates rather than duplicates (the unique
+                // index would also reject duplicates).
+                variables.svc.setValuesForTicket(
+                    ticketId : ticket.getId(),
+                    values   : { "#textDefId#" : "world" }
+                );
+                loaded = variables.svc.getValuesForTicket( ticket.getId() );
+                for ( var row in loaded ) {
+                    if ( row.definition.id == textDefId ) expect( row.value.valueText ).toBe( "world" );
+                }
+
+                queryExecute( "DELETE FROM ticket_custom_field_values WHERE ticket_id = :tid", { tid : ticket.getId() } );
+                queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
+            } );
+
+            it( "empty string clears the stored value", function(){
+                var ticket = variables.tsvc.createAccountlessTicket( {
+                    subject          : "cf-clear-" & createUUID(),
+                    originatingEmail : "cf-clear-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+                var defId = variables.svc.createDefinition(
+                    entityType : "ticket",
+                    key        : "spec_clr_" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                    label      : "Clr",
+                    fieldType  : "text"
+                );
+                variables.svc.setValuesForTicket( ticketId : ticket.getId(), values : { "#defId#" : "first" } );
+                variables.svc.setValuesForTicket( ticketId : ticket.getId(), values : { "#defId#" : "" } );
+
+                var rows = queryExecute(
+                    "SELECT value_text FROM ticket_custom_field_values WHERE ticket_id = :tid AND definition_id = :did",
+                    { tid : ticket.getId(), did : defId }
+                );
+                expect( rows.recordCount ).toBe( 1 );
+                expect( isNull( rows.value_text[ 1 ] ) || !len( toString( rows.value_text[ 1 ] ) ) ).toBeTrue();
+
+                queryExecute( "DELETE FROM ticket_custom_field_values WHERE ticket_id = :tid", { tid : ticket.getId() } );
+                queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
+            } );
+
+        } );
+    }
+
+}

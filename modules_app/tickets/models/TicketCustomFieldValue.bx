@@ -1,0 +1,23 @@
+/**
+ * TicketCustomFieldValue: one (ticket, definition) value row.
+ *
+ * Only one of the value_* columns is populated; which one depends
+ * on the parent definition's field_type. CustomFieldsService is
+ * the only place outside this class that writes here.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="ticket_custom_field_values"
+    accessors="true"
+{
+
+    property name="id";
+    property name="ticketId"      column="ticket_id";
+    property name="definitionId"  column="definition_id";
+    property name="valueText"     column="value_text";
+    property name="valueNumber"   column="value_number";
+    property name="valueDate"     column="value_date";
+    property name="valueBoolean"  column="value_boolean";
+    property name="updatedAt"     column="updated_at";
+
+}

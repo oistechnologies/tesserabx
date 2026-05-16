@@ -40,6 +40,21 @@ class {
         } );
         route( "kb" ).to( "Kb.index" );
 
+        // Ticket custom field definitions. Most-specific patterns
+        // first so /custom-fields/new and /:id/activate do not
+        // collide with /:id.
+        route( "custom-fields/new" ).withHandler( "CustomFields" ).toAction( {
+            "GET"  : "newForm",
+            "POST" : "create"
+        } );
+        route( "custom-fields/:id/activate" ).withVerbs( "POST" ).to( "CustomFields.activate" );
+        route( "custom-fields/:id/deactivate" ).withVerbs( "POST" ).to( "CustomFields.deactivate" );
+        route( "custom-fields/:id" ).withHandler( "CustomFields" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "custom-fields" ).to( "CustomFields.index" );
+
         // Branding + email server settings. Most-specific writes
         // first so /settings/branding et al. do not get swallowed.
         route( "settings/branding" ).withVerbs( "POST" ).to( "Settings.saveBranding" );

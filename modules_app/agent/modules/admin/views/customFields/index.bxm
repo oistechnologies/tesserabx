@@ -1,0 +1,73 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h5 mb-0">Custom fields</h2>
+        <p class="text-body-secondary small mb-0">Extra fields attached to every ticket. Agents see them on the ticket detail page.</p>
+    </div>
+    <div>
+        <form method="get" action="/agent/admin/custom-fields" class="form-check form-switch d-inline-block mb-0 me-2">
+            <input class="form-check-input" type="checkbox" id="includeInactive" name="includeInactive" value="true" onchange="this.form.submit()"<bx:if ( prc.includeInactive ?: "" ) eq "true" or ( prc.includeInactive ?: false ) eq true> checked</bx:if>>
+            <label class="form-check-label small" for="includeInactive">Show inactive</label>
+        </form>
+        <a class="btn btn-primary btn-sm" href="/agent/admin/custom-fields/new"><i class="bi bi-plus-lg"></i> New field</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Label</th>
+                    <th>Key</th>
+                    <th>Type</th>
+                    <th class="text-center">Required</th>
+                    <th class="text-center">Sort</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.definitions )>
+                    <tr><td colspan="7" class="text-center text-body-secondary py-4">No custom fields yet. Create one to surface extra data on every ticket.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.definitions#" item="d">
+                    <tr>
+                        <td>
+                            <strong>#encodeForHTML( d.label )#</strong>
+                            <bx:if len( d.helpText )>
+                                <div class="small text-body-secondary">#encodeForHTML( d.helpText )#</div>
+                            </bx:if>
+                        </td>
+                        <td><code>#encodeForHTML( d.key )#</code></td>
+                        <td><span class="badge text-bg-secondary">#encodeForHTML( d.fieldType )#</span></td>
+                        <td class="text-center">
+                            <bx:if d.isRequired><span class="badge text-bg-warning">required</span><bx:else>&mdash;</bx:if>
+                        </td>
+                        <td class="text-center">#d.sortOrder#</td>
+                        <td>
+                            <bx:if d.isActive>
+                                <span class="badge text-bg-success">Active</span>
+                            <bx:else>
+                                <span class="badge text-bg-light text-black">Inactive</span>
+                            </bx:if>
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#">Edit</a>
+                            <bx:if d.isActive>
+                                <form method="post" action="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#/deactivate" class="d-inline ms-1" onsubmit="return confirm('Deactivate this field? Existing values stay but agents will not see the input.');">
+                                    <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
+                                </form>
+                            <bx:else>
+                                <form method="post" action="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#/activate" class="d-inline ms-1">
+                                    <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
+                                </form>
+                            </bx:if>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

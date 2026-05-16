@@ -1,0 +1,95 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">
+        <bx:if prc.isNew>New custom field
+        <bx:else>Edit: #encodeForHTML( prc.def.label )#</bx:if>
+    </h2>
+    <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/custom-fields"><i class="bi bi-arrow-left"></i> Back</a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form id="cfDefForm" method="post" action="<bx:if prc.isNew>/agent/admin/custom-fields/new<bx:else>/agent/admin/custom-fields/#encodeForHTMLAttribute( prc.def.id )#</bx:if>">
+            <!--
+              options_json is the wire-safe carrier for the select
+              dropdown's option list. The textarea below is the editor;
+              the inline JS at the bottom of the form serializes its
+              lines into this hidden input on submit. Going over JSON
+              sidesteps a BoxLang form-scope quirk where multi-line
+              textarea content arrives newline-collapsed.
+            -->
+            <input type="hidden" id="optionsJson" name="options_json" value="">
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label" for="label">Label</label>
+                    <input type="text" id="label" name="label" class="form-control" required value="#encodeForHTMLAttribute( prc.def.label )#" placeholder="What agents see, e.g. Customer reference">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="key">Key</label>
+                    <input type="text" id="key" name="key" class="form-control" required value="#encodeForHTMLAttribute( prc.def.key )#" placeholder="snake_case_identifier" <bx:if !prc.isNew>readonly</bx:if>>
+                    <div class="form-text small">Lowercase letters, digits, underscores. Cannot change after creation.</div>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label" for="fieldType">Type</label>
+                    <select id="fieldType" name="fieldType" class="form-select">
+                        <bx:loop array="#prc.fieldTypes#" item="ft">
+                            <option value="#encodeForHTMLAttribute( ft.key )#"<bx:if prc.def.fieldType eq ft.key> selected</bx:if>>#encodeForHTML( ft.label )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="sortOrder">Sort order</label>
+                    <input type="number" id="sortOrder" name="sortOrder" class="form-control" value="#encodeForHTMLAttribute( prc.def.sortOrder )#">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <div class="form-check form-switch mt-3">
+                        <input type="hidden" name="isRequired" value="false">
+                        <input class="form-check-input" type="checkbox" id="isRequired" name="isRequired" value="true"<bx:if prc.def.isRequired> checked</bx:if>>
+                        <label class="form-check-label" for="isRequired">Required</label>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label" for="helpText">Help text (optional)</label>
+                    <input type="text" id="helpText" name="helpText" class="form-control" value="#encodeForHTMLAttribute( prc.def.helpText )#" placeholder="Shown under the field as a hint">
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label" for="options">Options (one per line, only used for "Dropdown")</label>
+                    <textarea id="options" name="options" class="form-control" rows="4" placeholder="Tier 1&##10;Tier 2&##10;Tier 3">#encodeForHTML( prc.def.options )#</textarea>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <button class="btn btn-primary" type="submit">
+                    <bx:if prc.isNew>Create field<bx:else>Save changes</bx:if>
+                </button>
+            </div>
+        </form>
+
+        <script>
+            (function(){
+                var form = document.getElementById('cfDefForm');
+                if ( !form ) return;
+                form.addEventListener('submit', function(){
+                    var ta = document.getElementById('options');
+                    var hidden = document.getElementById('optionsJson');
+                    if ( !ta || !hidden ) return;
+                    var lines = ta.value.split(/\r\n|\r|\n/)
+                        .map(function(s){ return s.trim(); })
+                        .filter(function(s){ return s.length > 0; });
+                    // Base64-encode the JSON so the cbantisamy sanitizer
+                    // does not eat the double quotes (it rewrites "
+                    // as &quot; which breaks jsonDeserialize on the
+                    // server side).
+                    var json = JSON.stringify(lines);
+                    var utf8 = unescape(encodeURIComponent(json));
+                    hidden.value = btoa(utf8);
+                });
+            })();
+        </script>
+    </div>
+</div>
+</bx:output>

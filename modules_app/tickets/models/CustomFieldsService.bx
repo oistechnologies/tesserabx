@@ -1,0 +1,391 @@
+/**
+ * CustomFieldsService: definitions + per-ticket values.
+ *
+ * The admin UI calls these to manage the schema (listDefinitions,
+ * createDefinition, updateDefinition, deactivateDefinition). The
+ * ticket show/edit pages call getValuesForTicket and
+ * setValuesForTicket. Reporting hits getValuesForTicket directly
+ * when slicing tickets by custom field.
+ *
+ * Field types: text | textarea | number | date | select | boolean.
+ * Selects keep their option list in CustomFieldDefinition.options
+ * as a newline-separated string (admin-edited textarea); the
+ * service splits and trims on read.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    public array function fieldTypes(){
+        return [
+            { key : "text",     label : "Single-line text" },
+            { key : "textarea", label : "Multi-line text"  },
+            { key : "number",   label : "Number"           },
+            { key : "date",     label : "Date"             },
+            { key : "select",   label : "Dropdown (select)" },
+            { key : "boolean",  label : "Checkbox"         }
+        ];
+    }
+
+    // ---------------- Definitions ----------------
+
+    public array function listDefinitions(
+        string entityType = "ticket",
+        boolean activeOnly = true
+    ){
+        var sql = "SELECT id, entity_type, key, label, field_type, options, help_text,
+                          is_required, is_active, sort_order
+                   FROM   custom_field_definitions
+                   WHERE  entity_type = :et";
+        var binds = { et : arguments.entityType };
+        if ( arguments.activeOnly ) sql &= " AND is_active = TRUE";
+        sql &= " ORDER BY sort_order ASC, label ASC";
+
+        var rows = queryExecute( sql, binds );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( rowToStruct( rows, i ) );
+        }
+        return out;
+    }
+
+    public any function findDefinition( required string id ){
+        if ( !len( arguments.id ) ) return javaCast( "null", "" );
+        var rows = queryExecute(
+            "SELECT id, entity_type, key, label, field_type, options, help_text,
+                    is_required, is_active, sort_order
+             FROM   custom_field_definitions
+             WHERE  id = :id",
+            { id : arguments.id }
+        );
+        if ( !rows.recordCount ) return javaCast( "null", "" );
+        return rowToStruct( rows, 1 );
+    }
+
+    public string function createDefinition(
+        required string entityType,
+        required string key,
+        required string label,
+        required string fieldType,
+        string options = "",
+        string helpText = "",
+        boolean isRequired = false,
+        numeric sortOrder = 0,
+        string actorAgentId = ""
+    ){
+        validateFieldType( arguments.fieldType );
+        validateKey( arguments.key );
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO custom_field_definitions
+                ( id, entity_type, key, label, field_type, options, help_text,
+                  is_required, is_active, sort_order, created_at, updated_at )
+             VALUES
+                ( :id, :et, :k, :lbl, :ft, :opts, :ht,
+                  cast( :req as boolean ), TRUE, cast( :so as integer ), NOW(), NOW() )",
+            {
+                id   : id,
+                et   : arguments.entityType,
+                k    : trim( arguments.key ),
+                lbl  : trim( arguments.label ),
+                ft   : arguments.fieldType,
+                opts : len( arguments.options )  ? arguments.options  : javaCast( "null", "" ),
+                ht   : len( arguments.helpText ) ? arguments.helpText : javaCast( "null", "" ),
+                req  : ( arguments.isRequired ? "true" : "false" ),
+                so   : toString( int( arguments.sortOrder ) )
+            }
+        );
+        recordAudit( "custom_field.created", id, arguments.actorAgentId, { "key" : arguments.key, "fieldType" : arguments.fieldType } );
+        return id;
+    }
+
+    public void function updateDefinition(
+        required string id,
+        string label,
+        string fieldType,
+        string options,
+        string helpText,
+        boolean isRequired,
+        numeric sortOrder,
+        string actorAgentId = ""
+    ){
+        var sets = [];
+        var binds = { id : arguments.id };
+        if ( structKeyExists( arguments, "label" ) && len( trim( arguments.label ?: "" ) ) ) {
+            sets.append( "label = :lbl" ); binds.lbl = trim( arguments.label );
+        }
+        if ( structKeyExists( arguments, "fieldType" ) && len( arguments.fieldType ?: "" ) ) {
+            validateFieldType( arguments.fieldType );
+            sets.append( "field_type = :ft" ); binds.ft = arguments.fieldType;
+        }
+        if ( structKeyExists( arguments, "options" ) ) {
+            sets.append( "options = :opts" );
+            binds.opts = len( arguments.options ?: "" ) ? arguments.options : javaCast( "null", "" );
+        }
+        if ( structKeyExists( arguments, "helpText" ) ) {
+            sets.append( "help_text = :ht" );
+            binds.ht = len( arguments.helpText ?: "" ) ? arguments.helpText : javaCast( "null", "" );
+        }
+        if ( structKeyExists( arguments, "isRequired" ) ) {
+            sets.append( "is_required = cast( :req as boolean )" );
+            binds.req = ( arguments.isRequired ? "true" : "false" );
+        }
+        if ( structKeyExists( arguments, "sortOrder" ) ) {
+            sets.append( "sort_order = cast( :so as integer )" );
+            binds.so = toString( int( arguments.sortOrder ) );
+        }
+        if ( !sets.len() ) return;
+        sets.append( "updated_at = NOW()" );
+
+        queryExecute(
+            "UPDATE custom_field_definitions SET " & sets.toList() & " WHERE id = :id",
+            binds
+        );
+        recordAudit( "custom_field.updated", arguments.id, arguments.actorAgentId, {} );
+    }
+
+    public void function setDefinitionActive(
+        required string id,
+        required boolean active,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "UPDATE custom_field_definitions
+             SET    is_active = cast( :a as boolean ), updated_at = NOW()
+             WHERE  id = :id",
+            { id : arguments.id, a : ( arguments.active ? "true" : "false" ) }
+        );
+        recordAudit(
+            arguments.active ? "custom_field.activated" : "custom_field.deactivated",
+            arguments.id,
+            arguments.actorAgentId,
+            {}
+        );
+    }
+
+    /**
+     * Split a select definition's options textarea into a clean
+     * array. Trims, drops blanks, preserves order. Used by both
+     * the admin form and the ticket-side render.
+     */
+    public array function parseOptions( required string raw ){
+        if ( !len( arguments.raw ) ) return [];
+        var out = [];
+        for ( var line in listToArray( arguments.raw, char( 10 ) & char( 13 ) ) ) {
+            var t = trim( line );
+            if ( len( t ) ) out.append( t );
+        }
+        return out;
+    }
+
+    // ---------------- Values ----------------
+
+    /**
+     * One row per active definition, with the saved value (if any)
+     * folded in. Drives the ticket-side render so missing values
+     * still surface the field with its placeholder.
+     */
+    public array function getValuesForTicket( required string ticketId ){
+        var defs = listDefinitions( entityType : "ticket", activeOnly : true );
+        if ( !defs.len() ) return [];
+
+        var rows = queryExecute(
+            "SELECT definition_id, value_text, value_number, value_date, value_boolean
+             FROM   ticket_custom_field_values
+             WHERE  ticket_id = :tid",
+            { tid : arguments.ticketId }
+        );
+        var byDef = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var rawBool = rows.value_boolean[ i ] ?: "";
+            byDef[ rows.definition_id[ i ] ] = {
+                valueText    : rows.value_text[ i ]    ?: "",
+                valueNumber  : rows.value_number[ i ]  ?: "",
+                valueDate    : rows.value_date[ i ]    ?: "",
+                valueBoolean : ( isBoolean( rawBool ) ? !!rawBool : false )
+            };
+        }
+
+        var out = [];
+        for ( var def in defs ) {
+            var v = byDef[ def.id ] ?: {
+                valueText    : "",
+                valueNumber  : "",
+                valueDate    : "",
+                valueBoolean : false
+            };
+            out.append( {
+                definition : def,
+                value      : v,
+                display    : displayValue( def, v )
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Batch upsert of all known values for one ticket. `values` is
+     * a struct keyed by definition id. The shape is opinionated:
+     * each entry is the raw string from the form; the service
+     * decides which column to write based on the definition's
+     * field_type. Empty strings are treated as "clear this value"
+     * and result in a NULL across all typed columns.
+     */
+    public void function setValuesForTicket(
+        required string ticketId,
+        required struct values,
+        string actorAgentId = ""
+    ){
+        var defs = listDefinitions( entityType : "ticket", activeOnly : true );
+        for ( var def in defs ) {
+            if ( !structKeyExists( arguments.values, def.id ) ) continue;
+            var raw = toString( arguments.values[ def.id ] ?: "" );
+
+            // Build the bind struct fresh per row. BoxLang's scope
+            // walker drops `var x = javaCast("null","")` declarations,
+            // so we add the column we want as a non-null and let the
+            // others default to null below.
+            var binds = {
+                id  : createUUID(),
+                tid : arguments.ticketId,
+                did : def.id
+            };
+            if ( len( raw ) ) {
+                switch ( def.fieldType ) {
+                    case "text":
+                    case "textarea":
+                    case "select":
+                        binds.vt = raw;
+                        break;
+                    case "number":
+                        if ( isNumeric( raw ) ) binds.vn = raw;
+                        break;
+                    case "date":
+                        if ( isDate( raw ) ) binds.vd = raw;
+                        break;
+                    case "boolean":
+                        binds.vb = ( raw == "true" || raw == "1" || raw == "on" ) ? "true" : "false";
+                        break;
+                }
+            }
+            if ( !structKeyExists( binds, "vt" ) ) binds.vt = javaCast( "null", "" );
+            if ( !structKeyExists( binds, "vn" ) ) binds.vn = javaCast( "null", "" );
+            if ( !structKeyExists( binds, "vd" ) ) binds.vd = javaCast( "null", "" );
+            if ( !structKeyExists( binds, "vb" ) ) binds.vb = javaCast( "null", "" );
+
+            queryExecute(
+                "INSERT INTO ticket_custom_field_values
+                    ( id, ticket_id, definition_id, value_text, value_number, value_date, value_boolean, updated_at )
+                 VALUES
+                    ( :id, :tid, :did,
+                      :vt,
+                      cast( :vn as numeric ),
+                      cast( :vd as timestamp ),
+                      cast( :vb as boolean ),
+                      NOW() )
+                 ON CONFLICT ( ticket_id, definition_id )
+                 DO UPDATE SET value_text    = EXCLUDED.value_text,
+                               value_number  = EXCLUDED.value_number,
+                               value_date    = EXCLUDED.value_date,
+                               value_boolean = EXCLUDED.value_boolean,
+                               updated_at    = NOW()",
+                binds
+            );
+        }
+        recordAudit( "custom_field.values_updated", arguments.ticketId, arguments.actorAgentId, {} );
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function rowToStruct( required query rows, required numeric i ){
+        return {
+            id          : arguments.rows.id[ arguments.i ],
+            entityType  : arguments.rows.entity_type[ arguments.i ],
+            key         : arguments.rows.key[ arguments.i ],
+            label       : arguments.rows.label[ arguments.i ],
+            fieldType   : arguments.rows.field_type[ arguments.i ],
+            options     : arguments.rows.options[ arguments.i ] ?: "",
+            helpText    : arguments.rows.help_text[ arguments.i ] ?: "",
+            isRequired  : !!arguments.rows.is_required[ arguments.i ],
+            isActive    : !!arguments.rows.is_active[ arguments.i ],
+            sortOrder   : val( arguments.rows.sort_order[ arguments.i ] )
+        };
+    }
+
+    /**
+     * Pick the right value column for the field type and stringify
+     * it for read-only display in lists / show pages. Empty when
+     * nothing has been saved yet.
+     */
+    private string function displayValue( required struct def, required struct v ){
+        switch ( arguments.def.fieldType ) {
+            case "text":
+            case "textarea":
+            case "select":
+                return arguments.v.valueText ?: "";
+            case "number":
+                var n = arguments.v.valueNumber ?: "";
+                return len( toString( n ) ) ? toString( n ) : "";
+            case "date":
+                var d = arguments.v.valueDate ?: "";
+                if ( isNull( d ) || !len( toString( d ) ) ) return "";
+                try { return dateFormat( d, "yyyy-mm-dd" ); } catch ( any e ) { return toString( d ); }
+            case "boolean":
+                return arguments.v.valueBoolean ? "Yes" : "No";
+        }
+        return "";
+    }
+
+    private void function validateFieldType( required string fieldType ){
+        var allowed = [ "text", "textarea", "number", "date", "select", "boolean" ];
+        if ( !arrayFindNoCase( allowed, arguments.fieldType ) ) {
+            throw(
+                type    : "CustomFieldsService.UnknownFieldType",
+                message : "Unknown field_type: " & arguments.fieldType
+            );
+        }
+    }
+
+    private void function validateKey( required string key ){
+        var t = trim( arguments.key );
+        if ( !len( t ) ) {
+            throw( type : "CustomFieldsService.InvalidKey", message : "Field key is required." );
+        }
+        // lowercase letters, digits, underscores
+        if ( !reFind( "^[a-z][a-z0-9_]*$", t ) ) {
+            throw(
+                type    : "CustomFieldsService.InvalidKey",
+                message : "Field key must start with a lowercase letter and contain only lowercase letters, digits, and underscores."
+            );
+        }
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string entityId,
+        required string actorAgentId,
+        required struct metadata
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "custom_field",
+                entityId   : arguments.entityId,
+                metadata   : arguments.metadata
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "CustomFieldsService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

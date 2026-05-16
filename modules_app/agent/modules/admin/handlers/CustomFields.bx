@@ -1,0 +1,145 @@
+/**
+ * /agent/admin/custom-fields handler.
+ *
+ * CRUD over CustomFieldDefinition (ticket scope for now).
+ * Admin-only via the cbSecurity rule on /agent/admin/*. All
+ * writes route through CustomFieldsService.
+ */
+class {
+
+    property name="customFields" inject="CustomFieldsService@tickets";
+    property name="messagebox"   inject="messagebox@cbmessagebox";
+    property name="auth"         inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.includeInactive = false;
+        prc.pageTitle       = "Custom fields";
+        prc.definitions     = customFields.listDefinitions(
+            entityType : "ticket",
+            activeOnly : !( rc.includeInactive == "true" || rc.includeInactive == "1" || rc.includeInactive == true )
+        );
+        prc.includeInactive = rc.includeInactive;
+        prc.fieldTypes      = customFields.fieldTypes();
+        event.setView( "customFields/index" );
+    }
+
+    function newForm( event, rc, prc ){
+        prc.pageTitle  = "New custom field";
+        prc.def        = { id : "", entityType : "ticket", key : "", label : "", fieldType : "text", options : "", helpText : "", isRequired : false, sortOrder : 0, isActive : true };
+        prc.isNew      = true;
+        prc.fieldTypes = customFields.fieldTypes();
+        event.setView( "customFields/edit" );
+    }
+
+    function create( event, rc, prc ){
+        try {
+            customFields.createDefinition(
+                entityType   : "ticket",
+                key          : rc.key ?: "",
+                label        : rc.label ?: "",
+                fieldType    : rc.fieldType ?: "text",
+                options      : resolveOptions( rc ),
+                helpText     : rc.helpText ?: "",
+                isRequired   : ( rc.isRequired ?: "false" ) == "true",
+                sortOrder    : val( rc.sortOrder ?: 0 ),
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Field created." );
+            relocate( uri = "/agent/admin/custom-fields" );
+        } catch ( any e ) {
+            messagebox.error( "Could not create field: " & e.message );
+            relocate( uri = "/agent/admin/custom-fields/new" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        param rc.id = "";
+        var def = customFields.findDefinition( rc.id );
+        if ( isNull( def ) ) {
+            messagebox.error( "Field not found." );
+            relocate( uri = "/agent/admin/custom-fields" );
+            return;
+        }
+        prc.pageTitle  = "Edit custom field";
+        prc.def        = def;
+        prc.isNew      = false;
+        prc.fieldTypes = customFields.fieldTypes();
+        event.setView( "customFields/edit" );
+    }
+
+    function update( event, rc, prc ){
+        param rc.id = "";
+        customFields.updateDefinition(
+            id           : rc.id,
+            label        : rc.label ?: "",
+            fieldType    : rc.fieldType ?: "text",
+            options      : resolveOptions( rc ),
+            helpText     : rc.helpText ?: "",
+            isRequired   : ( rc.isRequired ?: "false" ) == "true",
+            sortOrder    : val( rc.sortOrder ?: 0 ),
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Field saved." );
+        relocate( uri = "/agent/admin/custom-fields" );
+    }
+
+    function activate( event, rc, prc ){
+        param rc.id = "";
+        customFields.setDefinitionActive( id : rc.id, active : true, actorAgentId : currentAgentId() );
+        messagebox.info( "Field activated." );
+        relocate( uri = "/agent/admin/custom-fields?includeInactive=true" );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.id = "";
+        customFields.setDefinitionActive( id : rc.id, active : false, actorAgentId : currentAgentId() );
+        messagebox.info( "Field deactivated." );
+        relocate( uri = "/agent/admin/custom-fields" );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * The select-options textarea is shipped through a hidden
+     * options_json field built by the form's submit handler. We
+     * decode that JSON array and join with \n for storage so the
+     * read path (parseOptions splits on \n) stays unchanged. The
+     * raw rc.options textarea is the fallback when JS is disabled
+     * or the form was posted by a non-browser client.
+     */
+    private string function resolveOptions( required struct rc ){
+        var b64 = arguments.rc.options_json ?: "";
+        if ( len( b64 ) ) {
+            try {
+                // The view base64-encodes the JSON to ferry it past
+                // cbantisamy, which rewrites raw " as &quot; in form
+                // values. Decode → JSON → array → newline-joined string.
+                var jsonRaw = toString( toBinary( b64 ), "UTF-8" );
+                var arr     = jsonDeserialize( jsonRaw );
+                if ( isArray( arr ) ) {
+                    var cleaned = [];
+                    for ( var entry in arr ) {
+                        var t = trim( toString( entry ?: "" ) );
+                        if ( len( t ) ) cleaned.append( t );
+                    }
+                    return cleaned.toList( char( 10 ) );
+                }
+            } catch ( any e ) {
+                // fall through to raw fallback
+            }
+        }
+        return arguments.rc.options ?: "";
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

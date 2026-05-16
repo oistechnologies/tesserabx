@@ -295,6 +295,81 @@
             </div>
         </bx:if>
 
+        <bx:if arrayLen( prc.customFields ?: [] )>
+            <bx:set local.cfFilled = 0 >
+            <bx:loop array="#prc.customFields#" item="local.cf">
+                <bx:if len( local.cf.display )><bx:set local.cfFilled = local.cfFilled + 1 ></bx:if>
+            </bx:loop>
+            <div class="card mb-3">
+                <div class="card-header p-0">
+                    <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+                       data-bs-toggle="collapse"
+                       href="##custom-fields-card"
+                       role="button"
+                       aria-expanded="false"
+                       aria-controls="custom-fields-card">
+                        <span>
+                            Custom fields
+                            <span class="badge text-bg-light text-black ms-2">#local.cfFilled# / #arrayLen( prc.customFields )#</span>
+                        </span>
+                        <i class="bi bi-chevron-down"></i>
+                    </a>
+                </div>
+                <div id="custom-fields-card" class="collapse">
+                    <div class="card-body">
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/custom-fields">
+                            <bx:loop array="#prc.customFields#" item="local.cf">
+                                <bx:set local.def = local.cf.definition >
+                                <bx:set local.v   = local.cf.value >
+                                <bx:set local.fid = "cf_" & local.def.id >
+                                <div class="mb-3">
+                                    <label class="form-label small mb-1" for="#encodeForHTMLAttribute( local.fid )#">
+                                        #encodeForHTML( local.def.label )#
+                                        <bx:if local.def.isRequired><span class="text-danger">*</span></bx:if>
+                                    </label>
+
+                                    <bx:if local.def.fieldType eq "text">
+                                        <input type="text" class="form-control form-control-sm" id="#encodeForHTMLAttribute( local.fid )#" name="#encodeForHTMLAttribute( local.fid )#" value="#encodeForHTMLAttribute( local.v.valueText )#" <bx:if local.def.isRequired>required</bx:if>>
+                                    <bx:elseif local.def.fieldType eq "textarea">
+                                        <textarea class="form-control form-control-sm" id="#encodeForHTMLAttribute( local.fid )#" name="#encodeForHTMLAttribute( local.fid )#" rows="3" <bx:if local.def.isRequired>required</bx:if>>#encodeForHTML( local.v.valueText )#</textarea>
+                                    <bx:elseif local.def.fieldType eq "number">
+                                        <input type="number" step="any" class="form-control form-control-sm" id="#encodeForHTMLAttribute( local.fid )#" name="#encodeForHTMLAttribute( local.fid )#" value="#encodeForHTMLAttribute( local.v.valueNumber )#" <bx:if local.def.isRequired>required</bx:if>>
+                                    <bx:elseif local.def.fieldType eq "date">
+                                        <bx:set local.dateStr = "" >
+                                        <bx:if len( toString( local.v.valueDate ) )>
+                                            <bx:try>
+                                                <bx:set local.dateStr = dateFormat( local.v.valueDate, "yyyy-mm-dd" ) >
+                                                <bx:catch any></bx:catch>
+                                            </bx:try>
+                                        </bx:if>
+                                        <input type="date" class="form-control form-control-sm" id="#encodeForHTMLAttribute( local.fid )#" name="#encodeForHTMLAttribute( local.fid )#" value="#encodeForHTMLAttribute( local.dateStr )#" <bx:if local.def.isRequired>required</bx:if>>
+                                    <bx:elseif local.def.fieldType eq "select">
+                                        <select class="form-select form-select-sm" id="#encodeForHTMLAttribute( local.fid )#" name="#encodeForHTMLAttribute( local.fid )#" <bx:if local.def.isRequired>required</bx:if>>
+                                            <option value=""<bx:if !len( local.v.valueText )> selected</bx:if>>--</option>
+                                            <bx:loop array="#getInstance( 'CustomFieldsService@tickets' ).parseOptions( local.def.options )#" item="local.opt">
+                                                <option value="#encodeForHTMLAttribute( local.opt )#"<bx:if local.v.valueText eq local.opt> selected</bx:if>>#encodeForHTML( local.opt )#</option>
+                                            </bx:loop>
+                                        </select>
+                                    <bx:elseif local.def.fieldType eq "boolean">
+                                        <div class="form-check">
+                                            <input type="hidden" name="#encodeForHTMLAttribute( local.fid )#" value="false">
+                                            <input class="form-check-input" type="checkbox" id="#encodeForHTMLAttribute( local.fid )#" name="#encodeForHTMLAttribute( local.fid )#" value="true"<bx:if local.v.valueBoolean> checked</bx:if>>
+                                            <label class="form-check-label small" for="#encodeForHTMLAttribute( local.fid )#">Yes</label>
+                                        </div>
+                                    </bx:if>
+
+                                    <bx:if len( local.def.helpText )>
+                                        <div class="form-text small text-body-secondary">#encodeForHTML( local.def.helpText )#</div>
+                                    </bx:if>
+                                </div>
+                            </bx:loop>
+                            <button class="btn btn-sm btn-primary" type="submit">Save fields</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </bx:if>
+
         <div class="card mb-3">
             <div class="card-header p-0">
                 <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"

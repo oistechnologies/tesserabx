@@ -52,8 +52,15 @@ class {
               .to( "#moduleMapping#.models.Attachment" );
         binder.map( "Tag@tickets" )
               .to( "#moduleMapping#.models.Tag" );
+        binder.map( "CustomFieldDefinition@tickets" )
+              .to( "#moduleMapping#.models.CustomFieldDefinition" );
+        binder.map( "TicketCustomFieldValue@tickets" )
+              .to( "#moduleMapping#.models.TicketCustomFieldValue" );
         binder.map( "TicketsService@tickets" )
               .to( "#moduleMapping#.models.TicketsService" )
+              .asSingleton();
+        binder.map( "CustomFieldsService@tickets" )
+              .to( "#moduleMapping#.models.CustomFieldsService" )
               .asSingleton();
     }
 

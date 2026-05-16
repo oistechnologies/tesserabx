@@ -1,0 +1,27 @@
+/**
+ * CustomFieldDefinition: one admin-defined extra field that
+ * attaches to a domain entity (currently 'ticket').
+ *
+ * CustomFieldsService is the only place outside this class that
+ * writes here.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="custom_field_definitions"
+    accessors="true"
+{
+
+    property name="id";
+    property name="entityType"  column="entity_type";
+    property name="key";
+    property name="label";
+    property name="fieldType"   column="field_type";
+    property name="options";
+    property name="helpText"    column="help_text";
+    property name="isRequired"  column="is_required";
+    property name="isActive"    column="is_active";
+    property name="sortOrder"   column="sort_order";
+    property name="createdAt"   column="created_at";
+    property name="updatedAt"   column="updated_at";
+
+}

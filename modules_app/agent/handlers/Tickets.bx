@@ -13,6 +13,7 @@
 class {
 
     property name="ticketsService"        inject="TicketsService@tickets";
+    property name="customFieldsService"   inject="CustomFieldsService@tickets";
     property name="contactsService"       inject="ContactsService@contacts";
     property name="channelsService"       inject="ChannelsService@channels";
     property name="slaService"            inject="SlaService@sla";
@@ -343,6 +344,32 @@ class {
         relocate( uri = "/agent/tickets/" & t.getId() );
     }
 
+    function saveCustomFields( event, rc, prc ){
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        // Build the {defId: value} struct from the form keys the
+        // view emits as "cf_<definitionId>". Anything else in rc is
+        // ignored, so other form posts cannot accidentally write
+        // custom-field rows.
+        var values = {};
+        for ( var key in rc ) {
+            if ( left( key, 3 ) == "cf_" ) {
+                values[ mid( key, 4, len( key ) - 3 ) ] = rc[ key ];
+            }
+        }
+        customFieldsService.setValuesForTicket(
+            ticketId     : t.getId(),
+            values       : values,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Custom fields saved." );
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
     function blockSender( event, rc, prc ){
         param rc.scope  = "email";
         param rc.reason = "";
@@ -550,6 +577,11 @@ class {
         // The draft field carries the textarea contents back so the
         // agent does not lose what they typed when running a check.
         arguments.prc.toneReview = flash.get( "toneReview", {} );
+
+        // Custom fields (active definitions + saved values folded
+        // in). Empty when no definitions are configured, so the
+        // ticket view simply does not render the card.
+        arguments.prc.customFields = customFieldsService.getValuesForTicket( arguments.ticket.getId() );
     }
 
     private string function currentAgentId(){
