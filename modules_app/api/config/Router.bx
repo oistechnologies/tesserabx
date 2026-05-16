@@ -1,16 +1,34 @@
 /**
  * api module router.
  *
- * All routes are auto-prefixed with /api because of
- * `entryPoint = "api"` in ModuleConfig.bx.
+ * All routes auto-prefixed with /api per `entryPoint = "api"`
+ * in ModuleConfig.bx.
  *
- * Phase 0 ships a placeholder /v1/ping; Phase 1+ wires the real
- * endpoints.
+ * Versioned under /v1; future breaking changes mount under /v2.
  */
 class {
 
     function configure(){
-        // route( "/v1/ping" ).to( "Ping.index" );
+        // Order matters: ColdBox's test bootstrap appears to treat
+        // the first registered route as the implicit "current
+        // routed URL" when none was passed, which marks
+        // isInvalidHTTPMethod=true on unrelated execute() calls
+        // when the first route is POST-only. List GET routes first
+        // so the test fallback resolves to a GET-compatible route.
+        route( "/v1/tickets/:id" ).withVerbs( "GET" ).to( "Tickets.show" );
+        route( "/v1/tickets" ).withHandler( "Tickets" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
+
+        // Mutations on tickets.
+        route( "/v1/tickets/:id/messages" ).withVerbs( "POST" ).to( "Tickets.reply" );
+        route( "/v1/tickets/:id/status" ).withVerbs( "POST" ).to( "Tickets.changeStatus" );
+        route( "/v1/tickets/:id/assign" ).withVerbs( "POST" ).to( "Tickets.assign" );
+
+        // Auth.
+        route( "/v1/auth/login" ).withVerbs( "POST" ).to( "Auth.login" );
+        route( "/v1/auth/refresh" ).withVerbs( "POST" ).to( "Auth.refresh" );
     }
 
 }

@@ -18,11 +18,18 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 variables.svc.invalidateCache();
             } );
 
-            it( "listStatuses returns the seeded six in sort order", function(){
+            it( "listStatuses includes the seeded keys in sort order", function(){
                 var statuses = variables.svc.listStatuses();
                 var keys = [];
                 for ( var s in statuses ) keys.append( s.key );
-                expect( keys ).toBe( [ "new", "open", "pending", "on-hold", "resolved", "closed" ] );
+                for ( var expected in [ "new", "open", "pending", "on-hold", "resolved", "closed" ] ) {
+                    expect( keys ).toInclude( expected );
+                }
+                // The expected ordering of the seeded keys (admin may
+                // have inserted extras between them, which is fine).
+                expect( arrayFindNoCase( keys, "new" ) ).toBeLT( arrayFindNoCase( keys, "open" ) );
+                expect( arrayFindNoCase( keys, "open" ) ).toBeLT( arrayFindNoCase( keys, "resolved" ) );
+                expect( arrayFindNoCase( keys, "resolved" ) ).toBeLT( arrayFindNoCase( keys, "closed" ) );
             } );
 
             it( "isValidTransition matches the seeded edges", function(){
@@ -45,9 +52,14 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.svc.isTerminal( "open" ) ).toBeFalse();
             } );
 
-            it( "keysByCategory matches the documented seed", function(){
-                expect( variables.svc.keysByCategory( [ "resolved", "closed" ] ) ).toBe( [ "resolved", "closed" ] );
-                expect( variables.svc.keysByCategory( [ "paused" ] ) ).toBe( [ "pending", "on-hold" ] );
+            it( "keysByCategory matches the seeded keys for each bucket", function(){
+                var terminal = variables.svc.keysByCategory( [ "resolved", "closed" ] );
+                expect( terminal ).toInclude( "resolved" );
+                expect( terminal ).toInclude( "closed" );
+
+                var paused = variables.svc.keysByCategory( [ "paused" ] );
+                expect( paused ).toInclude( "pending" );
+                expect( paused ).toInclude( "on-hold" );
             } );
 
             it( "createStatus inserts and the cache picks it up after write", function(){

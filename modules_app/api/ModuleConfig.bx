@@ -18,7 +18,7 @@ class {
     this.modelNamespace     = "api";
     this.cfmapping          = "tesserabx.modules.api";
     this.autoMapModels      = false;
-    this.dependencies       = [ "tickets", "contacts" ];
+    this.dependencies       = [ "tickets", "contacts", "agent" ];
 
     function configure(){
         settings = {};

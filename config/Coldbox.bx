@@ -168,6 +168,33 @@ class {
                     rotationTimeInMinutes : 30,
                     verifyExcludes        : [ "^/api(/|$)", "^/health" ]
                 },
+                authentication : {
+                    provider        : "authenticationService@cbauth",
+                    userService     : "UserService@contacts",
+                    prcUserVariable : "oCurrentUser"
+                },
+                // JWT settings for the REST API at /api. The Authorization
+                // bearer token is the only mechanism agents use to
+                // authenticate API requests; portal and agent surfaces
+                // continue to use cbauth's session-based auth.
+                jwt : {
+                    issuer             : "tesserabx",
+                    secretKey          : getSystemSetting( "JWT_SECRET", "" ),
+                    customAuthHeader   : "x-auth-token",
+                    expiration         : val( getSystemSetting( "JWT_EXPIRATION_MINUTES", 60 ) ),
+                    enableRefreshTokens   : true,
+                    refreshExpiration     : val( getSystemSetting( "JWT_REFRESH_MINUTES", 10080 ) ),
+                    customRefreshHeader   : "x-refresh-token",
+                    enableRefreshEndpoint : false,
+                    algorithm             : "HS512",
+                    requiredClaims        : [],
+                    tokenStorage : {
+                        "enabled"    : true,
+                        "keyPrefix"  : "cbjwt_",
+                        "driver"     : "cachebox",
+                        "properties" : { cacheName : "default" }
+                    }
+                },
                 firewall : {
                     autoLoadFirewall              : true,
                     invalidAuthenticationEvent    : "portal:Session.new",
@@ -176,6 +203,22 @@ class {
                     invalidAuthorizationEvent     : "agent:Session.unauthorized",
                     defaultAuthorizationAction    : "block",
                     rules : [
+                        // API surface: bearer-token / JWT auth, validated
+                        // by cbsecurity's JwtAuthValidator. The login and
+                        // refresh endpoints are unauthenticated; every
+                        // other /api/* path requires a valid JWT whose
+                        // bearer holds the "agent" role. Contacts cannot
+                        // hit the API — the role check rejects them with
+                        // 403 even when their JWT is valid.
+                        // /api routes are stateless. cbsecurity's
+                        // global validator is session-based (cbauth)
+                        // and 3.7 does not honor a per-rule validator
+                        // override; nor does the firewall let us cheaply
+                        // express "no auth check for these paths". So
+                        // each api handler action calls an ensureAgent()
+                        // guard that parses the JWT through JwtService
+                        // and responds 401/403 in JSON when it fails.
+                        // No firewall rule lives here for /api.
                         // Most-specific rule first: /agent/admin requires
                         // an admin-flagged agent. Anyone else gets the
                         // agent:Session.unauthorized handler which renders

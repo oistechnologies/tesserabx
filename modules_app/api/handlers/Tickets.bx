@@ -1,0 +1,293 @@
+/**
+ * api:Tickets handler — REST endpoints for ticket CRUD.
+ *
+ * - GET    /api/v1/tickets               → list (filters: status, priority, organizationId, q, limit, accountlessOnly)
+ * - POST   /api/v1/tickets               → create (contact-backed or accountless)
+ * - GET    /api/v1/tickets/:id           → single ticket with timeline
+ * - POST   /api/v1/tickets/:id/messages  → add reply (public or internal)
+ * - POST   /api/v1/tickets/:id/status    → change status
+ * - POST   /api/v1/tickets/:id/assign    → assign / unassign
+ *
+ * Every call requires a valid JWT bearer with the "agent" role; the
+ * global firewall rule on /api enforces this. The acting agent's id
+ * is pulled from prc.oCurrentUser (cbsecurity stashes the resolved
+ * user there) so per-ticket audit + ticket_events records the
+ * actor correctly.
+ */
+class {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="jwtService"     inject="JwtService@cbsecurity";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.paramValue( "format", "json" );
+    }
+
+    /**
+     * Guard called by every secured action. Returns true when the
+     * bearer holds a valid token with the agent role; otherwise
+     * renders the 401/403 response and returns false. Action
+     * methods MUST `if ( !ensureAgent(...) ) return;` before doing
+     * any work — ColdBox 8's preHandler cannot halt the subsequent
+     * action even with event.noExecution(), so the auth check
+     * lives here per-action.
+     */
+    private boolean function ensureAgent( required any event, required struct prc ){
+        try {
+            // parseToken populates prc.oCurrentUser as a side effect.
+            var payload = jwtService.getPayload();
+        } catch ( any e ) {
+            arguments.event.renderData(
+                type = "json",
+                statusCode = 401,
+                data = { error : ( e.type ?: "TokenError" ) & ": " & ( e.message ?: "" ) }
+            );
+            return false;
+        }
+        if ( !listFindNoCase( payload.scope ?: "", "agent", " " ) ) {
+            arguments.event.renderData(
+                type = "json",
+                statusCode = 403,
+                data = { error : "Token does not carry the agent role." }
+            );
+            return false;
+        }
+        return true;
+    }
+
+    function index( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        param rc.status            = "";
+        param rc.priority          = "";
+        param rc.organizationId    = "";
+        param rc.assignedToAgentId = "";
+        param rc.q                 = "";
+        param rc.limit             = 50;
+        param rc.accountlessOnly   = false;
+
+        var rows = ticketsService.listTickets(
+            status            : rc.status,
+            priority          : rc.priority,
+            organizationId    : rc.organizationId,
+            assignedToAgentId : rc.assignedToAgentId,
+            search            : rc.q,
+            accountlessOnly   : ( rc.accountlessOnly == "true" || rc.accountlessOnly == "1" || rc.accountlessOnly == true ),
+            limit             : int( min( val( rc.limit ), 200 ) )
+        );
+        var data = [];
+        for ( var t in rows ) data.append( ticketStruct( t ) );
+        return event.renderData( type = "json", statusCode = 200, data = { tickets : data, total : data.len() } );
+    }
+
+    function show( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) return notFound( event, "Ticket not found." );
+
+        var messages = [];
+        for ( var m in ticketsService.listMessagesForTicket( t.getId(), true ) ) {
+            messages.append( messageStruct( m ) );
+        }
+        var events = [];
+        for ( var e in ticketsService.listEventsForTicket( t.getId() ) ) {
+            events.append( eventStruct( e ) );
+        }
+        return event.renderData(
+            type = "json",
+            statusCode = 200,
+            data = ticketStruct( t ).append( { messages : messages, events : events } )
+        );
+    }
+
+    function create( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        param rc.subject            = "";
+        param rc.requesterContactId = "";
+        param rc.originatingEmail   = "";
+        param rc.priority           = "normal";
+        param rc.ticketType         = "request";
+        param rc.firstMessage       = "";
+
+        if ( !len( trim( rc.subject ) ) ) return badRequest( event, "subject is required" );
+
+        var actorId = currentAgentId( prc );
+        try {
+            var t = "";
+            if ( len( rc.requesterContactId ) ) {
+                t = ticketsService.createTicket( {
+                    requesterContactId : rc.requesterContactId,
+                    subject            : rc.subject,
+                    priority           : rc.priority,
+                    ticketType         : rc.ticketType,
+                    source             : "api",
+                    actorType          : "agent",
+                    actorId            : actorId
+                } );
+            } else if ( len( rc.originatingEmail ) ) {
+                t = ticketsService.createAccountlessTicket( {
+                    originatingEmail : rc.originatingEmail,
+                    subject          : rc.subject,
+                    priority         : rc.priority,
+                    ticketType       : rc.ticketType,
+                    source           : "api",
+                    actorType        : "agent",
+                    actorId          : actorId
+                } );
+            } else {
+                return badRequest( event, "Either requesterContactId or originatingEmail is required." );
+            }
+            if ( len( trim( rc.firstMessage ) ) ) {
+                ticketsService.addMessage( {
+                    ticketId   : t.getId(),
+                    body       : rc.firstMessage,
+                    isInternal : false,
+                    authorType : "agent",
+                    authorId   : actorId
+                } );
+            }
+            return event.renderData(
+                type = "json",
+                statusCode = 201,
+                data = ticketStruct( t )
+            );
+        } catch ( any e ) {
+            return badRequest( event, e.message );
+        }
+    }
+
+    function reply( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        param rc.body       = "";
+        param rc.isInternal = false;
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) return notFound( event, "Ticket not found." );
+        if ( !len( trim( rc.body ) ) ) return badRequest( event, "body is required" );
+
+        try {
+            var m = ticketsService.addMessage( {
+                ticketId   : t.getId(),
+                body       : rc.body,
+                isInternal : ( rc.isInternal == "true" || rc.isInternal == "1" || rc.isInternal == true ),
+                authorType : "agent",
+                authorId   : currentAgentId( prc )
+            } );
+            return event.renderData( type = "json", statusCode = 201, data = messageStruct( m ) );
+        } catch ( any e ) {
+            return badRequest( event, e.message );
+        }
+    }
+
+    function changeStatus( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        param rc.status = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) return notFound( event, "Ticket not found." );
+        if ( !len( rc.status ) ) return badRequest( event, "status is required" );
+
+        try {
+            ticketsService.changeStatus( {
+                ticketId  : t.getId(),
+                status    : rc.status,
+                actorType : "agent",
+                actorId   : currentAgentId( prc )
+            } );
+            return event.renderData(
+                type = "json",
+                statusCode = 200,
+                data = ticketStruct( ticketsService.getTicket( t.getId() ) )
+            );
+        } catch ( any e ) {
+            return badRequest( event, e.message );
+        }
+    }
+
+    function assign( event, rc, prc ){
+        if ( !ensureAgent( event, prc ) ) return;
+        param rc.agentId = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) return notFound( event, "Ticket not found." );
+
+        try {
+            ticketsService.assignToAgent( {
+                ticketId : t.getId(),
+                agentId  : rc.agentId,
+                actorId  : currentAgentId( prc )
+            } );
+            return event.renderData(
+                type = "json",
+                statusCode = 200,
+                data = ticketStruct( ticketsService.getTicket( t.getId() ) )
+            );
+        } catch ( any e ) {
+            return badRequest( event, e.message );
+        }
+    }
+
+    // ---------- serialization ----------
+
+    private struct function ticketStruct( required any t ){
+        return {
+            id                  : arguments.t.getId(),
+            ticket_number       : arguments.t.getTicketNumber(),
+            subject             : arguments.t.getSubject(),
+            status              : arguments.t.getStatus(),
+            priority            : arguments.t.getPriority(),
+            ticket_type         : arguments.t.getTicketType() ?: "",
+            source              : arguments.t.getSource()     ?: "",
+            organization_id     : arguments.t.getOrganizationId()     ?: "",
+            requester_contact_id: arguments.t.getRequesterContactId() ?: "",
+            originating_email   : arguments.t.getOriginatingEmail()   ?: "",
+            assigned_to_agent_id: arguments.t.getAssignedToAgentId()  ?: "",
+            created_at          : toString( arguments.t.getCreatedAt() ?: "" ),
+            updated_at          : toString( arguments.t.getUpdatedAt() ?: "" ),
+            resolved_at         : toString( arguments.t.getResolvedAt() ?: "" ),
+            closed_at           : toString( arguments.t.getClosedAt()   ?: "" )
+        };
+    }
+
+    private struct function messageStruct( required any m ){
+        var authorAgentId   = arguments.m.getAuthorAgentId()   ?: "";
+        var authorContactId = arguments.m.getAuthorContactId() ?: "";
+        return {
+            id                : arguments.m.getId(),
+            ticket_id         : arguments.m.getTicketId(),
+            author_type       : len( authorAgentId ) ? "agent" : ( len( authorContactId ) ? "contact" : "system" ),
+            author_agent_id   : authorAgentId,
+            author_contact_id : authorContactId,
+            author_email      : arguments.m.getAuthorEmail() ?: "",
+            body              : arguments.m.getBody() ?: "",
+            is_internal       : !!arguments.m.getIsInternal(),
+            created_at        : toString( arguments.m.getCreatedAt() ?: "" )
+        };
+    }
+
+    private struct function eventStruct( required any e ){
+        return {
+            id          : arguments.e.getId(),
+            ticket_id   : arguments.e.getTicketId(),
+            event_type  : arguments.e.getEventType()    ?: "",
+            actor_type  : arguments.e.getActorType()    ?: "",
+            actor_id    : arguments.e.getActorId()      ?: "",
+            metadata    : arguments.e.getMetadataJson() ?: "",
+            occurred_at : toString( arguments.e.getOccurredAt() ?: "" )
+        };
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId( required struct prc ){
+        if ( !structKeyExists( arguments.prc, "oCurrentUser" ) ) return "";
+        var u = arguments.prc.oCurrentUser;
+        if ( isNull( u ) ) return "";
+        try { return u.getId(); } catch ( any e ) { return ""; }
+    }
+
+    private any function badRequest( required any event, required string message ){
+        return arguments.event.renderData( type = "json", statusCode = 400, data = { error : arguments.message } );
+    }
+
+    private any function notFound( required any event, required string message ){
+        return arguments.event.renderData( type = "json", statusCode = 404, data = { error : arguments.message } );
+    }
+
+}

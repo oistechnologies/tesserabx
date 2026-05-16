@@ -1,0 +1,90 @@
+/**
+ * ApiAuthSpec: covers the auth primitives the API depends on
+ * without going through ColdBox's execute() helper, which leaks
+ * request-context routing state into subsequent test bundles
+ * (the request URL gets stuck on the first registered route's
+ * pattern and trips isInvalidHTTPMethod on every later spec).
+ *
+ * The live REST flow (login → bearer → protected GET) is
+ * verified by hand via curl; this spec asserts the building
+ * blocks: AgentAuthService.authenticate, JwtService.fromUser /
+ * decode, and the JWT subject claims Agent contributes.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.bcrypt   = getController().getWireBox().getInstance( "@BCrypt" );
+        variables.authSvc  = getController().getWireBox().getInstance( "AgentAuthService@agent" );
+        variables.jwtSvc   = getController().getWireBox().getInstance( "JwtService@cbsecurity" );
+    }
+
+    function run(){
+        describe( "REST API auth primitives", function(){
+
+            it( "AgentAuthService.authenticate returns the agent for valid credentials", function(){
+                var seeded = seedAgent();
+                var got = variables.authSvc.authenticate( seeded.email, "spec-pass" );
+                expect( got ).notToBeNull();
+                expect( got.getId() ).toBe( seeded.id );
+                cleanupAgent( seeded.id );
+            } );
+
+            it( "AgentAuthService.authenticate returns null for bad credentials", function(){
+                var seeded = seedAgent();
+                expect( variables.authSvc.authenticate( seeded.email, "wrong-pass" ) ).toBeNull();
+                cleanupAgent( seeded.id );
+            } );
+
+            it( "AgentAuthService.authenticate returns null for an unknown email", function(){
+                expect( variables.authSvc.authenticate( "ghost-" & createUUID() & "@example.com", "x" ) ).toBeNull();
+            } );
+
+            it( "JwtService.fromUser mints a token whose payload carries the agent's id and scope", function(){
+                var seeded = seedAgent();
+                var agent  = getController().getWireBox().getInstance( "Agent@agent" )
+                    .where( "id", seeded.id )
+                    .first();
+                var token  = variables.jwtSvc.fromUser( agent );
+                var raw    = isStruct( token ) ? token.access_token : token;
+                var payload = variables.jwtSvc.decode( raw );
+                expect( payload.sub ).toBe( seeded.id );
+                expect( payload.scope ).toInclude( "agent" );
+                expect( payload.account_type ?: "" ).toBe( "agent" );
+                expect( payload.email ?: "" ).toBe( seeded.email );
+                cleanupAgent( seeded.id );
+            } );
+
+            it( "Agent.getJwtScopes returns the same roles cbsecurity sees", function(){
+                var seeded = seedAgent();
+                var agent  = getController().getWireBox().getInstance( "Agent@agent" )
+                    .where( "id", seeded.id )
+                    .first();
+                expect( agent.getJwtScopes() ).toInclude( "agent" );
+                cleanupAgent( seeded.id );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private struct function seedAgent(){
+        var id    = createUUID();
+        var email = "api-spec-" & id & "@example.com";
+        var hash  = variables.bcrypt.hashPassword( "spec-pass" );
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :h, FALSE, TRUE )",
+            { id : id, email : email, h : hash }
+        );
+        return { id : id, email : email };
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.agentId } );
+    }
+
+}

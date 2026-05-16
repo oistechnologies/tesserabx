@@ -95,4 +95,22 @@ class
         return false;
     }
 
+    // ---- cbsecurity JWT interface ----
+    //
+    // JwtService.fromUser calls these on the user it is minting a
+    // token for. `getJwtScopes()` populates the `scope` claim;
+    // `getJwtCustomClaims( payload )` returns any extra claims we
+    // want carried on the token (e.g. account family).
+
+    public array function getJwtScopes(){
+        return getRoles();
+    }
+
+    public struct function getJwtCustomClaims( required struct payload ){
+        return {
+            "account_type" : "agent",
+            "email"        : getEmail() ?: ""
+        };
+    }
+
 }

@@ -33,4 +33,19 @@ class singleton=true {
         return bcrypt.checkPassword( arguments.password, user.getPasswordHash() );
     }
 
+    /**
+     * Authenticate and return the Agent when the credentials match,
+     * null otherwise. Used by the REST API's JWT issuance path
+     * (api:Auth.login) where the handler needs the entity to
+     * pass to cbsecurity's jwt.fromUser.
+     */
+    public any function authenticate( required string username, required string password ){
+        var user = retrieveUserByUsername( arguments.username );
+        if ( isNull( user ) ) return javaCast( "null", "" );
+        if ( !bcrypt.checkPassword( arguments.password, user.getPasswordHash() ) ) {
+            return javaCast( "null", "" );
+        }
+        return user;
+    }
+
 }
