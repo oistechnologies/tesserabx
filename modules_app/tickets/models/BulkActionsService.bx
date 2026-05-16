@@ -29,20 +29,19 @@ class singleton=true {
      * Returns the cbq job dispatch result; callers usually just
      * relay a "queued N tickets" message back to the user.
      *
-     * Default connection is "sync" so the work runs inline in the
-     * request thread. The cbq DBProvider has Postgres compatibility
-     * issues today (unquoted camelCase identifiers in raw SQL, qb's
-     * varchar binding against bigint columns) that prevent the DB
-     * worker from draining the queue. Phase 6 will address those;
-     * until then, bulk operations execute synchronously so the
-     * agent's "Apply" click is reliable.
+     * Default connection is "default" — the DB-backed queue
+     * processed by the worker container. The Postgres compat
+     * issues that previously forced sync execution
+     * (PostgresDBProvider@core override) are resolved as of
+     * Phase 6e. Callers that want synchronous semantics for
+     * specs pass connection="sync" explicitly.
      */
     public any function enqueue(
         required string action,
         required array  ticketIds,
         struct params         = {},
         string actorAgentId   = "",
-        string connection     = "sync"
+        string connection     = "default"
     ){
         validateAction( arguments.action );
         if ( !arguments.ticketIds.len() ) {
