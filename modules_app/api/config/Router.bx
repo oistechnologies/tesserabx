@@ -29,6 +29,11 @@ class {
         // Auth.
         route( "/v1/auth/login" ).withVerbs( "POST" ).to( "Auth.login" );
         route( "/v1/auth/refresh" ).withVerbs( "POST" ).to( "Auth.refresh" );
+
+        // Swagger UI. The OpenAPI 3.0 spec itself is served by
+        // cbswagger at /cbswagger; this route renders the
+        // swagger-ui-dist client and points it at that spec URL.
+        route( "/swagger" ).to( "Swagger.index" );
     }
 
 }

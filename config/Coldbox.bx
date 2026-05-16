@@ -355,6 +355,60 @@ class {
                 defaultGrammar      : "PostgresGrammar@qb",
                 datasource          : "tesserabx",
                 schema              : getSystemSetting( "DB_SCHEMA", "public" )
+            },
+
+            // cbswagger: auto-generated OpenAPI 3.0 docs for the
+            // /api routes. cbswagger introspects every registered
+            // route whose pattern begins with the prefix below and
+            // builds the spec from handler / action metadata. The
+            // module mounts itself at /cbswagger by default; the
+            // JSON spec is at /cbswagger and the rendered Swagger
+            // UI is at /cbswagger/ui.
+            //
+            // The auth endpoints are excluded from the secured-
+            // operation listing so the docs do not require a token
+            // to read; the actual /api/v1/auth/login + refresh
+            // routes remain unauthenticated at the API layer.
+            cbswagger : {
+                routes          : [ "api/v1" ],
+                excludeRoutes   : [],
+                defaultFormat   : "json",
+                info : {
+                    title          : "TesseraBX REST API",
+                    description    : "Versioned REST surface for TesseraBX. JWT auth via POST /api/v1/auth/login; the access token goes in the Authorization: Bearer header on every secured route.",
+                    termsOfService : "",
+                    version        : "1.0.0",
+                    contact        : {
+                        name  : "TesseraBX",
+                        url   : "https://github.com/oistechnologies/tesserabx",
+                        email : ""
+                    },
+                    license : {
+                        name : "",
+                        url  : ""
+                    }
+                },
+                servers : [
+                    {
+                        url         : getSystemSetting( "APP_BASE_URL", "http://localhost:8080" ),
+                        description : "Configured deployment"
+                    }
+                ],
+                // Single security scheme: JWT bearer. Handlers opt in
+                // per-action with `@security bearerAuth` in the
+                // function docblock. The two /auth endpoints (login,
+                // refresh) intentionally omit it because they are the
+                // path that mints tokens.
+                components : {
+                    securitySchemes : {
+                        bearerAuth : {
+                            type         : "http",
+                            scheme       : "bearer",
+                            bearerFormat : "JWT",
+                            description  : "JWT access token obtained from POST /api/v1/auth/login. Pass it in the `Authorization` header as `Bearer <token>`."
+                        }
+                    }
+                }
             }
 
         };

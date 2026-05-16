@@ -21,6 +21,19 @@ class {
         event.paramValue( "format", "json" );
     }
 
+    /**
+     * Issue access + refresh tokens for an Agent.
+     *
+     * Authenticates against the agents table only. A Contact with
+     * valid credentials is rejected so a Contact identity can never
+     * be carried in a JWT. Throttled to 10 attempts per 15 minutes
+     * per remote IP.
+     *
+     * @tags Auth
+     * @summary Sign in as an Agent
+     * @requestBody { "description" : "Agent credentials.", "required" : true, "content" : { "application/x-www-form-urlencoded" : { "schema" : { "type" : "object", "required" : [ "email", "password" ], "properties" : { "email" : { "type" : "string", "format" : "email", "description" : "Agent email address." }, "password" : { "type" : "string", "format" : "password", "description" : "Agent password." } } } } } }
+     * @responses { "200" : { "description" : "Tokens issued.", "content" : { "application/json" : { "schema" : { "type" : "object", "properties" : { "access_token" : { "type" : "string" }, "refresh_token" : { "type" : "string" }, "expires_in_minutes" : { "type" : "integer" }, "agent" : { "type" : "object" } } } } } }, "400" : { "description" : "email or password missing." }, "401" : { "description" : "Invalid credentials." }, "429" : { "description" : "Too many sign-in attempts. Returns Retry-After header." } }
+     */
     function login( event, rc, prc ){
         param rc.email    = "";
         param rc.password = "";
@@ -77,6 +90,18 @@ class {
         }
     }
 
+    /**
+     * Exchange a refresh token for a new access + refresh token pair.
+     *
+     * The refresh token is read from the `x-refresh-token` request
+     * header. cbjwt's `refreshToken()` rotates both halves so a stolen
+     * refresh token is single-use.
+     *
+     * @tags Auth
+     * @summary Refresh access token
+     * @parameters [ { "name" : "x-refresh-token", "in" : "header", "required" : true, "description" : "The refresh token previously issued by /auth/login or a prior /auth/refresh.", "schema" : { "type" : "string" } } ]
+     * @responses { "200" : { "description" : "New token pair.", "content" : { "application/json" : { "schema" : { "type" : "object", "properties" : { "access_token" : { "type" : "string" }, "refresh_token" : { "type" : "string" }, "expires_in_minutes" : { "type" : "integer" } } } } } }, "401" : { "description" : "Refresh token missing, invalid, or expired." } }
+     */
     function refresh( event, rc, prc ){
         try {
             // refreshToken() reads the refresh token from the

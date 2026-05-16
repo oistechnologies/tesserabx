@@ -1,0 +1,24 @@
+/**
+ * api:Swagger handler — serves the Swagger UI page at
+ * /api/swagger that loads the OpenAPI spec from /cbswagger.
+ *
+ * cbswagger generates the spec but does not ship a UI; we
+ * render swagger-ui from the official CDN and point it at the
+ * cbswagger JSON endpoint.
+ *
+ * Unauthenticated — the spec is public so external integrators
+ * can read it without provisioning an account. Whether the
+ * documented routes themselves require auth (most do) is
+ * orthogonal to whether the docs are public.
+ */
+class {
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.noLayout();
+    }
+
+    function index( event, rc, prc ){
+        event.setView( view = "swagger/index", noLayout = true );
+    }
+
+}

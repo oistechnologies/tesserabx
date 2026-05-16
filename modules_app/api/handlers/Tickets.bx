@@ -55,6 +55,17 @@ class {
         return true;
     }
 
+    /**
+     * List tickets. Provider-side; returns tickets across every
+     * organization the caller is permitted to see. Filters compose
+     * with AND semantics.
+     *
+     * @tags Tickets
+     * @summary List tickets
+     * @security bearerAuth
+     * @parameters [ { "name" : "status", "in" : "query", "required" : false, "description" : "Filter by status (e.g. new, open, pending, resolved, closed).", "schema" : { "type" : "string" } }, { "name" : "priority", "in" : "query", "required" : false, "description" : "Filter by priority (low, normal, high, urgent).", "schema" : { "type" : "string" } }, { "name" : "organizationId", "in" : "query", "required" : false, "description" : "Filter by organization ID.", "schema" : { "type" : "string", "format" : "uuid" } }, { "name" : "assignedToAgentId", "in" : "query", "required" : false, "description" : "Filter by assigned Agent ID.", "schema" : { "type" : "string", "format" : "uuid" } }, { "name" : "q", "in" : "query", "required" : false, "description" : "Full-text search across subject and body.", "schema" : { "type" : "string" } }, { "name" : "accountlessOnly", "in" : "query", "required" : false, "description" : "When true, returns only tickets that have no requester_contact_id.", "schema" : { "type" : "boolean", "default" : false } }, { "name" : "limit", "in" : "query", "required" : false, "description" : "Cap the result set. Hard-capped at 200 server-side.", "schema" : { "type" : "integer", "default" : 50, "maximum" : 200 } } ]
+     * @responses { "200" : { "description" : "Tickets list.", "content" : { "application/json" : { "schema" : { "type" : "object", "properties" : { "tickets" : { "type" : "array", "items" : { "type" : "object" } }, "total" : { "type" : "integer" } } } } } }, "401" : { "description" : "Missing or invalid JWT." }, "403" : { "description" : "Token does not carry the agent role." } }
+     */
     function index( event, rc, prc ){
         if ( !ensureAgent( event, prc ) ) return;
         param rc.status            = "";
@@ -79,6 +90,17 @@ class {
         return event.renderData( type = "json", statusCode = 200, data = { tickets : data, total : data.len() } );
     }
 
+    /**
+     * Single-ticket detail. Returns the ticket struct plus an embedded
+     * `messages` array (public + internal, since the agent surface
+     * sees both) and an `events` array (the agent-facing ticket
+     * timeline).
+     *
+     * @tags Tickets
+     * @summary Get a single ticket
+     * @security bearerAuth
+     * @responses { "200" : { "description" : "Ticket struct with embedded messages and events." }, "401" : { "description" : "Missing or invalid JWT." }, "403" : { "description" : "Token does not carry the agent role." }, "404" : { "description" : "Ticket not found." } }
+     */
     function show( event, rc, prc ){
         if ( !ensureAgent( event, prc ) ) return;
         var t = ticketsService.getTicket( rc.id ?: "" );
@@ -99,6 +121,20 @@ class {
         );
     }
 
+    /**
+     * Create a ticket. Exactly one of `requesterContactId` or
+     * `originatingEmail` is required. If `requesterContactId` is
+     * supplied the ticket inherits that contact's organization; if
+     * `originatingEmail` is supplied the ticket is created
+     * accountless (organization_id = NULL) and is visible only to
+     * provider agents until an agent promotes the sender to a Contact.
+     *
+     * @tags Tickets
+     * @summary Create a ticket
+     * @security bearerAuth
+     * @requestBody { "description" : "Ticket fields.", "required" : true, "content" : { "application/x-www-form-urlencoded" : { "schema" : { "type" : "object", "required" : [ "subject" ], "properties" : { "subject" : { "type" : "string", "description" : "Ticket subject." }, "requesterContactId" : { "type" : "string", "format" : "uuid", "description" : "Existing Contact ID. Mutually exclusive with originatingEmail." }, "originatingEmail" : { "type" : "string", "format" : "email", "description" : "Raw sender email. Creates an accountless ticket." }, "priority" : { "type" : "string", "enum" : [ "low", "normal", "high", "urgent" ], "default" : "normal" }, "ticketType" : { "type" : "string", "default" : "request" }, "firstMessage" : { "type" : "string", "description" : "Optional initial public message to attach to the ticket." } } } } } }
+     * @responses { "201" : { "description" : "Ticket created. Returns the new ticket struct." }, "400" : { "description" : "Missing subject, or neither requesterContactId nor originatingEmail provided." }, "401" : { "description" : "Missing or invalid JWT." }, "403" : { "description" : "Token does not carry the agent role." } }
+     */
     function create( event, rc, prc ){
         if ( !ensureAgent( event, prc ) ) return;
         param rc.subject            = "";
@@ -155,6 +191,17 @@ class {
         }
     }
 
+    /**
+     * Append a message to a ticket. The author is always the bearer
+     * Agent. Internal notes are agent-only and never reach the
+     * client-side ticket view.
+     *
+     * @tags Tickets
+     * @summary Reply on a ticket
+     * @security bearerAuth
+     * @requestBody { "description" : "Reply body.", "required" : true, "content" : { "application/x-www-form-urlencoded" : { "schema" : { "type" : "object", "required" : [ "body" ], "properties" : { "body" : { "type" : "string", "description" : "Message body." }, "isInternal" : { "type" : "boolean", "default" : false, "description" : "Internal-only note; not visible to the client." } } } } } }
+     * @responses { "201" : { "description" : "Message created. Returns the new message struct." }, "400" : { "description" : "Missing body." }, "401" : { "description" : "Missing or invalid JWT." }, "403" : { "description" : "Token does not carry the agent role." }, "404" : { "description" : "Ticket not found." } }
+     */
     function reply( event, rc, prc ){
         if ( !ensureAgent( event, prc ) ) return;
         param rc.body       = "";
@@ -177,6 +224,17 @@ class {
         }
     }
 
+    /**
+     * Transition the ticket to a new status. Allowed values come from
+     * the admin-editable status workflow; invalid transitions return
+     * 400 with the validation message.
+     *
+     * @tags Tickets
+     * @summary Change ticket status
+     * @security bearerAuth
+     * @requestBody { "description" : "Target status.", "required" : true, "content" : { "application/x-www-form-urlencoded" : { "schema" : { "type" : "object", "required" : [ "status" ], "properties" : { "status" : { "type" : "string", "description" : "Target status code from the configured workflow (e.g. open, pending, resolved, closed)." } } } } } }
+     * @responses { "200" : { "description" : "Updated ticket struct." }, "400" : { "description" : "Missing status or invalid transition." }, "401" : { "description" : "Missing or invalid JWT." }, "403" : { "description" : "Token does not carry the agent role." }, "404" : { "description" : "Ticket not found." } }
+     */
     function changeStatus( event, rc, prc ){
         if ( !ensureAgent( event, prc ) ) return;
         param rc.status = "";
@@ -201,6 +259,16 @@ class {
         }
     }
 
+    /**
+     * Assign (or unassign) a ticket. Pass an empty `agentId` to
+     * unassign.
+     *
+     * @tags Tickets
+     * @summary Assign or unassign a ticket
+     * @security bearerAuth
+     * @requestBody { "description" : "Target Agent.", "required" : true, "content" : { "application/x-www-form-urlencoded" : { "schema" : { "type" : "object", "properties" : { "agentId" : { "type" : "string", "format" : "uuid", "description" : "Agent ID to assign to. Empty string unassigns." } } } } } }
+     * @responses { "200" : { "description" : "Updated ticket struct." }, "400" : { "description" : "Invalid agent ID or assignment refused." }, "401" : { "description" : "Missing or invalid JWT." }, "403" : { "description" : "Token does not carry the agent role." }, "404" : { "description" : "Ticket not found." } }
+     */
     function assign( event, rc, prc ){
         if ( !ensureAgent( event, prc ) ) return;
         param rc.agentId = "";

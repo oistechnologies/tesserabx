@@ -31,6 +31,15 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
             it( "pruneOldBackups removes dumps older than the configured retention", function(){
+                // This spec backdates a file's mtime via `touch -d`,
+                // which only works on the local-disk provider — S3
+                // and B2 do not expose an OS path. Skip when the
+                // active provider is not local. CI sets
+                // CBFS_DEFAULT_PROVIDER=local explicitly.
+                var activeProvider = getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" );
+                if ( activeProvider != "local" ) {
+                    return;
+                }
                 // Write the synthetic ancient backup through cbfs so the
                 // spec works in any environment (dev: /app/storage, CI:
                 // /home/runner/.../storage), then ask cbfs where the

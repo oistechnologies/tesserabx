@@ -32,13 +32,22 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( stepsByName.delete.ok ).toBeTrue();
             } );
 
-            it( "marks the signed-URL and private-bucket steps as skipped on the local provider", function(){
+            it( "handles signed-URL and private-bucket steps according to the active provider", function(){
+                // On local: both steps short-circuit with a "skipped"
+                // note. On s3 / b2: both steps make real HTTP calls
+                // against the configured bucket and should pass. CI
+                // pins CBFS_DEFAULT_PROVIDER=local explicitly so this
+                // spec always exercises the local branch there.
+                var activeProvider = getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" );
                 var report = variables.svc.verify();
                 var stepsByName = {};
                 for ( var s in report.steps ) stepsByName[ s.name ] = s;
                 expect( stepsByName[ "signed-url" ].ok ).toBeTrue();
-                expect( stepsByName[ "signed-url" ].detail ).toInclude( "skipped" );
                 expect( stepsByName[ "private-bucket" ].ok ).toBeTrue();
+                if ( activeProvider == "local" ) {
+                    expect( stepsByName[ "signed-url" ].detail ).toInclude( "skipped" );
+                    expect( stepsByName[ "private-bucket" ].detail ).toInclude( "skipped" );
+                }
             } );
 
             it( "reports all_ok=true when every step passes", function(){
