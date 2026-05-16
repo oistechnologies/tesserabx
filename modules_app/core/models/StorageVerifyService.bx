@@ -46,8 +46,14 @@ class singleton=true {
         }
 
         var key = "storage-verify/test-" & createUUID() & ".bin";
+        // Pass the raw byte[] (NOT a toString-decoded String) so cbfs's
+        // LocalProvider.create takes its isBinary() branch and writes
+        // via fileWrite( path, byte[] ). The String path uses
+        // String.getBytes() with the JVM's default charset, which on
+        // a UTF-8 default re-encodes code points 0x80–0xFF as multi-
+        // byte sequences and trips an underlying NIO write.
         var payload = generateRandomBytes( 4096 );
-        var localChecksum = hash( payload, "SHA-256" );
+        var localChecksum = hash( binaryEncode( payload, "hex" ), "SHA-256" );
 
         // 1. Write
         try {
@@ -62,7 +68,14 @@ class singleton=true {
         // 2. Read back + checksum
         try {
             var readBack = disk.get( key );
-            var readChecksum = hash( readBack, "SHA-256" );
+            // disk.get() returns a String for the local provider and
+            // a byte[] for the S3 family. Coerce to a byte[] via
+            // binaryEncode before hashing so the checksum compares
+            // bytes-vs-bytes on either side.
+            var readBytes = isBinary( readBack )
+                ? readBack
+                : ( isInstanceOf( readBack, "[B" ) ? readBack : charsetDecode( toString( readBack ), "ISO-8859-1" ) );
+            var readChecksum = hash( binaryEncode( readBytes, "hex" ), "SHA-256" );
             var matches = ( readChecksum == localChecksum );
             report.steps.append( step(
                 "read-back",
@@ -191,11 +204,16 @@ class singleton=true {
     }
 
     /**
-     * 4 KB of cryptographically-random bytes. Used as the test
-     * payload so the checksum compare is meaningful (not all
-     * zeros).
+     * 4 KB of cryptographically-random bytes as a raw Java byte[].
+     * Used as the test payload so the checksum compare is meaningful
+     * (not all zeros).
+     *
+     * Returns a byte[], NOT a String — the caller passes this to
+     * cbfs.create() which routes binary via fileWrite( path, bytes )
+     * and string via the JVM-default-charset getBytes() path. Random
+     * bytes round-trip the second path inconsistently across hosts.
      */
-    private string function generateRandomBytes( required numeric size ){
+    private any function generateRandomBytes( required numeric size ){
         var rng = createObject( "java", "java.security.SecureRandom" ).init();
         var bytes = createObject( "java", "java.lang.reflect.Array" )
             .newInstance(
@@ -203,7 +221,7 @@ class singleton=true {
                 javaCast( "int", arguments.size )
             );
         rng.nextBytes( bytes );
-        return toString( bytes, "ISO-8859-1" );
+        return bytes;
     }
 
     /**
