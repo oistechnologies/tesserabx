@@ -27,9 +27,15 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 var report = variables.svc.verify();
                 var stepsByName = {};
                 for ( var s in report.steps ) stepsByName[ s.name ] = s;
-                expect( stepsByName.write.ok ).toBeTrue();
-                expect( stepsByName[ "read-back" ].ok ).toBeTrue();
-                expect( stepsByName.delete.ok ).toBeTrue();
+                if ( !( stepsByName.write.ok ?: false ) ) {
+                    fail( "write step failed: " & ( stepsByName.write.detail ?: "(no detail)" ) & " | provider=" & ( report.provider ?: "?" ) & " | disk=" & ( report.disk_name ?: "?" ) );
+                }
+                if ( !( stepsByName[ "read-back" ].ok ?: false ) ) {
+                    fail( "read-back step failed: " & ( stepsByName[ "read-back" ].detail ?: "(no detail)" ) );
+                }
+                if ( !( stepsByName.delete.ok ?: false ) ) {
+                    fail( "delete step failed: " & ( stepsByName.delete.detail ?: "(no detail)" ) );
+                }
             } );
 
             it( "handles signed-URL and private-bucket steps according to the active provider", function(){
