@@ -16,8 +16,9 @@
  */
 class singleton=true {
 
-    property name="wirebox"        inject="wirebox";
-    property name="mailService"    inject="MailService@cbmailservices";
+    property name="wirebox"          inject="wirebox";
+    property name="mailService"      inject="MailService@cbmailservices";
+    property name="settingsService"  inject="SettingsService@admin";
 
     public string function generateMessageId( string ticketId = "" ){
         var host = getSystemSetting( "MAIL_FROM_DOMAIN", "tesserabx.local" );
@@ -190,6 +191,11 @@ class singleton=true {
             type    = "text",
             body    = arguments.body
         );
+
+        // Apply the admin-managed mail server override. No-op when
+        // mail.enabled is false; .env-backed cbmailservices config
+        // is the fallback in that case.
+        settingsService.applyMailOverride( mail );
 
         mail.addMailParam( name = "Message-ID", value = arguments.messageId );
         if ( len( arguments.inReplyTo ) ) {

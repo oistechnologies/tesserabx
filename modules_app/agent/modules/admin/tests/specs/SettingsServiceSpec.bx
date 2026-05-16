@@ -1,0 +1,107 @@
+/**
+ * SettingsServiceSpec: read/write/cache + branding + mail override.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "SettingsService@admin" );
+    }
+
+    private void function cleanupSpec(){
+        queryExecute( "DELETE FROM app_settings WHERE key LIKE 'spec.%' OR key LIKE 'brand.%' OR key LIKE 'mail.%'" );
+        variables.svc.invalidateCache();
+    }
+
+    function run(){
+        describe( "SettingsService", function(){
+
+            beforeEach( function( currentSpec ){
+                // Earlier runs that crashed mid-test, or other
+                // suites that happen to share keys, can leave rows
+                // behind. Reset before every spec so each one
+                // observes the documented defaults.
+                cleanupSpec();
+            } );
+
+            afterEach( function( currentSpec ){
+                cleanupSpec();
+            } );
+
+            it( "getString returns the supplied default when no row exists", function(){
+                expect( variables.svc.getString( "spec.missing", "fallback" ) ).toBe( "fallback" );
+            } );
+
+            it( "set then get round-trips the value across the cache", function(){
+                variables.svc.set( "spec.x", "hello" );
+                expect( variables.svc.getString( "spec.x" ) ).toBe( "hello" );
+            } );
+
+            it( "getBoolean coerces stored 'true' / '1' / 'yes' and defaults otherwise", function(){
+                variables.svc.set( "spec.b1", "true", "boolean" );
+                variables.svc.set( "spec.b2", "1",    "boolean" );
+                variables.svc.set( "spec.b3", "no",   "boolean" );
+                expect( variables.svc.getBoolean( "spec.b1" ) ).toBeTrue();
+                expect( variables.svc.getBoolean( "spec.b2" ) ).toBeTrue();
+                expect( variables.svc.getBoolean( "spec.b3" ) ).toBeFalse();
+                expect( variables.svc.getBoolean( "spec.nope", true ) ).toBeTrue();
+            } );
+
+            it( "getInteger returns the parsed integer or the default", function(){
+                variables.svc.set( "spec.n", "42", "integer" );
+                expect( variables.svc.getInteger( "spec.n" ) ).toBe( 42 );
+                expect( variables.svc.getInteger( "spec.nope", 7 ) ).toBe( 7 );
+            } );
+
+            it( "getBranding returns a struct with documented defaults", function(){
+                var brand = variables.svc.getBranding();
+                expect( brand ).toHaveKey( "productName" );
+                expect( brand ).toHaveKey( "primaryColor" );
+                expect( brand.productName ).toBe( "TesseraBX" );
+            } );
+
+            it( "getBranding picks up an overridden product_name", function(){
+                variables.svc.set( "brand.product_name", "Acme Helpdesk" );
+                expect( variables.svc.getBranding().productName ).toBe( "Acme Helpdesk" );
+            } );
+
+            it( "getMailOverride returns null when mail.enabled is false", function(){
+                variables.svc.set( "mail.enabled", "false", "boolean" );
+                expect( variables.svc.getMailOverride() ).toBeNull();
+            } );
+
+            it( "getMailOverride returns a struct when mail.enabled is true", function(){
+                variables.svc.set( "mail.enabled",   "true",     "boolean" );
+                variables.svc.set( "mail.host",      "smtp.x.y", "string" );
+                variables.svc.set( "mail.port",      "2525",     "integer" );
+                variables.svc.set( "mail.use_tls",   "true",     "boolean" );
+                var ovr = variables.svc.getMailOverride();
+                expect( ovr ).notToBeNull();
+                expect( ovr.host ).toBe( "smtp.x.y" );
+                expect( ovr.port ).toBe( 2525 );
+                expect( ovr.useTLS ).toBeTrue();
+            } );
+
+            it( "clear drops the row so the default returns again", function(){
+                variables.svc.set( "spec.y", "before" );
+                expect( variables.svc.getString( "spec.y" ) ).toBe( "before" );
+                variables.svc.clear( "spec.y" );
+                expect( variables.svc.getString( "spec.y", "default-back" ) ).toBe( "default-back" );
+            } );
+
+            it( "applyMailOverride is a no-op when no override is active", function(){
+                variables.svc.set( "mail.enabled", "false", "boolean" );
+                // A bare struct that records calls; if applyMailOverride
+                // touches it we will see attempts and the test would
+                // throw because the struct does not respond to setServer
+                // / setPort. The point: no override → no call.
+                var fakeMail = {};
+                variables.svc.applyMailOverride( fakeMail );
+                expect( fakeMail ).toBeStruct();
+            } );
+
+        } );
+    }
+
+}

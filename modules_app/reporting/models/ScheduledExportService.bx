@@ -20,6 +20,7 @@ class singleton=true {
     property name="cbfs"             inject="DiskService@cbfs";
     property name="reportingService" inject="ReportingService@reporting";
     property name="mailService"      inject="mailService@cbmailservices";
+    property name="settingsService"  inject="SettingsService@admin";
 
     // ---------------- CRUD ----------------
 
@@ -224,6 +225,9 @@ class singleton=true {
                     );
                 }
             }
+            // Apply admin-managed mail server override (no-op when
+            // mail.enabled is false).
+            settingsService.applyMailOverride( mail );
             mailService.send( mail );
         } catch ( any e ) {
             writeLog(

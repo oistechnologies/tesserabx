@@ -1,0 +1,247 @@
+/**
+ * SettingsService: read and write admin-editable runtime settings.
+ *
+ * Backed by the app_settings table. Reads pass through a single
+ * in-memory cache so the per-request lookups (branding in layouts,
+ * the mail-override check in every send) do not hit Postgres on
+ * every render. The cache is invalidated on every write.
+ *
+ * The set of valid keys is curated below in `BRANDING_KEYS` and
+ * `MAIL_KEYS`; anything outside that allowlist still reads/writes
+ * fine but the admin UI only exposes these.
+ *
+ * Default semantics: if a key has no row, the caller-supplied
+ * default is returned. The .env value is the conventional fallback
+ * passed in by callers (e.g. the BrandingInterceptor or
+ * NotificationsService).
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    // The keys the admin UI manages. Listed here so the handler and
+    // the interceptor have one source of truth.
+    public struct function brandingKeys(){
+        return {
+            "brand.product_name"  : { "label" : "Product name",   "default" : "TesseraBX",                        "type" : "string"  },
+            "brand.tagline"       : { "label" : "Tagline",        "default" : "Help desk and customer support",   "type" : "string"  },
+            "brand.logo_url"      : { "label" : "Logo URL",       "default" : "",                                 "type" : "string"  },
+            "brand.primary_color" : { "label" : "Primary color",  "default" : "##0d6efd",                         "type" : "string"  },
+            "brand.footer_text"   : { "label" : "Footer text",    "default" : "Powered by BoxLang & ColdBox.",    "type" : "string"  }
+        };
+    }
+
+    public struct function mailKeys(){
+        return {
+            "mail.enabled"       : { "label" : "Enable admin override", "default" : "false",                  "type" : "boolean" },
+            "mail.host"          : { "label" : "SMTP host",             "default" : "",                       "type" : "string"  },
+            "mail.port"          : { "label" : "SMTP port",             "default" : "587",                    "type" : "integer" },
+            "mail.username"      : { "label" : "Username",              "default" : "",                       "type" : "string"  },
+            "mail.password"      : { "label" : "Password",              "default" : "",                       "type" : "string"  },
+            "mail.use_tls"       : { "label" : "STARTTLS",              "default" : "true",                   "type" : "boolean" },
+            "mail.use_ssl"       : { "label" : "SSL",                   "default" : "false",                  "type" : "boolean" },
+            "mail.from_address"  : { "label" : "From address",          "default" : "",                       "type" : "string"  }
+        };
+    }
+
+    // ---------------- Reads ----------------
+
+    public string function getString( required string key, string default = "" ){
+        ensureCache();
+        if ( !structKeyExists( variables.cache, arguments.key ) ) return arguments.default;
+        return toString( variables.cache[ arguments.key ].value ?: "" );
+    }
+
+    public numeric function getInteger( required string key, numeric default = 0 ){
+        ensureCache();
+        if ( !structKeyExists( variables.cache, arguments.key ) ) return arguments.default;
+        var raw = toString( variables.cache[ arguments.key ].value ?: "" );
+        return len( raw ) && isNumeric( raw ) ? int( raw ) : arguments.default;
+    }
+
+    public boolean function getBoolean( required string key, boolean default = false ){
+        ensureCache();
+        if ( !structKeyExists( variables.cache, arguments.key ) ) return arguments.default;
+        var raw = toString( variables.cache[ arguments.key ].value ?: "" );
+        if ( !len( raw ) ) return arguments.default;
+        return ( raw == "true" || raw == "1" || raw == "yes" );
+    }
+
+    /**
+     * Branding values resolved against defaults. Returned struct is
+     * safe for direct use in a layout. The HTML-side caller is
+     * responsible for the html-encode pass.
+     */
+    public struct function getBranding(){
+        var out  = {};
+        var keys = brandingKeys();
+        for ( var k in keys ) {
+            out[ keys[ k ].label ] = getString( k, keys[ k ].default );
+        }
+        // Re-key into camelCase the layout can use directly.
+        return {
+            productName  : getString( "brand.product_name",  keys[ "brand.product_name"  ].default ),
+            tagline      : getString( "brand.tagline",       keys[ "brand.tagline"       ].default ),
+            logoUrl      : getString( "brand.logo_url",      keys[ "brand.logo_url"      ].default ),
+            primaryColor : getString( "brand.primary_color", keys[ "brand.primary_color" ].default ),
+            footerText   : getString( "brand.footer_text",   keys[ "brand.footer_text"   ].default )
+        };
+    }
+
+    /**
+     * Mail-server override struct. Returns null when no override is
+     * active (mail.enabled is false or unset). Callers apply this
+     * to each cbmailservices Mail object via applyMailOverride.
+     */
+    public any function getMailOverride(){
+        if ( !getBoolean( "mail.enabled", false ) ) return javaCast( "null", "" );
+        return {
+            host        : getString(  "mail.host",         "" ),
+            port        : getInteger( "mail.port",         587 ),
+            username    : getString(  "mail.username",     "" ),
+            password    : getString(  "mail.password",     "" ),
+            useTLS      : getBoolean( "mail.use_tls",      true ),
+            useSSL      : getBoolean( "mail.use_ssl",      false ),
+            fromAddress : getString(  "mail.from_address", "" )
+        };
+    }
+
+    /**
+     * Apply the runtime mail override to a cbmailservices Mail
+     * object. Caller-friendly: do nothing if no override is set, so
+     * the call site stays a one-liner.
+     */
+    public void function applyMailOverride( required any mail ){
+        var ovr = getMailOverride();
+        if ( isNull( ovr ) || !len( ovr.host ) ) return;
+        arguments.mail.setServer( ovr.host );
+        arguments.mail.setPort( ovr.port );
+        if ( len( ovr.username ) ) arguments.mail.setUsername( ovr.username );
+        if ( len( ovr.password ) ) arguments.mail.setPassword( ovr.password );
+        arguments.mail.setUseTLS( ovr.useTLS );
+        arguments.mail.setUseSSL( ovr.useSSL );
+        if ( len( ovr.fromAddress ) ) arguments.mail.setFrom( ovr.fromAddress );
+    }
+
+    public array function listSettingsByPrefix( required string prefix ){
+        ensureCache();
+        var out = [];
+        for ( var k in variables.cache ) {
+            if ( left( k, len( arguments.prefix ) ) == arguments.prefix ) {
+                out.append( {
+                    key   : k,
+                    value : variables.cache[ k ].value,
+                    type  : variables.cache[ k ].type
+                } );
+            }
+        }
+        return out;
+    }
+
+    // ---------------- Writes ----------------
+
+    public void function set(
+        required string key,
+        required string value,
+        string valueType = "string",
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "INSERT INTO app_settings ( key, value, value_type, updated_at, updated_by_agent_id )
+             VALUES ( :k, :v, :t, NOW(), :a )
+             ON CONFLICT ( key )
+             DO UPDATE SET value = EXCLUDED.value,
+                           value_type = EXCLUDED.value_type,
+                           updated_at = NOW(),
+                           updated_by_agent_id = EXCLUDED.updated_by_agent_id",
+            {
+                k : arguments.key,
+                v : arguments.value,
+                t : arguments.valueType,
+                a : len( arguments.actorAgentId ) ? arguments.actorAgentId : javaCast( "null", "" )
+            }
+        );
+        variables.cacheLoaded = false;
+        recordAudit( "settings.updated", arguments.key, arguments.actorAgentId );
+    }
+
+    /**
+     * Bulk write. Accepts a struct keyed by setting key with each
+     * value being either a string (defaults to type=string) or a
+     * struct of { value, type }. Used by the admin form's save.
+     */
+    public void function setMany( required struct values, string actorAgentId = "" ){
+        for ( var k in arguments.values ) {
+            var entry = arguments.values[ k ];
+            var v = isStruct( entry ) ? toString( entry.value ?: "" ) : toString( entry ?: "" );
+            var t = isStruct( entry ) ? ( entry.type ?: "string" ) : "string";
+            set( key : k, value : v, valueType : t, actorAgentId : arguments.actorAgentId );
+        }
+    }
+
+    /**
+     * Drop a setting back to its default by removing the row.
+     */
+    public void function clear( required string key, string actorAgentId = "" ){
+        queryExecute(
+            "DELETE FROM app_settings WHERE key = :k",
+            { k : arguments.key }
+        );
+        variables.cacheLoaded = false;
+        recordAudit( "settings.cleared", arguments.key, arguments.actorAgentId );
+    }
+
+    public void function invalidateCache(){
+        variables.cacheLoaded = false;
+    }
+
+    // ---------------- internals ----------------
+
+    private void function ensureCache(){
+        if ( variables.cacheLoaded ) return;
+        lock name="tesserabx.settings.cache" type="exclusive" timeout="5" {
+            if ( variables.cacheLoaded ) return;
+            var rows = queryExecute( "SELECT key, value, value_type FROM app_settings" );
+            var next = {};
+            for ( var i = 1; i <= rows.recordCount; i++ ) {
+                next[ rows.key[ i ] ] = {
+                    value : toString( rows.value[ i ] ?: "" ),
+                    type  : toString( rows.value_type[ i ] ?: "string" )
+                };
+            }
+            variables.cache       = next;
+            variables.cacheLoaded = true;
+        }
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string settingKey,
+        required string actorAgentId
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "app_setting",
+                entityId   : arguments.settingKey,
+                metadata   : { "key" : arguments.settingKey }
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "SettingsService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

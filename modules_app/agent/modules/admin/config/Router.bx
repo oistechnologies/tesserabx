@@ -40,6 +40,13 @@ class {
         } );
         route( "kb" ).to( "Kb.index" );
 
+        // Branding + email server settings. Most-specific writes
+        // first so /settings/branding et al. do not get swallowed.
+        route( "settings/branding" ).withVerbs( "POST" ).to( "Settings.saveBranding" );
+        route( "settings/mail" ).withVerbs( "POST" ).to( "Settings.saveMail" );
+        route( "settings/test-email" ).withVerbs( "POST" ).to( "Settings.testEmail" );
+        route( "settings" ).to( "Settings.index" );
+
         // Provider-user RBAC. Most-specific writes first; the index
         // is the only GET on /users.
         route( "users/grant" ).withVerbs( "POST" ).to( "Users.grant" );

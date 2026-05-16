@@ -1,0 +1,122 @@
+/**
+ * /agent/admin/settings handler.
+ *
+ * Branding + email server configuration. Admin-only via the
+ * cbSecurity rule on /agent/admin/*. All writes route through
+ * SettingsService; this handler never touches app_settings
+ * directly.
+ *
+ * "Send test email" lives on this page so an operator can verify
+ * the override they just saved without leaving the form.
+ */
+class {
+
+    property name="settings"    inject="SettingsService@admin";
+    property name="mailService" inject="mailService@cbmailservices";
+    property name="messagebox"  inject="messagebox@cbmessagebox";
+    property name="auth"        inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle    = "Settings";
+        prc.brandingKeys = settings.brandingKeys();
+        prc.mailKeys     = settings.mailKeys();
+        // Resolve current values (with defaults baked in for empty
+        // cells) so the form is always populated.
+        prc.brandingValues = {};
+        for ( var k in prc.brandingKeys ) {
+            prc.brandingValues[ k ] = settings.getString( k, prc.brandingKeys[ k ].default );
+        }
+        prc.mailValues = {};
+        for ( var k in prc.mailKeys ) {
+            if ( prc.mailKeys[ k ].type == "boolean" ) {
+                prc.mailValues[ k ] = settings.getBoolean( k, prc.mailKeys[ k ].default == "true" );
+            } else if ( prc.mailKeys[ k ].type == "integer" ) {
+                prc.mailValues[ k ] = settings.getInteger( k, val( prc.mailKeys[ k ].default ) );
+            } else {
+                prc.mailValues[ k ] = settings.getString( k, prc.mailKeys[ k ].default );
+            }
+        }
+        prc.currentAgentEmail = currentAgentEmail();
+        event.setView( "settings/index" );
+    }
+
+    function saveBranding( event, rc, prc ){
+        var keys = settings.brandingKeys();
+        var actor = currentAgentId();
+        for ( var k in keys ) {
+            var v = rc[ k ] ?: "";
+            settings.set( key : k, value : v, valueType : keys[ k ].type, actorAgentId : actor );
+        }
+        messagebox.info( "Branding updated." );
+        relocate( uri = "/agent/admin/settings" );
+    }
+
+    function saveMail( event, rc, prc ){
+        var keys = settings.mailKeys();
+        var actor = currentAgentId();
+        for ( var k in keys ) {
+            var raw = rc[ k ] ?: "";
+            if ( keys[ k ].type == "boolean" ) {
+                raw = ( raw == "true" || raw == "1" || raw == "on" ) ? "true" : "false";
+            }
+            // Password field is treated specially: an empty submit
+            // means "leave the current password alone". Avoids the
+            // common UX of admins blanking the password every time
+            // they save another field.
+            if ( k == "mail.password" && !len( raw ) ) continue;
+            settings.set( key : k, value : raw, valueType : keys[ k ].type, actorAgentId : actor );
+        }
+        messagebox.info( "Email server settings updated." );
+        relocate( uri = "/agent/admin/settings" );
+    }
+
+    function testEmail( event, rc, prc ){
+        param rc.to = "";
+        var to = trim( rc.to );
+        if ( !len( to ) ) to = currentAgentEmail();
+        if ( !len( to ) ) {
+            messagebox.error( "No recipient address available for the test." );
+            relocate( uri = "/agent/admin/settings" );
+            return;
+        }
+        try {
+            var brand = settings.getBranding();
+            var mail = mailService.newMail(
+                to      = to,
+                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                subject = brand.productName & " test email",
+                type    = "text/plain",
+                body    = "If you can read this, the configured mail server accepted the send."
+                          & char( 10 ) & char( 10 )
+                          & "Sent by the /agent/admin/settings test button."
+            );
+            settings.applyMailOverride( mail );
+            mailService.send( mail );
+            messagebox.info( "Test email queued to " & to & "." );
+        } catch ( any e ) {
+            messagebox.error( "Test send failed: " & e.message );
+        }
+        relocate( uri = "/agent/admin/settings" );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+    private string function currentAgentEmail(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        try { return u.getEmail() ?: ""; } catch ( any e ) { return ""; }
+    }
+
+}

@@ -1,0 +1,83 @@
+<bx:output>
+<div class="row g-3">
+
+    <div class="col-12 col-lg-6">
+        <div class="card">
+            <div class="card-header"><strong>Branding</strong></div>
+            <div class="card-body">
+                <form method="post" action="/agent/admin/settings/branding">
+                    <bx:loop collection="#prc.brandingKeys#" item="k">
+                        <div class="mb-3">
+                            <label class="form-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.brandingKeys[ k ].label )#</label>
+                            <bx:if k eq "brand.primary_color">
+                                <div class="input-group">
+                                    <input type="color" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control form-control-color" value="#encodeForHTMLAttribute( prc.brandingValues[ k ] )#">
+                                    <input type="text" class="form-control" value="#encodeForHTMLAttribute( prc.brandingValues[ k ] )#" disabled>
+                                </div>
+                            <bx:elseif k eq "brand.footer_text">
+                                <textarea id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control" rows="2">#encodeForHTML( prc.brandingValues[ k ] )#</textarea>
+                            <bx:else>
+                                <input type="text" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control" value="#encodeForHTMLAttribute( prc.brandingValues[ k ] )#">
+                            </bx:if>
+                            <div class="form-text small text-body-secondary">Default: <code>#encodeForHTML( prc.brandingKeys[ k ].default )#</code></div>
+                        </div>
+                    </bx:loop>
+                    <button class="btn btn-primary" type="submit">Save branding</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Email server</strong>
+                <bx:if prc.mailValues[ "mail.enabled" ]>
+                    <span class="badge text-bg-success">Override active</span>
+                <bx:else>
+                    <span class="badge text-bg-light text-black">Using .env defaults</span>
+                </bx:if>
+            </div>
+            <div class="card-body">
+                <p class="text-body-secondary small mb-3">
+                    These settings override the SMTP config from <code>.env</code> at runtime. Leave "Enable admin override" off to keep the platform defaults. The password is masked; leave it blank when saving other fields and the stored password is preserved.
+                </p>
+                <form method="post" action="/agent/admin/settings/mail">
+                    <bx:loop collection="#prc.mailKeys#" item="k">
+                        <div class="mb-3">
+                            <bx:if prc.mailKeys[ k ].type eq "boolean">
+                                <div class="form-check form-switch">
+                                    <input type="hidden" name="#encodeForHTMLAttribute( k )#" value="false">
+                                    <input class="form-check-input" type="checkbox" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" value="true"<bx:if prc.mailValues[ k ]> checked</bx:if>>
+                                    <label class="form-check-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.mailKeys[ k ].label )#</label>
+                                </div>
+                            <bx:elseif k eq "mail.password">
+                                <label class="form-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.mailKeys[ k ].label )#</label>
+                                <input type="password" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control" placeholder="leave blank to keep current">
+                            <bx:elseif prc.mailKeys[ k ].type eq "integer">
+                                <label class="form-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.mailKeys[ k ].label )#</label>
+                                <input type="number" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control" value="#encodeForHTMLAttribute( prc.mailValues[ k ] )#">
+                            <bx:else>
+                                <label class="form-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.mailKeys[ k ].label )#</label>
+                                <input type="text" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control" value="#encodeForHTMLAttribute( prc.mailValues[ k ] )#">
+                            </bx:if>
+                        </div>
+                    </bx:loop>
+                    <button class="btn btn-primary" type="submit">Save email settings</button>
+                </form>
+
+                <hr>
+                <form method="post" action="/agent/admin/settings/test-email" class="row g-2">
+                    <div class="col">
+                        <input type="email" name="to" class="form-control form-control-sm" placeholder="Send a test to..." value="#encodeForHTMLAttribute( prc.currentAgentEmail )#">
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-send"></i> Send test</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+</div>
+</bx:output>

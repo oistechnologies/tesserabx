@@ -1,0 +1,20 @@
+/**
+ * AppSetting: one admin-editable runtime setting row.
+ *
+ * SettingsService is the only place outside this class that writes
+ * here. Direct entity use is discouraged; the service caches reads
+ * and invalidates on write.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="app_settings"
+    accessors="true"
+{
+
+    property name="key";
+    property name="value";
+    property name="valueType"            column="value_type";
+    property name="updatedAt"            column="updated_at";
+    property name="updatedByAgentId"     column="updated_by_agent_id";
+
+}

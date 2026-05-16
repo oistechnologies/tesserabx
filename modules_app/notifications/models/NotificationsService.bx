@@ -22,6 +22,7 @@ class singleton=true {
 
     property name="wirebox"               inject="wirebox";
     property name="mailService"           inject="mailService@cbmailservices";
+    property name="settingsService"       inject="SettingsService@admin";
     property name="slackWebhookUrl"       inject="coldbox:setting:slackWebhookUrl";
     property name="appBaseUrl"            inject="coldbox:setting:appBaseUrl";
     property name="unsubscribeSecret"     inject="coldbox:setting:notificationsUnsubscribeSecret";
@@ -439,6 +440,11 @@ class singleton=true {
                 type    = "text/plain",
                 body    = arguments.notification.getBody() ?: ""
             );
+            // Apply the admin-managed mail server override (host,
+            // port, credentials, TLS). No-op when mail.enabled is
+            // false; .env-backed cbmailservices config is the
+            // fallback in that case.
+            settingsService.applyMailOverride( mail );
             var result = mailService.send( mail );
             // cbmailservices returns a struct; the older convention
             // is that `error=true` means it caught a failure rather

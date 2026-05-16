@@ -38,7 +38,13 @@ class {
         interceptors = [];
     }
 
-    function onLoad(){}
+    function onLoad(){
+        binder.map( "AppSetting@admin" )
+              .to( "#moduleMapping#.models.AppSetting" );
+        binder.map( "SettingsService@admin" )
+              .to( "#moduleMapping#.models.SettingsService" )
+              .asSingleton();
+    }
     function onUnload(){}
 
 }
