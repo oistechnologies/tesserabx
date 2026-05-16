@@ -1,0 +1,25 @@
+/**
+ * TicketStatus: one entry in the admin-managed status catalog.
+ *
+ * WorkflowService is the only place outside this class that
+ * writes here. Tickets reference statuses by `key`, not by id,
+ * so an admin can deactivate a status without breaking the
+ * historical ticket rows that still carry it.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="ticket_statuses"
+    accessors="true"
+{
+
+    property name="id";
+    property name="key";
+    property name="label";
+    property name="category";
+    property name="badgeClass"  column="badge_class";
+    property name="sortOrder"   column="sort_order";
+    property name="isActive"    column="is_active";
+    property name="createdAt"   column="created_at";
+    property name="updatedAt"   column="updated_at";
+
+}

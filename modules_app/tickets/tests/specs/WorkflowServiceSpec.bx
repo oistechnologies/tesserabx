@@ -1,0 +1,102 @@
+/**
+ * WorkflowServiceSpec: catalog + transitions + cached reads.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "WorkflowService@tickets" );
+    }
+
+    function run(){
+        describe( "WorkflowService", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute( "DELETE FROM ticket_status_transitions WHERE from_key LIKE 'spec_%' OR to_key LIKE 'spec_%'" );
+                queryExecute( "DELETE FROM ticket_statuses WHERE key LIKE 'spec_%'" );
+                variables.svc.invalidateCache();
+            } );
+
+            it( "listStatuses returns the seeded six in sort order", function(){
+                var statuses = variables.svc.listStatuses();
+                var keys = [];
+                for ( var s in statuses ) keys.append( s.key );
+                expect( keys ).toBe( [ "new", "open", "pending", "on-hold", "resolved", "closed" ] );
+            } );
+
+            it( "isValidTransition matches the seeded edges", function(){
+                expect( variables.svc.isValidTransition( "new", "open" ) ).toBeTrue();
+                expect( variables.svc.isValidTransition( "open", "pending" ) ).toBeTrue();
+                expect( variables.svc.isValidTransition( "closed", "resolved" ) ).toBeFalse();
+                // No-op transition stays valid (consistent with prior TicketsService behavior).
+                expect( variables.svc.isValidTransition( "open", "open" ) ).toBeTrue();
+            } );
+
+            it( "pausesSla is true for the paused category", function(){
+                expect( variables.svc.pausesSla( "pending" ) ).toBeTrue();
+                expect( variables.svc.pausesSla( "on-hold" ) ).toBeTrue();
+                expect( variables.svc.pausesSla( "open" ) ).toBeFalse();
+            } );
+
+            it( "isTerminal is true for resolved + closed", function(){
+                expect( variables.svc.isTerminal( "resolved" ) ).toBeTrue();
+                expect( variables.svc.isTerminal( "closed" ) ).toBeTrue();
+                expect( variables.svc.isTerminal( "open" ) ).toBeFalse();
+            } );
+
+            it( "keysByCategory matches the documented seed", function(){
+                expect( variables.svc.keysByCategory( [ "resolved", "closed" ] ) ).toBe( [ "resolved", "closed" ] );
+                expect( variables.svc.keysByCategory( [ "paused" ] ) ).toBe( [ "pending", "on-hold" ] );
+            } );
+
+            it( "createStatus inserts and the cache picks it up after write", function(){
+                var id = variables.svc.createStatus(
+                    key      : "spec_qa",
+                    label    : "QA review",
+                    category : "open",
+                    badgeClass : "info",
+                    sortOrder : 200
+                );
+                var keys = variables.svc.listStatusKeys();
+                expect( keys ).toInclude( "spec_qa" );
+            } );
+
+            it( "rejects an unknown category", function(){
+                expect( function(){
+                    variables.svc.createStatus( key : "spec_x", label : "X", category : "imaginary" );
+                } ).toThrow();
+            } );
+
+            it( "rejects an invalid key shape", function(){
+                expect( function(){
+                    variables.svc.createStatus( key : "Spaces Here", label : "X", category : "open" );
+                } ).toThrow();
+            } );
+
+            it( "setTransitionsFrom replaces the row set wholesale", function(){
+                variables.svc.createStatus( key : "spec_a", label : "A", category : "open" );
+                variables.svc.createStatus( key : "spec_b", label : "B", category : "open" );
+                variables.svc.createStatus( key : "spec_c", label : "C", category : "open" );
+                variables.svc.setTransitionsFrom( fromKey : "spec_a", toKeys : [ "spec_b", "spec_c" ] );
+                expect( variables.svc.isValidTransition( "spec_a", "spec_b" ) ).toBeTrue();
+                expect( variables.svc.isValidTransition( "spec_a", "spec_c" ) ).toBeTrue();
+                // Replace with just one. The dropped target rejects.
+                variables.svc.setTransitionsFrom( fromKey : "spec_a", toKeys : [ "spec_b" ] );
+                expect( variables.svc.isValidTransition( "spec_a", "spec_c" ) ).toBeFalse();
+                expect( variables.svc.isValidTransition( "spec_a", "spec_b" ) ).toBeTrue();
+            } );
+
+            it( "setStatusActive flips and removes from active listing", function(){
+                var id = variables.svc.createStatus(
+                    key : "spec_inactive", label : "Tmp", category : "open"
+                );
+                variables.svc.setStatusActive( id, false );
+                expect( variables.svc.listStatusKeys() ).notToInclude( "spec_inactive" );
+                expect( variables.svc.listStatusKeys( activeOnly : false ) ).toInclude( "spec_inactive" );
+            } );
+
+        } );
+    }
+
+}

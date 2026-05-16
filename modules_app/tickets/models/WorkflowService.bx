@@ -1,0 +1,364 @@
+/**
+ * WorkflowService: admin-editable ticket status catalog and the
+ * transitions graph.
+ *
+ * Reads are cached in process so the per-request hot paths
+ * (changeStatus, listStatuses on every show / index render, SLA
+ * pause checks on every transition) do not pay a roundtrip. The
+ * cache invalidates on every write here; cross-process cache
+ * coherence is acceptable as eventually-consistent in this
+ * deployment (statuses change rarely).
+ *
+ * Category semantics, consumed by callers:
+ *   open     — active, SLA running, not terminal
+ *   paused   — active, SLA paused, not terminal
+ *   resolved — terminal, stamps resolved_at, excluded from breach
+ *   closed   — terminal, stamps closed_at, excluded from breach
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    variables.statusCache       = {};
+    variables.transitionCache   = {};
+    variables.cacheLoaded       = false;
+
+    public array function categories(){
+        return [
+            { key : "open",     label : "Open (SLA running)" },
+            { key : "paused",   label : "Paused (SLA paused)" },
+            { key : "resolved", label : "Resolved (terminal)" },
+            { key : "closed",   label : "Closed (terminal)" }
+        ];
+    }
+
+    public array function badgeClasses(){
+        return [
+            "primary", "secondary", "success", "danger", "warning", "info", "light", "dark"
+        ];
+    }
+
+    // ---------------- Reads ----------------
+
+    /**
+     * All statuses, ordered by sort_order. Defaults to active
+     * only; pass activeOnly=false to include deactivated rows
+     * (used by the admin UI).
+     */
+    public array function listStatuses( boolean activeOnly = true ){
+        ensureCache();
+        var out = [];
+        for ( var key in variables.statusCache ) {
+            var s = variables.statusCache[ key ];
+            if ( arguments.activeOnly && !s.isActive ) continue;
+            out.append( s );
+        }
+        arraySort( out, function( a, b ){
+            return ( a.sortOrder < b.sortOrder ) ? -1 : ( a.sortOrder > b.sortOrder ? 1 : 0 );
+        } );
+        return out;
+    }
+
+    /**
+     * Just the keys, in sort order. The hot path for view code
+     * that just needs the dropdown values.
+     */
+    public array function listStatusKeys( boolean activeOnly = true ){
+        var out = [];
+        for ( var s in listStatuses( arguments.activeOnly ) ) {
+            out.append( s.key );
+        }
+        return out;
+    }
+
+    public any function findStatus( required string key ){
+        if ( !len( arguments.key ) ) return javaCast( "null", "" );
+        ensureCache();
+        return variables.statusCache[ arguments.key ] ?: javaCast( "null", "" );
+    }
+
+    public boolean function isValidTransition( required string from, required string to ){
+        if ( !len( arguments.from ) || !len( arguments.to ) ) return false;
+        if ( arguments.from == arguments.to ) return true; // no-op transitions stay valid
+        ensureCache();
+        var allowed = variables.transitionCache[ arguments.from ] ?: [];
+        for ( var t in allowed ) {
+            if ( t == arguments.to ) return true;
+        }
+        return false;
+    }
+
+    public array function allowedNextFor( required string from ){
+        ensureCache();
+        return variables.transitionCache[ arguments.from ] ?: [];
+    }
+
+    public boolean function pausesSla( required string key ){
+        var s = findStatus( arguments.key );
+        if ( isNull( s ) ) return false;
+        return s.category == "paused";
+    }
+
+    public boolean function isTerminal( required string key ){
+        var s = findStatus( arguments.key );
+        if ( isNull( s ) ) return false;
+        return s.category == "resolved" || s.category == "closed";
+    }
+
+    /**
+     * The keys whose category lives in `categoryList`. Reporting
+     * and the SLA breach query use this to build dynamic
+     * "exclude terminal" IN clauses without hardcoding strings.
+     */
+    public array function keysByCategory( required array categoryList ){
+        var out = [];
+        for ( var s in listStatuses( activeOnly : false ) ) {
+            for ( var c in arguments.categoryList ) {
+                if ( s.category == c ) {
+                    out.append( s.key );
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    // ---------------- Writes ----------------
+
+    public string function createStatus(
+        required string key,
+        required string label,
+        required string category,
+        string badgeClass = "secondary",
+        numeric sortOrder = 0,
+        string actorAgentId = ""
+    ){
+        validateCategory( arguments.category );
+        validateKey( arguments.key );
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO ticket_statuses
+                ( id, key, label, category, badge_class, sort_order, is_active )
+             VALUES
+                ( :id, :k, :l, :c, :bc, cast( :so as integer ), TRUE )",
+            {
+                id : id,
+                k  : trim( arguments.key ),
+                l  : trim( arguments.label ),
+                c  : arguments.category,
+                bc : arguments.badgeClass,
+                so : toString( int( arguments.sortOrder ) )
+            }
+        );
+        invalidateCache();
+        recordAudit( "ticket_status.created", id, arguments.actorAgentId, { "key" : arguments.key } );
+        return id;
+    }
+
+    public void function updateStatus(
+        required string id,
+        string label,
+        string category,
+        string badgeClass,
+        numeric sortOrder,
+        string actorAgentId = ""
+    ){
+        var sets = [];
+        var binds = { id : arguments.id };
+        if ( structKeyExists( arguments, "label" ) && len( trim( arguments.label ?: "" ) ) ) {
+            sets.append( "label = :l" ); binds.l = trim( arguments.label );
+        }
+        if ( structKeyExists( arguments, "category" ) && len( arguments.category ?: "" ) ) {
+            validateCategory( arguments.category );
+            sets.append( "category = :c" ); binds.c = arguments.category;
+        }
+        if ( structKeyExists( arguments, "badgeClass" ) && len( arguments.badgeClass ?: "" ) ) {
+            sets.append( "badge_class = :bc" ); binds.bc = arguments.badgeClass;
+        }
+        if ( structKeyExists( arguments, "sortOrder" ) ) {
+            sets.append( "sort_order = cast( :so as integer )" );
+            binds.so = toString( int( arguments.sortOrder ) );
+        }
+        if ( !sets.len() ) return;
+        sets.append( "updated_at = NOW()" );
+        queryExecute( "UPDATE ticket_statuses SET " & sets.toList() & " WHERE id = :id", binds );
+        invalidateCache();
+        recordAudit( "ticket_status.updated", arguments.id, arguments.actorAgentId, {} );
+    }
+
+    public void function setStatusActive(
+        required string id,
+        required boolean active,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "UPDATE ticket_statuses SET is_active = cast( :a as boolean ), updated_at = NOW() WHERE id = :id",
+            { id : arguments.id, a : ( arguments.active ? "true" : "false" ) }
+        );
+        invalidateCache();
+        recordAudit(
+            arguments.active ? "ticket_status.activated" : "ticket_status.deactivated",
+            arguments.id,
+            arguments.actorAgentId,
+            {}
+        );
+    }
+
+    public void function addTransition(
+        required string fromKey,
+        required string toKey,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "INSERT INTO ticket_status_transitions ( id, from_key, to_key )
+             VALUES ( :id, :f, :t )
+             ON CONFLICT ( from_key, to_key ) DO NOTHING",
+            { id : createUUID(), f : arguments.fromKey, t : arguments.toKey }
+        );
+        invalidateCache();
+        recordAudit( "ticket_status_transition.added", "", arguments.actorAgentId, {
+            "from" : arguments.fromKey,
+            "to"   : arguments.toKey
+        } );
+    }
+
+    public void function removeTransition(
+        required string fromKey,
+        required string toKey,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "DELETE FROM ticket_status_transitions WHERE from_key = :f AND to_key = :t",
+            { f : arguments.fromKey, t : arguments.toKey }
+        );
+        invalidateCache();
+        recordAudit( "ticket_status_transition.removed", "", arguments.actorAgentId, {
+            "from" : arguments.fromKey,
+            "to"   : arguments.toKey
+        } );
+    }
+
+    /**
+     * Bulk-set transitions for one `from_key`. Replaces the row
+     * set with exactly `toKeys`. Used by the admin edit form
+     * which submits checkboxes per target status.
+     */
+    public void function setTransitionsFrom(
+        required string fromKey,
+        required array  toKeys,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "DELETE FROM ticket_status_transitions WHERE from_key = :f",
+            { f : arguments.fromKey }
+        );
+        for ( var to in arguments.toKeys ) {
+            if ( !len( trim( to ) ) ) continue;
+            queryExecute(
+                "INSERT INTO ticket_status_transitions ( id, from_key, to_key ) VALUES ( :id, :f, :t )",
+                { id : createUUID(), f : arguments.fromKey, t : trim( to ) }
+            );
+        }
+        invalidateCache();
+        recordAudit( "ticket_status_transition.bulk_set", "", arguments.actorAgentId, {
+            "from"     : arguments.fromKey,
+            "toCount"  : arguments.toKeys.len()
+        } );
+    }
+
+    public void function invalidateCache(){
+        variables.cacheLoaded = false;
+    }
+
+    // ---------------- internals ----------------
+
+    private void function ensureCache(){
+        if ( variables.cacheLoaded ) return;
+        lock name="tesserabx.workflow.cache" type="exclusive" timeout="5" {
+            if ( variables.cacheLoaded ) return;
+            var sRows = queryExecute(
+                "SELECT id, key, label, category, badge_class, sort_order, is_active
+                 FROM   ticket_statuses
+                 ORDER BY sort_order"
+            );
+            var sNext = {};
+            for ( var i = 1; i <= sRows.recordCount; i++ ) {
+                sNext[ sRows.key[ i ] ] = {
+                    id         : sRows.id[ i ],
+                    key        : sRows.key[ i ],
+                    label      : sRows.label[ i ],
+                    category   : sRows.category[ i ],
+                    badgeClass : sRows.badge_class[ i ] ?: "secondary",
+                    sortOrder  : val( sRows.sort_order[ i ] ),
+                    isActive   : !!sRows.is_active[ i ]
+                };
+            }
+
+            var tRows = queryExecute(
+                "SELECT from_key, to_key FROM ticket_status_transitions"
+            );
+            var tNext = {};
+            for ( var i = 1; i <= tRows.recordCount; i++ ) {
+                var from = tRows.from_key[ i ];
+                if ( !structKeyExists( tNext, from ) ) tNext[ from ] = [];
+                tNext[ from ].append( tRows.to_key[ i ] );
+            }
+
+            variables.statusCache     = sNext;
+            variables.transitionCache = tNext;
+            variables.cacheLoaded     = true;
+        }
+    }
+
+    private void function validateCategory( required string category ){
+        var allowed = [ "open", "paused", "resolved", "closed" ];
+        if ( !arrayFindNoCase( allowed, arguments.category ) ) {
+            throw(
+                type    : "WorkflowService.UnknownCategory",
+                message : "Unknown status category: " & arguments.category
+            );
+        }
+    }
+
+    private void function validateKey( required string key ){
+        var t = trim( arguments.key );
+        if ( !len( t ) ) {
+            throw( type : "WorkflowService.InvalidKey", message : "Status key is required." );
+        }
+        if ( !reFind( "^[a-z][a-z0-9_-]*$", t ) ) {
+            throw(
+                type    : "WorkflowService.InvalidKey",
+                message : "Status key must start with a lowercase letter and contain only lowercase letters, digits, hyphens, and underscores."
+            );
+        }
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string entityId,
+        required string actorAgentId,
+        required struct metadata
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "ticket_status",
+                entityId   : arguments.entityId,
+                metadata   : arguments.metadata
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "WorkflowService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

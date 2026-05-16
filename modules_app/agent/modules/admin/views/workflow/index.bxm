@@ -1,0 +1,106 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h5 mb-0">Ticket workflow</h2>
+        <p class="text-body-secondary small mb-0">
+            Statuses and allowed transitions. Categories drive SLA pause and breach behavior:
+            <code>open</code> (SLA running), <code>paused</code> (SLA paused),
+            <code>resolved</code> / <code>closed</code> (terminal, excluded from breach).
+        </p>
+    </div>
+    <a class="btn btn-primary btn-sm" href="/agent/admin/workflow/new"><i class="bi bi-plus-lg"></i> New status</a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header"><strong>Statuses</strong></div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th>Label</th>
+                    <th>Key</th>
+                    <th>Category</th>
+                    <th class="text-center">Sort</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <bx:loop array="#prc.statuses#" item="s">
+                    <tr>
+                        <td>
+                            <span class="badge text-bg-#encodeForHTML( s.badgeClass )#">#encodeForHTML( s.label )#</span>
+                        </td>
+                        <td><code>#encodeForHTML( s.key )#</code></td>
+                        <td><span class="badge text-bg-light text-black">#encodeForHTML( s.category )#</span></td>
+                        <td class="text-center">#s.sortOrder#</td>
+                        <td>
+                            <bx:if s.isActive>
+                                <span class="badge text-bg-success">Active</span>
+                            <bx:else>
+                                <span class="badge text-bg-light text-black">Inactive</span>
+                            </bx:if>
+                        </td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="/agent/admin/workflow/#encodeForHTMLAttribute( s.id )#">Edit</a>
+                            <bx:if s.isActive>
+                                <form method="post" action="/agent/admin/workflow/#encodeForHTMLAttribute( s.id )#/deactivate" class="d-inline ms-1" onsubmit="return confirm('Deactivate this status? Existing tickets keep their value but it disappears from new pickers.');">
+                                    <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
+                                </form>
+                            <bx:else>
+                                <form method="post" action="/agent/admin/workflow/#encodeForHTMLAttribute( s.id )#/activate" class="d-inline ms-1">
+                                    <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
+                                </form>
+                            </bx:if>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><strong>Transition matrix</strong></div>
+    <div class="card-body p-0">
+        <p class="px-3 pt-3 text-body-secondary small mb-2">
+            Read row → column: when a ticket is in the row's status,
+            agents may transition it to any column with a check.
+            Self-transitions (key → same key) are always permitted
+            as no-ops and not shown.
+        </p>
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered mb-0 align-middle text-center">
+                <thead>
+                    <tr>
+                        <th class="text-start">From \\ To</th>
+                        <bx:loop array="#prc.statuses#" item="col">
+                            <th><small><span class="badge text-bg-#encodeForHTML( col.badgeClass )#">#encodeForHTML( col.label )#</span></small></th>
+                        </bx:loop>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:loop array="#prc.statuses#" item="row">
+                        <tr>
+                            <th class="text-start">
+                                <small><span class="badge text-bg-#encodeForHTML( row.badgeClass )#">#encodeForHTML( row.label )#</span></small>
+                            </th>
+                            <bx:loop array="#prc.statuses#" item="col">
+                                <td>
+                                    <bx:if row.key eq col.key>
+                                        <span class="text-body-secondary">—</span>
+                                    <bx:elseif structKeyExists( prc.transitionMap, row.key & "|" & col.key )>
+                                        <i class="bi bi-check2 text-success"></i>
+                                    <bx:else>
+                                        <span class="text-body-secondary">·</span>
+                                    </bx:if>
+                                </td>
+                            </bx:loop>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</bx:output>

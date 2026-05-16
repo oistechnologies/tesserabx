@@ -1,0 +1,16 @@
+/**
+ * TicketStatusTransition: one allowed (from, to) edge in the
+ * ticket workflow graph.
+ */
+class
+    extends="quick.models.BaseEntity"
+    table="ticket_status_transitions"
+    accessors="true"
+{
+
+    property name="id";
+    property name="fromKey"   column="from_key";
+    property name="toKey"     column="to_key";
+    property name="createdAt" column="created_at";
+
+}

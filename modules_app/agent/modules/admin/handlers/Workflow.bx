@@ -1,0 +1,149 @@
+/**
+ * /agent/admin/workflow handler.
+ *
+ * Admin-managed ticket statuses + transitions. Admin-only via the
+ * cbSecurity rule on /agent/admin/*. All writes route through
+ * WorkflowService@tickets; this handler never touches the
+ * ticket_statuses / ticket_status_transitions tables directly.
+ */
+class {
+
+    property name="workflow"    inject="WorkflowService@tickets";
+    property name="messagebox"  inject="messagebox@cbmessagebox";
+    property name="auth"        inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle     = "Workflow";
+        prc.statuses      = workflow.listStatuses( activeOnly : false );
+        prc.categories    = workflow.categories();
+        prc.badgeClasses  = workflow.badgeClasses();
+        // Transition matrix: rows = from, cols = to. Build a map
+        // keyed by "from|to" → true so the view can render a grid
+        // without a per-cell DB call.
+        prc.transitionMap = {};
+        for ( var s in prc.statuses ) {
+            for ( var to in workflow.allowedNextFor( s.key ) ) {
+                prc.transitionMap[ s.key & "|" & to ] = true;
+            }
+        }
+        event.setView( "workflow/index" );
+    }
+
+    function newForm( event, rc, prc ){
+        prc.pageTitle    = "New status";
+        prc.status       = { id : "", key : "", label : "", category : "open", badgeClass : "secondary", sortOrder : 100, isActive : true };
+        prc.isNew        = true;
+        prc.categories   = workflow.categories();
+        prc.badgeClasses = workflow.badgeClasses();
+        event.setView( "workflow/edit" );
+    }
+
+    function create( event, rc, prc ){
+        try {
+            workflow.createStatus(
+                key          : rc.key ?: "",
+                label        : rc.label ?: "",
+                category     : rc.category ?: "open",
+                badgeClass   : rc.badgeClass ?: "secondary",
+                sortOrder    : val( rc.sortOrder ?: 100 ),
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Status created." );
+            relocate( uri = "/agent/admin/workflow" );
+        } catch ( any e ) {
+            messagebox.error( "Could not create status: " & e.message );
+            relocate( uri = "/agent/admin/workflow/new" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        param rc.id = "";
+        var status = findStatusById( rc.id );
+        if ( isNull( status ) ) {
+            messagebox.error( "Status not found." );
+            relocate( uri = "/agent/admin/workflow" );
+            return;
+        }
+        prc.pageTitle    = "Edit status";
+        prc.status       = status;
+        prc.isNew        = false;
+        prc.categories   = workflow.categories();
+        prc.badgeClasses = workflow.badgeClasses();
+        // For the transition editor: every other status as a
+        // candidate "to", with a flag for whether it is currently
+        // allowed.
+        var allowed = workflow.allowedNextFor( status.key );
+        prc.targets = [];
+        for ( var s in workflow.listStatuses( activeOnly : false ) ) {
+            prc.targets.append( {
+                key      : s.key,
+                label    : s.label,
+                allowed  : arrayFindNoCase( allowed, s.key ) > 0,
+                isSelf   : s.key == status.key
+            } );
+        }
+        event.setView( "workflow/edit" );
+    }
+
+    function update( event, rc, prc ){
+        param rc.id = "";
+        var status = findStatusById( rc.id );
+        if ( isNull( status ) ) {
+            messagebox.error( "Status not found." );
+            relocate( uri = "/agent/admin/workflow" );
+            return;
+        }
+        workflow.updateStatus(
+            id           : rc.id,
+            label        : rc.label ?: "",
+            category     : rc.category ?: "",
+            badgeClass   : rc.badgeClass ?: "",
+            sortOrder    : val( rc.sortOrder ?: 0 ),
+            actorAgentId : currentAgentId()
+        );
+        // Transitions: "to_keys" is the multi-checkbox submission.
+        var toKeys = listToArray( rc.to_keys ?: "", "," );
+        workflow.setTransitionsFrom(
+            fromKey      : status.key,
+            toKeys       : toKeys,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Status saved." );
+        relocate( uri = "/agent/admin/workflow" );
+    }
+
+    function activate( event, rc, prc ){
+        param rc.id = "";
+        workflow.setStatusActive( id : rc.id, active : true, actorAgentId : currentAgentId() );
+        messagebox.info( "Status activated." );
+        relocate( uri = "/agent/admin/workflow" );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.id = "";
+        workflow.setStatusActive( id : rc.id, active : false, actorAgentId : currentAgentId() );
+        messagebox.info( "Status deactivated. Existing tickets keep their value but the picker hides it." );
+        relocate( uri = "/agent/admin/workflow" );
+    }
+
+    // ---------- internals ----------
+
+    private any function findStatusById( required string id ){
+        for ( var s in workflow.listStatuses( activeOnly : false ) ) {
+            if ( s.id == arguments.id ) return s;
+        }
+        return javaCast( "null", "" );
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

@@ -16,36 +16,27 @@ class singleton=true {
     property name="contactsService"    inject="ContactsService@contacts";
     property name="auditService"       inject="AuditService@audit";
     property name="slaService"         inject="SlaService@sla";
+    property name="workflowService"    inject="WorkflowService@tickets";
     property name="cbfs"               inject="DiskService@cbfs";
     property name="interceptorService" inject="coldbox:interceptorService";
 
-    // Statuses that pause the SLA clock. A transition into one of these
-    // stamps sla_paused_at; a transition out shifts the due_at columns
-    // forward by the business-minutes that elapsed during the pause.
-    variables.PAUSED_STATUSES = [ "pending", "on-hold" ];
-
     // ---------- Status workflow ----------
+    //
+    // Statuses and transitions live in the ticket_statuses /
+    // ticket_status_transitions tables and are admin-editable
+    // through /agent/admin/workflow. The cached lookups in
+    // WorkflowService keep these hot paths fast.
 
-    variables.STATUSES = [ "new", "open", "pending", "on-hold", "resolved", "closed" ];
     variables.PRIORITIES = [ "low", "normal", "high", "urgent" ];
     variables.TYPES = [ "incident", "request", "problem", "question" ];
     variables.SOURCES = [ "email", "portal", "widget", "agent" ];
-    variables.TRANSITIONS = {
-        "new"      : [ "open", "on-hold", "resolved", "closed" ],
-        "open"     : [ "pending", "on-hold", "resolved", "closed" ],
-        "pending"  : [ "open", "on-hold", "resolved", "closed" ],
-        "on-hold"  : [ "open", "pending", "resolved", "closed" ],
-        "resolved" : [ "open", "closed" ],
-        "closed"   : [ "open" ]
-    };
 
-    public array function listStatuses() { return variables.STATUSES; }
+    public array function listStatuses() { return workflowService.listStatusKeys(); }
     public array function listPriorities() { return variables.PRIORITIES; }
     public array function listTypes() { return variables.TYPES; }
 
     public boolean function isValidTransition( required string from, required string to ){
-        if ( !structKeyExists( variables.TRANSITIONS, arguments.from ) ) return false;
-        return arrayFindNoCase( variables.TRANSITIONS[ arguments.from ], arguments.to ) > 0;
+        return workflowService.isValidTransition( arguments.from, arguments.to );
     }
 
     // ---------- Reads ----------
@@ -463,9 +454,18 @@ class singleton=true {
         }
 
         t.setStatus( to );
-        if ( to == "resolved" ) t.setResolvedAt( now() );
-        if ( to == "closed" )   t.setClosedAt( now() );
-        if ( to == "open" && from == "closed" ) {
+        // Stamp resolved_at / closed_at from the destination
+        // status's category, not a hardcoded key. Re-opening a
+        // terminal ticket (any non-terminal target from a terminal
+        // source) clears both stamps so historical rows do not
+        // bleed into "currently resolved" reporting.
+        var toCategory   = workflowCategoryFor( to );
+        var fromCategory = workflowCategoryFor( from );
+        if ( toCategory == "resolved" ) t.setResolvedAt( now() );
+        if ( toCategory == "closed" )   t.setClosedAt( now() );
+        var fromTerminal = ( fromCategory == "resolved" || fromCategory == "closed" );
+        var toTerminal   = ( toCategory   == "resolved" || toCategory   == "closed" );
+        if ( fromTerminal && !toTerminal ) {
             t.clearAttribute( name = "closedAt", setToNull = true );
             t.clearAttribute( name = "resolvedAt", setToNull = true );
         }
@@ -797,8 +797,11 @@ class singleton=true {
      */
     private void function applySlaStatusTransition( required any ticket, required string from, required string to ){
         if ( !len( arguments.ticket.getSlaPolicyId() ?: "" ) ) return;
-        var wasPaused = arrayFindNoCase( variables.PAUSED_STATUSES, arguments.from ) > 0;
-        var isPaused  = arrayFindNoCase( variables.PAUSED_STATUSES, arguments.to   ) > 0;
+        // SLA pause now flows from the destination status's
+        // category (admin-editable). Old hardcoded "pending" /
+        // "on-hold" remain in the seeded catalog as category=paused.
+        var wasPaused = workflowService.pausesSla( arguments.from );
+        var isPaused  = workflowService.pausesSla( arguments.to );
 
         if ( !wasPaused && isPaused ) {
             arguments.ticket.setSlaPausedAt( now() );
@@ -851,7 +854,7 @@ class singleton=true {
     public array function findBreachedTickets(){
         var q = wirebox.getInstance( "Ticket@tickets" )
             .withoutGlobalScope()
-            .whereNotIn( "status", [ "resolved", "closed" ] )
+            .whereNotIn( "status", workflowService.keysByCategory( [ "resolved", "closed" ] ) )
             .whereNull( "sla_paused_at" )
             .where( function( w ){
                 w.where( function( w2 ){
@@ -880,7 +883,7 @@ class singleton=true {
     public array function findActiveTicketsForScan(){
         return wirebox.getInstance( "Ticket@tickets" )
             .withoutGlobalScope()
-            .whereNotIn( "status", [ "resolved", "closed" ] )
+            .whereNotIn( "status", workflowService.keysByCategory( [ "resolved", "closed" ] ) )
             .whereNull( "sla_paused_at" )
             .orderBy( "created_at" )
             .get();
@@ -922,7 +925,7 @@ class singleton=true {
         var interval = "INTERVAL '" & int( arguments.windowMinutes ) & " minutes'";
         var q = wirebox.getInstance( "Ticket@tickets" )
             .withoutGlobalScope()
-            .whereNotIn( "status", [ "resolved", "closed" ] )
+            .whereNotIn( "status", workflowService.keysByCategory( [ "resolved", "closed" ] ) )
             .whereNull( "sla_paused_at" )
             .where( function( w ){
                 w.where( function( w2 ){
@@ -937,6 +940,20 @@ class singleton=true {
                 } );
             } );
         return q.get();
+    }
+
+    /**
+     * Returns the category ("open" | "paused" | "resolved" |
+     * "closed") for a status key, or "" when the key is unknown
+     * (an admin may have removed it after the ticket was last
+     * touched). Used by changeStatus to decide resolved_at /
+     * closed_at stamping.
+     */
+    private string function workflowCategoryFor( required string statusKey ){
+        if ( !len( arguments.statusKey ) ) return "";
+        var s = workflowService.findStatus( arguments.statusKey );
+        if ( isNull( s ) ) return "";
+        return s.category ?: "";
     }
 
 }

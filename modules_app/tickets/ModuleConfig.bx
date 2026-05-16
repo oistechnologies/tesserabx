@@ -62,6 +62,13 @@ class {
         binder.map( "CustomFieldsService@tickets" )
               .to( "#moduleMapping#.models.CustomFieldsService" )
               .asSingleton();
+        binder.map( "TicketStatus@tickets" )
+              .to( "#moduleMapping#.models.TicketStatus" );
+        binder.map( "TicketStatusTransition@tickets" )
+              .to( "#moduleMapping#.models.TicketStatusTransition" );
+        binder.map( "WorkflowService@tickets" )
+              .to( "#moduleMapping#.models.WorkflowService" )
+              .asSingleton();
         binder.map( "BulkActionsService@tickets" )
               .to( "#moduleMapping#.models.BulkActionsService" )
               .asSingleton();
