@@ -210,6 +210,81 @@ class singleton=true {
     }
 
     /**
+     * Aspect-preserving thumbnail for a generic image attachment.
+     *
+     * Unlike processProfileImage, this does NOT center-crop; the
+     * thumbnail mirrors the original's shape but is scaled so the
+     * longest dimension is at most maxDimension. Output is JPEG.
+     *
+     * Returns { ok : boolean, bytes : byte[], error : string }.
+     * Never throws; on failure, the upload path marks the
+     * attachment's thumbnail_status as "failed" and serves the
+     * original file with no thumbnail.
+     */
+    public struct function generateThumbnail(
+        required any sourceBytes,
+        required string contentType,
+        numeric maxDimension = 320
+    ){
+        try {
+            var source = decode( arguments.sourceBytes );
+            if ( isNull( source ) ) {
+                return { ok : false, bytes : "", error : "Unknown or corrupt image format." };
+            }
+            var bytes = resizePreservingAspect( source, arguments.maxDimension );
+            return { ok : true, bytes : bytes, error : "" };
+        } catch ( any e ) {
+            return { ok : false, bytes : "", error : "Thumbnail generation failed: " & e.message };
+        }
+    }
+
+    /**
+     * Scale the source so its longest dimension fits in maxDim
+     * (no upscaling: tiny images pass through unchanged), encode
+     * as JPEG byte[]. Aspect ratio preserved.
+     */
+    private any function resizePreservingAspect( required any source, required numeric maxDim ){
+        var w = arguments.source.getWidth();
+        var h = arguments.source.getHeight();
+        var newW = w;
+        var newH = h;
+        if ( w > arguments.maxDim || h > arguments.maxDim ) {
+            if ( w >= h ) {
+                newW = arguments.maxDim;
+                newH = max( 1, int( h * ( arguments.maxDim / w ) ) );
+            } else {
+                newH = arguments.maxDim;
+                newW = max( 1, int( w * ( arguments.maxDim / h ) ) );
+            }
+        }
+        var BufferedImage  = createObject( "java", "java.awt.image.BufferedImage" );
+        var RenderingHints = createObject( "java", "java.awt.RenderingHints" );
+        var target = BufferedImage.init( newW, newH, BufferedImage.TYPE_INT_RGB );
+        var g = target.createGraphics();
+        try {
+            g.setRenderingHint(
+                RenderingHints.KEY_INTERPOLATION,
+                RenderingHints.VALUE_INTERPOLATION_BICUBIC
+            );
+            g.setRenderingHint(
+                RenderingHints.KEY_RENDERING,
+                RenderingHints.VALUE_RENDER_QUALITY
+            );
+            g.setRenderingHint(
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON
+            );
+            g.drawImage( arguments.source, 0, 0, newW, newH, javaCast( "null", "" ) );
+        } finally {
+            g.dispose();
+        }
+        var baos    = createObject( "java", "java.io.ByteArrayOutputStream" ).init();
+        var ImageIO = createObject( "java", "javax.imageio.ImageIO" );
+        ImageIO.write( target, "jpg", baos );
+        return baos.toByteArray();
+    }
+
+    /**
      * Scale to size x size and encode as JPEG byte[].
      */
     private any function resizeToJpegBytes( required any cropped, required numeric size ){

@@ -121,6 +121,33 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
             } );
 
+            describe( "generateThumbnail", function(){
+
+                it( "produces a JPEG within the requested max dimension while preserving aspect", function(){
+                    var path = writeTempJpeg( 800, 200 );  // wide source
+                    var src  = fileReadBinary( path );
+
+                    var out = variables.svc.generateThumbnail( src, "image/jpeg", 320 );
+                    expect( out.ok ).toBeTrue();
+                    expect( out.error ).toBeEmpty();
+
+                    var bais  = createObject( "java", "java.io.ByteArrayInputStream" ).init( out.bytes );
+                    var img   = createObject( "java", "javax.imageio.ImageIO" ).read( bais );
+                    expect( max( img.getWidth(), img.getHeight() ) ).toBeLTE( 320 );
+                    // Aspect ratio preserved (within 1px tolerance for rounding).
+                    expect( abs( ( img.getWidth() / img.getHeight() ) - 4.0 ) ).toBeLT( 0.1 );
+                    fileDelete( path );
+                } );
+
+                it( "returns ok=false rather than throwing on non-image bytes", function(){
+                    var fake = charsetDecode( "not really an image", "ISO-8859-1" );
+                    var out = variables.svc.generateThumbnail( fake, "image/jpeg", 320 );
+                    expect( out.ok ).toBeFalse();
+                    expect( out.error ).notToBeEmpty();
+                } );
+
+            } );
+
         } );
     }
 

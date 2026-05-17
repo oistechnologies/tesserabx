@@ -18,6 +18,7 @@ class singleton=true {
     property name="slaService"         inject="SlaService@sla";
     property name="workflowService"    inject="WorkflowService@tickets";
     property name="cbfs"               inject="DiskService@cbfs";
+    property name="imageProcessing"    inject="ImageProcessingService@core";
     property name="interceptorService" inject="coldbox:interceptorService";
 
     // ---------- Status workflow ----------
@@ -722,6 +723,43 @@ class singleton=true {
         a.setCbfsPath( path );
         a.setThumbnailStatus( thumbStatus );
         a.save();
+
+        // Synchronous thumbnail generation for image extensions.
+        // cbq is partially broken on Postgres per the project's
+        // memory file; async deferred to a later phase. The avatar
+        // pipeline (Phase 3) runs sync without complaints; image
+        // attachments are similarly small.
+        if ( thumbStatus == "pending" ) {
+            try {
+                var thumb = imageProcessing.generateThumbnail(
+                    fileReadBinary( sourcePath ),
+                    ctype
+                );
+                if ( thumb.ok ) {
+                    cbfs.defaultDisk().create(
+                        path      : path & ".thumb.jpg",
+                        contents  : thumb.bytes,
+                        overwrite : true,
+                        mode      : "600"
+                    );
+                    markThumbnailReady( a.getId() );
+                } else {
+                    writeLog(
+                        text : "Attachment thumbnail generation failed [" & a.getId() & "]: " & thumb.error,
+                        log  : "tesserabx",
+                        type : "warning"
+                    );
+                    markThumbnailFailed( a.getId() );
+                }
+            } catch ( any e ) {
+                writeLog(
+                    text : "Attachment thumbnail generation threw [" & a.getId() & "]: " & e.message,
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+                markThumbnailFailed( a.getId() );
+            }
+        }
 
         touchTicket( t );
 
