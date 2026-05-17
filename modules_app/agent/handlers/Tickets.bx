@@ -583,7 +583,18 @@ class {
 
         // Assignment-card dropdown options.
         arguments.prc.assignableAgents = rbacService.listAgentsWithRoles();
-        arguments.prc.attachments  = ticketsService.listAttachmentsForTicket( arguments.ticket.getId() );
+        // Attachments + per-message bucket so the view can render
+        // inline links under each message in O(1).
+        var viewer = { type : "agent", id : currentAgentId() };
+        arguments.prc.attachments  = ticketsService.listAttachmentsForTicket( arguments.ticket.getId(), viewer );
+        arguments.prc.attachmentsByMessageId = {};
+        for ( var att in arguments.prc.attachments ) {
+            var mid = att.getMessageId() ?: "";
+            if ( !structKeyExists( arguments.prc.attachmentsByMessageId, mid ) ) {
+                arguments.prc.attachmentsByMessageId[ mid ] = [];
+            }
+            arguments.prc.attachmentsByMessageId[ mid ].append( att );
+        }
         arguments.prc.statuses     = ticketsService.listStatuses();
         arguments.prc.organization = isNull( arguments.ticket.getOrganizationId() ) || !len( arguments.ticket.getOrganizationId() ?: "" )
             ? javaCast( "null", "" )
@@ -663,6 +674,113 @@ class {
         var user = auth.getUser();
         if ( isNull( user ) ) return "";
         return user.getId();
+    }
+
+    // ---------- Attachments: agent-side upload + delete ----------
+
+    /**
+     * Multi-file upload from the Attachments tab. Iterates the
+     * posted files, calls TicketsService.addAttachment per file
+     * (try/catch each so one bad file doesn't take down the batch),
+     * flashes a summary, and redirects back to the ticket.
+     */
+    function uploadAttachments( event, rc, prc ){
+        param rc.ticketId = "";
+        if ( !len( rc.ticketId ) ) {
+            messagebox.error( "Missing ticket id." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        var ticket = ticketsService.getTicket( rc.ticketId );
+        if ( isNull( ticket ) ) {
+            messagebox.error( "Ticket not found." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !structKeyExists( form, "attachments" ) || !len( form.attachments ?: "" ) ) {
+            messagebox.warn( "Pick at least one file." );
+            relocate( uri = "/agent/tickets/" & rc.ticketId );
+            return;
+        }
+        var ok       = 0;
+        var failed   = [];
+        var destDir  = getTempDirectory() & "/ticket-att-" & createUUID() & "/";
+        directoryCreate( destDir );
+        try {
+            // fileUploadAll handles a multi-file <input name="attachments" multiple>.
+            var results = fileUploadAll( destination = destDir, nameConflict = "makeUnique" );
+            for ( var r in results ) {
+                var srcPath = destDir & r.serverFile;
+                var ctype   = r.contentType & "/" & r.contentSubType;
+                try {
+                    ticketsService.addAttachment( {
+                        ticketId         : rc.ticketId,
+                        originalFilename : r.clientFile,
+                        contentType      : ctype,
+                        sizeBytes        : r.fileSize,
+                        sourcePath       : srcPath,
+                        uploaderAgentId  : currentAgentId()
+                    } );
+                    ok++;
+                } catch ( any e ) {
+                    failed.append( r.clientFile & " (" & e.message & ")" );
+                }
+                try { fileDelete( srcPath ); } catch ( any e ) {}
+            }
+        } catch ( any e ) {
+            messagebox.error( "Upload failed: " & e.message );
+        }
+        try { directoryDelete( destDir, true ); } catch ( any e ) {}
+
+        if ( ok > 0 && !arrayLen( failed ) ) {
+            messagebox.info( "Uploaded " & ok & " file(s)." );
+        } else if ( ok > 0 ) {
+            messagebox.warn( "Uploaded " & ok & " file(s); rejected: " & arrayToList( failed, "; " ) );
+        } else if ( arrayLen( failed ) ) {
+            messagebox.error( "All uploads rejected: " & arrayToList( failed, "; " ) );
+        }
+        relocate( uri = "/agent/tickets/" & rc.ticketId );
+    }
+
+    /**
+     * Soft-delete a single attachment with a required reason.
+     * Verifies the URL's ticketId matches the attachment so a
+     * forged URL can't act across tickets.
+     */
+    function deleteAttachment( event, rc, prc ){
+        param rc.ticketId     = "";
+        param rc.attachmentId = "";
+        param rc.reason       = "";
+
+        if ( !len( rc.attachmentId ) || !len( rc.ticketId ) ) {
+            messagebox.error( "Missing attachment or ticket id." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        var viewer = { type : "agent", id : currentAgentId() };
+        try {
+            var att = ticketsService.getAttachmentForViewer( rc.attachmentId, viewer );
+            if ( att.getTicketId() != rc.ticketId ) {
+                messagebox.error( "Attachment does not belong to that ticket." );
+                relocate( uri = "/agent/tickets/" & rc.ticketId );
+                return;
+            }
+            ticketsService.softDeleteAttachment(
+                attachmentId : rc.attachmentId,
+                agentId      : currentAgentId(),
+                reason       : rc.reason
+            );
+            messagebox.info( "Attachment deleted." );
+        } catch ( TicketsService.MissingDeletionReason e ) {
+            messagebox.error( "A deletion reason is required." );
+        } catch ( TicketsService.AttachmentNotFound e ) {
+            messagebox.error( "Attachment not found." );
+        } catch ( TicketsService.AttachmentAccessDenied e ) {
+            messagebox.error( "You do not have access to this attachment." );
+        } catch ( any e ) {
+            messagebox.error( "Could not delete attachment: " & e.message );
+        }
+        relocate( uri = "/agent/tickets/" & rc.ticketId );
     }
 
 }

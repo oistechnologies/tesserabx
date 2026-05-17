@@ -1,0 +1,115 @@
+/**
+ * /agent/attachments/* — secure download for ticket attachments.
+ *
+ * Two actions:
+ *   show(rc.id)        : stream the full file with Content-Disposition.
+ *   thumbnail(rc.id)   : stream the cached .thumb.jpg.
+ *
+ * Both funnel through TicketsService.getAttachmentForViewer with
+ * an agent viewer struct so the service-layer access check fires
+ * uniformly. Errors map to 404 / 403 with no body so callers
+ * cannot infer the existence of an attachment they cannot see.
+ *
+ * The download action records ticket.attachment_downloaded via
+ * readAttachmentBytes. The thumbnail action skips the audit row
+ * because thumbnails fetch on every page render and would flood
+ * the log; the parent download is the auditable event.
+ */
+class {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="cbfs"           inject="DiskService@cbfs";
+    property name="auth"           inject="AuthenticationService@cbauth";
+
+    function show( event, rc, prc ){
+        param rc.id = "";
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        var viewer = { type : "agent", id : auth.getUser().getId() };
+        try {
+            var att   = ticketsService.getAttachmentForViewer( rc.id, viewer );
+            var bytes = ticketsService.readAttachmentBytes( rc.id, viewer );
+        } catch ( TicketsService.AttachmentNotFound e ) {
+            return notFound( event );
+        } catch ( TicketsService.AttachmentAccessDenied e ) {
+            return forbidden( event );
+        }
+        var rawBytes = asBinary( bytes );
+        event.setHTTPHeader( name = "Cache-Control",        value = "private, no-store" );
+        event.setHTTPHeader(
+            name  = "Content-Disposition",
+            value = "attachment; filename=""" & sanitizeFilename( att.getOriginalFilename() ) & """"
+        );
+        event.renderData(
+            type        = "plain",
+            data        = rawBytes,
+            contentType = att.getContentType(),
+            isBinary    = true
+        );
+    }
+
+    function thumbnail( event, rc, prc ){
+        param rc.id = "";
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        var viewer = { type : "agent", id : auth.getUser().getId() };
+        try {
+            var att = ticketsService.getAttachmentForViewer( rc.id, viewer );
+        } catch ( TicketsService.AttachmentNotFound e ) {
+            return notFound( event );
+        } catch ( TicketsService.AttachmentAccessDenied e ) {
+            return forbidden( event );
+        }
+        if ( att.getThumbnailStatus() != "ready" ) {
+            return notFound( event );
+        }
+        var disk = cbfs.defaultDisk();
+        var path = att.getCbfsPath() & ".thumb.jpg";
+        if ( !disk.exists( path ) ) return notFound( event );
+        event.setHTTPHeader( name = "Cache-Control", value = "private, max-age=3600" );
+        event.renderData(
+            type        = "plain",
+            data        = asBinary( disk.get( path ) ),
+            contentType = "image/jpeg",
+            isBinary    = true
+        );
+    }
+
+    // ---------- internals ----------
+
+    private void function notFound( event ){
+        event.setHTTPHeader( statusCode = 404, statusText = "Not Found" );
+        event.renderData( type = "plain", data = "", statusCode = 404 );
+    }
+
+    private void function forbidden( event ){
+        event.setHTTPHeader( statusCode = 403, statusText = "Forbidden" );
+        event.renderData( type = "plain", data = "", statusCode = 403 );
+    }
+
+    /**
+     * Coerce a disk.get() result (String on local, byte[] on S3) to
+     * a Java byte[] so renderData streams real bytes.
+     */
+    private any function asBinary( required any value ){
+        if ( isBinary( arguments.value ) ) return arguments.value;
+        if ( isInstanceOf( arguments.value, "[B" ) ) return arguments.value;
+        return charsetDecode( toString( arguments.value ), "ISO-8859-1" );
+    }
+
+    /**
+     * Strip characters that would break the Content-Disposition
+     * filename header. Keeps the original filename's letters /
+     * digits / dots / dashes / underscores.
+     */
+    private string function sanitizeFilename( required string filename ){
+        var safe = reReplace( arguments.filename, "[^A-Za-z0-9._-]", "_", "all" );
+        if ( !len( safe ) ) safe = "download";
+        return safe;
+    }
+
+}

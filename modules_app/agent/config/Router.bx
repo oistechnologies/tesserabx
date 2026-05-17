@@ -43,6 +43,21 @@ class {
         // disk at <CBFS_PUBLIC_BASE_URL>/agents/<id>/profile/<size>.jpg,
         // no app round-trip required.)
 
+        // Ticket attachment downloads + thumbnails. Both pass through
+        // TicketsService access checks (Phase 8.2 chokepoint). Routes
+        // declared above the catchall so the two-segment patterns
+        // win against /:handler/:action.
+        route( "attachments/:id/thumbnail" ).withVerbs( "GET" ).to( "Attachments.thumbnail" );
+        route( "attachments/:id" ).withVerbs( "GET" ).to( "Attachments.show" );
+
+        // Multi-file upload + per-attachment soft-delete actions on
+        // tickets. Both POST-only. The upload pattern is intentionally
+        // nested under /tickets/:ticketId/attachments so the URL
+        // mirrors the access path (handler also verifies the
+        // attachment.ticketId matches before deleting).
+        route( "tickets/:ticketId/attachments/:attachmentId/delete" ).withVerbs( "POST" ).to( "Tickets.deleteAttachment" );
+        route( "tickets/:ticketId/attachments" ).withVerbs( "POST" ).to( "Tickets.uploadAttachments" );
+
         // My Account surface: self-service for any logged-in agent.
         // confirm-email consumes the verification token; most-specific
         // pattern first. Avatar upload + clear use plain multipart

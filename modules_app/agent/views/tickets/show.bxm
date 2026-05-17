@@ -111,6 +111,34 @@
                         <span>#encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
                     </div>
                     <div style="white-space:pre-wrap">#encodeForHTML( local.m.getBody() )#</div>
+                    <bx:set local.msgAttachments = prc.attachmentsByMessageId[ local.m.getId() ] ?: [] >
+                    <bx:if arrayLen( local.msgAttachments )>
+                        <div class="mt-2 d-flex flex-wrap gap-2">
+                            <bx:loop array="#local.msgAttachments#" item="local.att">
+                                <bx:if local.att.isDeleted()>
+                                    <span class="text-body-secondary small fst-italic">
+                                        <i class="bi bi-trash"></i> #encodeForHTML( local.att.getOriginalFilename() )# (deleted)
+                                    </span>
+                                <bx:elseif local.att.isImage() && local.att.getThumbnailStatus() == "ready">
+                                    <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
+                                       target="_blank"
+                                       title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )# (#local.att.displaySize()#)">
+                                        <img src="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#/thumbnail"
+                                             alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
+                                             style="max-height:80px; border-radius:4px; border:1px solid var(--bs-border-color);">
+                                    </a>
+                                <bx:else>
+                                    <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
+                                       target="_blank"
+                                       class="btn btn-sm btn-outline-secondary">
+                                        <i class="bi bi-paperclip"></i>
+                                        #encodeForHTML( local.att.getOriginalFilename() )#
+                                        <small class="text-body-secondary">#local.att.displaySize()#</small>
+                                    </a>
+                                </bx:if>
+                            </bx:loop>
+                        </div>
+                    </bx:if>
                 </div>
             </div>
         </bx:loop>
@@ -118,9 +146,18 @@
         <div class="card mt-3">
             <div class="card-header">Reply</div>
             <div class="card-body">
+                <bx:set local.attachmentCount = 0 >
+                <bx:loop array="#prc.attachments ?: []#" item="local.acount">
+                    <bx:if !local.acount.isDeleted()><bx:set local.attachmentCount = local.attachmentCount + 1 ></bx:if>
+                </bx:loop>
                 <ul class="nav nav-tabs" role="tablist">
                     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="##public-pane" type="button">Public reply</button></li>
                     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="##internal-pane" type="button">Internal note</button></li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="##attachments-pane" type="button">
+                            Attachments <span class="badge text-bg-secondary">#local.attachmentCount#</span>
+                        </button>
+                    </li>
                 </ul>
                 <div class="tab-content pt-3">
                     <div class="tab-pane fade show active" id="public-pane" role="tabpanel">
@@ -186,6 +223,138 @@
                                 <button class="btn btn-warning" type="submit">Add internal note</button>
                             </div>
                         </form>
+                    </div>
+                    <div class="tab-pane fade" id="attachments-pane" role="tabpanel">
+
+                        <!-- Upload form: multi-file, plain POST. Phase 8.7 will
+                             enhance this into a drag-and-drop zone via JS. -->
+                        <form method="post"
+                              action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/attachments"
+                              enctype="multipart/form-data"
+                              class="mb-3">
+                            <label class="form-label small text-body-secondary">Upload files</label>
+                            <div class="input-group input-group-sm">
+                                <input type="file" name="attachments" class="form-control" multiple required>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-cloud-upload"></i> Upload
+                                </button>
+                            </div>
+                            <div class="form-text small">Multiple files allowed. Max per file follows UPLOAD_MAX_BYTES.</div>
+                        </form>
+
+                        <bx:if !arrayLen( prc.attachments ?: [] )>
+                            <div class="text-body-secondary fst-italic">No attachments yet.</div>
+                        <bx:else>
+                            <div class="row g-2">
+                                <bx:loop array="#prc.attachments#" item="local.att">
+                                    <div class="col-12 col-md-6 col-xl-4">
+                                        <div class="card h-100 #local.att.isDeleted() ? 'opacity-50' : ''#">
+                                            <div class="card-body p-2 d-flex gap-2 align-items-start">
+                                                <div style="flex:0 0 96px;">
+                                                    <bx:if local.att.isImage() && local.att.getThumbnailStatus() == "ready" && !local.att.isDeleted()>
+                                                        <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#" target="_blank">
+                                                            <img src="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#/thumbnail"
+                                                                 alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
+                                                                 style="width:96px; height:96px; object-fit:cover; border-radius:4px; border:1px solid var(--bs-border-color);">
+                                                        </a>
+                                                    <bx:else>
+                                                        <div class="d-flex align-items-center justify-content-center"
+                                                             style="width:96px; height:96px; background:var(--bs-secondary-bg); border-radius:4px;">
+                                                            <i class="bi bi-file-earmark" style="font-size:2.5rem; color:var(--bs-secondary);"></i>
+                                                        </div>
+                                                    </bx:if>
+                                                </div>
+                                                <div class="flex-grow-1" style="min-width:0;">
+                                                    <div class="text-truncate fw-semibold" title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
+                                                        #encodeForHTML( local.att.getOriginalFilename() )#
+                                                    </div>
+                                                    <div class="small text-body-secondary">
+                                                        #local.att.displaySize()# &middot;
+                                                        #encodeForHTML( dateTimeFormat( local.att.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#
+                                                    </div>
+                                                    <div class="small text-body-secondary text-truncate">
+                                                        <bx:if len( local.att.getUploaderAgentId() ?: "" )>
+                                                            agent
+                                                        <bx:elseif len( local.att.getUploaderContactId() ?: "" )>
+                                                            contact
+                                                        <bx:else>
+                                                            email
+                                                        </bx:if>
+                                                    </div>
+                                                    <bx:if local.att.isDeleted()>
+                                                        <div class="alert alert-secondary p-1 px-2 mt-1 mb-0 small">
+                                                            <i class="bi bi-trash"></i> Deleted #encodeForHTML( dateTimeFormat( local.att.getDeletedAt(), "yyyy-mm-dd HH:nn" ) )#
+                                                            <div class="text-body-secondary fst-italic" style="white-space:pre-wrap">#encodeForHTML( local.att.getDeletionReason() ?: "" )#</div>
+                                                        </div>
+                                                    <bx:else>
+                                                        <div class="mt-2 d-flex gap-1">
+                                                            <a class="btn btn-sm btn-outline-primary"
+                                                               href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
+                                                               target="_blank">
+                                                                <i class="bi bi-download"></i>
+                                                            </a>
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-outline-danger"
+                                                                    data-bs-toggle="modal"
+                                                                    data-bs-target="##deleteAttachmentModal"
+                                                                    data-attachment-id="#encodeForHTMLAttribute( local.att.getId() )#"
+                                                                    data-attachment-name="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
+                                                                <i class="bi bi-trash"></i>
+                                                            </button>
+                                                        </div>
+                                                    </bx:if>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </bx:loop>
+                            </div>
+                        </bx:if>
+
+                        <!-- Shared delete-with-reason modal. Vanilla JS fills
+                             the hidden attachmentId field from the clicked
+                             button's data attributes. -->
+                        <div class="modal fade" id="deleteAttachmentModal" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog">
+                                <form method="post" id="deleteAttachmentForm">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Delete attachment</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <p class="small text-body-secondary">
+                                                Removing <strong id="deleteAttachmentName"></strong> from this ticket.
+                                                The file stays in storage for audit; clients and agents will no longer see it.
+                                            </p>
+                                            <label class="form-label">Reason (required)</label>
+                                            <textarea name="reason" class="form-control" rows="3" required></textarea>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                                            <button type="submit" class="btn btn-danger">Delete attachment</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                        <script>
+                        (function(){
+                            var ticketId = "#encodeForJavaScript( local.t.getId() )#";
+                            var modal    = document.getElementById( 'deleteAttachmentModal' );
+                            var form     = document.getElementById( 'deleteAttachmentForm' );
+                            var nameEl   = document.getElementById( 'deleteAttachmentName' );
+                            if ( !modal || !form ) return;
+                            modal.addEventListener( 'show.bs.modal', function( ev ){
+                                var btn  = ev.relatedTarget;
+                                var aid  = btn.getAttribute( 'data-attachment-id' );
+                                var name = btn.getAttribute( 'data-attachment-name' ) || '';
+                                form.action = '/agent/tickets/' + encodeURIComponent( ticketId )
+                                            + '/attachments/' + encodeURIComponent( aid ) + '/delete';
+                                nameEl.textContent = name;
+                            } );
+                        })();
+                        </script>
                     </div>
                 </div>
             </div>
