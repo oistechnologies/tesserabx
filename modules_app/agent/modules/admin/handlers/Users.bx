@@ -1,12 +1,14 @@
 /**
  * /agent/admin/users handler.
  *
- * Lists every Agent account, surfaces their role assignments, and
- * lets admins grant or revoke roles and activate or deactivate
- * accounts. Admin-only via the cbSecurity rule on /agent/admin/*.
+ * Thin shell around the CBWire components AgentsList and AgentForm.
+ * All search, filter, sort, pagination, create, update, activate,
+ * deactivate, and role grant/revoke now live in the wires.
  *
- * All writes route through RbacService; the handler never touches
- * agent_roles or the agents table directly.
+ * The legacy form-POST endpoints (grant, revoke, activate,
+ * deactivate, resetMfa) are kept as direct-URL fallbacks for any
+ * consumer that hits the routes directly (smoke scripts, bookmarks).
+ * Wire actions are the primary path for new traffic.
  */
 class {
 
@@ -19,16 +21,23 @@ class {
     }
 
     function index( event, rc, prc ){
-        param rc.includeInactive = false;
-        prc.pageTitle       = "Users";
-        prc.agents          = rbacService.listAgentsWithRoles(
-            includeInactive = ( rc.includeInactive == "true" || rc.includeInactive == "1" || rc.includeInactive == true )
-        );
-        prc.roleCatalog     = rbacService.roleCatalog();
-        prc.includeInactive = rc.includeInactive;
-        prc.currentAgentId  = currentAgentId();
+        prc.pageTitle = "Users";
         event.setView( "users/index" );
     }
+
+    function newForm( event, rc, prc ){
+        prc.pageTitle = "New agent";
+        event.setView( "users/new" );
+    }
+
+    function edit( event, rc, prc ){
+        param rc.id = "";
+        prc.pageTitle = "Edit agent";
+        prc.agentId   = rc.id;
+        event.setView( "users/edit" );
+    }
+
+    // ---------- Legacy POST endpoints (direct-URL fallbacks) ----------
 
     function grant( event, rc, prc ){
         param rc.agentId = "";
@@ -49,9 +58,6 @@ class {
     function revoke( event, rc, prc ){
         param rc.agentId = "";
         param rc.roleKey = "";
-        // Last-admin safety: don't let the signed-in agent revoke
-        // their own agent-admin role. That would 403 themselves on
-        // the very page that just succeeded.
         if ( rc.roleKey == "agent-admin" && rc.agentId == currentAgentId() ) {
             messagebox.error( "You cannot revoke your own administrator role." );
             relocate( uri = "/agent/admin/users" );
@@ -78,7 +84,23 @@ class {
             actorAgentId : currentAgentId()
         );
         messagebox.info( "User activated." );
-        relocate( uri = "/agent/admin/users?includeInactive=true" );
+        relocate( uri = "/agent/admin/users" );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.agentId = "";
+        if ( rc.agentId == currentAgentId() ) {
+            messagebox.error( "You cannot deactivate your own account." );
+            relocate( uri = "/agent/admin/users" );
+            return;
+        }
+        rbacService.setAgentActive(
+            agentId      : rc.agentId,
+            active       : false,
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "User deactivated." );
+        relocate( uri = "/agent/admin/users" );
     }
 
     function resetMfa( event, rc, prc ){
@@ -99,22 +121,6 @@ class {
             { id : rc.agentId }
         );
         messagebox.info( "MFA reset. The user will be prompted to enroll on next sign-in." );
-        relocate( uri = "/agent/admin/users" );
-    }
-
-    function deactivate( event, rc, prc ){
-        param rc.agentId = "";
-        if ( rc.agentId == currentAgentId() ) {
-            messagebox.error( "You cannot deactivate your own account." );
-            relocate( uri = "/agent/admin/users" );
-            return;
-        }
-        rbacService.setAgentActive(
-            agentId      : rc.agentId,
-            active       : false,
-            actorAgentId : currentAgentId()
-        );
-        messagebox.info( "User deactivated." );
         relocate( uri = "/agent/admin/users" );
     }
 

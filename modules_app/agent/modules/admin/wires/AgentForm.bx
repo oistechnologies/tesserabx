@@ -1,0 +1,248 @@
+/**
+ * AgentForm: single create-or-edit form for an admin user.
+ *
+ * Mount with no arguments for create, or with agentId for edit.
+ * The wire owns its own validation (inline private helper returning
+ * array of error strings, per the Contacts.bx pattern) and calls
+ * AgentService.createAgent / updateAgent on save().
+ *
+ * The role checkbox panel calls RbacService.grantRole / revokeRole
+ * directly. The role grant/revoke event types stay distinct from
+ * agent.created / agent.updated in the audit log, which is what we
+ * want.
+ *
+ * Phase 3 will extend this wire with a profile-image upload
+ * control; for now, profile-image columns are not on the form.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="agentService" inject="AgentService@agent";
+    property name="rbacService"  inject="RbacService@agent";
+    property name="auth"         inject="AuthenticationService@cbauth";
+
+    data = {
+        // Identifier (locked: never modified from the client). Empty
+        // for the create form; populated on mount for edit.
+        "agentId"          : "",
+        "isEdit"           : false,
+
+        // Profile fields
+        "email"            : "",
+        "password"         : "",
+        "passwordConfirm"  : "",
+        "firstName"        : "",
+        "lastName"         : "",
+        "title"            : "",
+        "department"       : "",
+        "phoneWork"        : "",
+        "phoneMobile"      : "",
+        "timezone"         : "UTC",
+        "locale"           : "en-US",
+        "hireDate"         : "",
+        "terminationDate"  : "",
+        "employeeId"       : "",
+        "bio"              : "",
+        "emailSignature"   : "",
+        "slackHandle"      : "",
+        "teamsHandle"      : "",
+        "managerAgentId"   : "",
+        "isActive"         : true,
+
+        // Role state: array of role_keys currently granted.
+        "grantedRoles"     : [],
+
+        // Transient UI feedback.
+        "errors"           : [],
+        "notice"           : "",
+        "noticeKind"       : "info"
+    };
+
+    // agentId and isEdit must not be mutable from the client; the
+    // route or onMount sets them once and they stay locked.
+    locked = [ "agentId", "isEdit" ];
+
+    /**
+     * Mount params: { agentId : "uuid" } for edit, empty for create.
+     * cbwire 5 no longer auto-assigns params to data; do it here.
+     */
+    function onMount( params = {} ){
+        if ( structKeyExists( arguments.params, "agentId" ) && len( arguments.params.agentId ) ) {
+            loadAgent( arguments.params.agentId );
+        }
+    }
+
+    /**
+     * Populate every data field from a live Agent row. Called from
+     * onMount in edit mode.
+     */
+    private void function loadAgent( agentId ){
+        var agent = agentService.getAgentById( arguments.agentId );
+        if ( isNull( agent ) ) {
+            data.errors = [ "Agent not found." ];
+            return;
+        }
+        data.agentId         = agent.getId();
+        data.isEdit          = true;
+        data.email           = agent.getEmail() ?: "";
+        data.firstName       = agent.getFirstName()       ?: "";
+        data.lastName        = agent.getLastName()        ?: "";
+        data.title           = agent.getTitle()           ?: "";
+        data.department      = agent.getDepartment()      ?: "";
+        data.phoneWork       = agent.getPhoneWork()       ?: "";
+        data.phoneMobile     = agent.getPhoneMobile()     ?: "";
+        data.timezone        = agent.getTimezone()        ?: "UTC";
+        data.locale          = agent.getLocale()          ?: "en-US";
+        data.hireDate        = isNull( agent.getHireDate() )         ? "" : dateFormat( agent.getHireDate(), "yyyy-mm-dd" );
+        data.terminationDate = isNull( agent.getTerminationDate() )  ? "" : dateFormat( agent.getTerminationDate(), "yyyy-mm-dd" );
+        data.employeeId      = agent.getEmployeeId()      ?: "";
+        data.bio             = agent.getBio()             ?: "";
+        data.emailSignature  = agent.getEmailSignature()  ?: "";
+        data.slackHandle     = agent.getSlackHandle()     ?: "";
+        data.teamsHandle     = agent.getTeamsHandle()     ?: "";
+        data.managerAgentId  = agent.getManagerAgentId()  ?: "";
+        data.isActive        = !!agent.getIsActive();
+        data.grantedRoles    = rbacService.listRoles( agent.getId() );
+    }
+
+    // ---------------- Helpers for the template ----------------
+
+    function roleCatalog(){ return rbacService.roleCatalog(); }
+
+    /**
+     * Other agents (excluding the one being edited) for the
+     * manager dropdown. Sorted by email.
+     */
+    function managerCandidates(){
+        var page = agentService.listAgents(
+            filters  : { isActive : "any" },
+            sort     : "email",
+            dir      : "asc",
+            page     : 1,
+            pageSize : 100
+        );
+        var out = [];
+        for ( var row in page.rows ) {
+            if ( row.id == data.agentId ) continue;
+            out.append( {
+                id    : row.id,
+                label : trim( ( row.firstName & " " & row.lastName ) ) & " (" & row.email & ")"
+            } );
+        }
+        return out;
+    }
+
+    function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        return isNull( u ) ? "" : u.getId();
+    }
+
+    function hasRole( key ){
+        return arrayFindNoCase( data.grantedRoles, arguments.key ) > 0;
+    }
+
+    // ---------------- Save ----------------
+
+    function save(){
+        data.errors = validate();
+        if ( arrayLen( data.errors ) ) return;
+
+        var actor = currentAgentId();
+        try {
+            if ( data.isEdit ) {
+                agentService.updateAgent(
+                    id           : data.agentId,
+                    data         : buildPersistStruct( includePassword : false ),
+                    actorAgentId : actor
+                );
+            } else {
+                var newId = agentService.createAgent(
+                    data         : buildPersistStruct( includePassword : true ),
+                    actorAgentId : actor
+                );
+                data.agentId = newId;
+                data.isEdit  = true;
+            }
+            redirect( "/agent/admin/users", true );
+        } catch ( any e ) {
+            data.errors = [ "Save failed: " & e.message ];
+        }
+    }
+
+    function toggleRole( key ){
+        var actor = currentAgentId();
+        if ( !len( data.agentId ) ) {
+            data.errors = [ "Save the agent before assigning roles." ];
+            return;
+        }
+        if ( hasRole( arguments.key ) ) {
+            // Refuse to revoke the current agent's own agent-admin
+            // (the legacy guard from Users.revoke()).
+            if ( data.agentId == actor && arguments.key == "agent-admin" ) {
+                data.errors = [ "You cannot revoke your own administrator role." ];
+                return;
+            }
+            rbacService.revokeRole( agentId : data.agentId, roleKey : arguments.key, actorAgentId : actor );
+        } else {
+            rbacService.grantRole( agentId : data.agentId, roleKey : arguments.key, actorAgentId : actor );
+        }
+        data.grantedRoles = rbacService.listRoles( data.agentId );
+    }
+
+    // ---------------- internals ----------------
+
+    private array function validate(){
+        var errs = [];
+        if ( !len( trim( data.email ) ) ) errs.append( "Email is required." );
+        if ( len( trim( data.email ) ) && !isValid( "email", data.email ) ) {
+            errs.append( "Please enter a valid email address." );
+        }
+        if ( !data.isEdit ) {
+            if ( !len( data.password ) ) {
+                errs.append( "Initial password is required." );
+            } else if ( len( data.password ) < 8 ) {
+                errs.append( "Password must be at least 8 characters." );
+            } else if ( data.password != data.passwordConfirm ) {
+                errs.append( "Password and confirmation do not match." );
+            }
+            // Uniqueness on create.
+            if ( len( trim( data.email ) ) ) {
+                var existing = agentService.getAgentByEmail( data.email );
+                if ( !isNull( existing ) ) errs.append( "An agent with that email already exists." );
+            }
+        }
+        return errs;
+    }
+
+    private struct function buildPersistStruct( boolean includePassword ){
+        var s = {
+            email           : trim( data.email ),
+            firstName       : trim( data.firstName ),
+            lastName        : trim( data.lastName ),
+            title           : data.title,
+            department      : data.department,
+            phoneWork       : data.phoneWork,
+            phoneMobile     : data.phoneMobile,
+            timezone        : len( data.timezone ) ? data.timezone : "UTC",
+            locale          : len( data.locale )   ? data.locale   : "en-US",
+            hireDate        : data.hireDate,
+            terminationDate : data.terminationDate,
+            employeeId      : data.employeeId,
+            bio             : data.bio,
+            emailSignature  : data.emailSignature,
+            slackHandle     : data.slackHandle,
+            teamsHandle     : data.teamsHandle,
+            managerAgentId  : data.managerAgentId
+        };
+        if ( data.isEdit ) {
+            // Only the active flag travels on update; password and
+            // email have their own dedicated paths (Phase 4).
+            s.isActive = data.isActive;
+        }
+        if ( arguments.includePassword ) {
+            s.password = data.password;
+        }
+        return s;
+    }
+
+}

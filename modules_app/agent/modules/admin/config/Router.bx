@@ -98,13 +98,19 @@ class {
         route( "settings/test-email" ).withVerbs( "POST" ).to( "Settings.testEmail" );
         route( "settings" ).to( "Settings.index" );
 
-        // Provider-user RBAC. Most-specific writes first; the index
-        // is the only GET on /users.
+        // Provider-user RBAC. Most-specific patterns first.
+        //  - /users/new and /users/:id/edit serve the CBWire form
+        //    component (AgentForm@admin).
+        //  - The POST endpoints (grant, revoke, activate, deactivate,
+        //    reset-mfa) stay as direct-URL fallbacks; the AgentsList
+        //    wire and AgentForm wire are the primary write paths.
+        route( "users/new" ).to( "Users.newForm" );
         route( "users/grant" ).withVerbs( "POST" ).to( "Users.grant" );
         route( "users/revoke" ).withVerbs( "POST" ).to( "Users.revoke" );
         route( "users/activate" ).withVerbs( "POST" ).to( "Users.activate" );
         route( "users/deactivate" ).withVerbs( "POST" ).to( "Users.deactivate" );
         route( "users/reset-mfa" ).withVerbs( "POST" ).to( "Users.resetMfa" );
+        route( "users/:id/edit" ).to( "Users.edit" );
         route( "users" ).to( "Users.index" );
 
         // Teams + membership. Most-specific patterns first so

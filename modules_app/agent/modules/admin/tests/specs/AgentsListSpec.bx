@@ -1,0 +1,113 @@
+/**
+ * AgentsListSpec: behavioral coverage for the CBWire admin list.
+ *
+ * cbwire 5.0.4 ships BaseWireTest.cfc referencing a TestComponentSpec
+ * helper that is not bundled. Until that lands we exercise the wire
+ * via cbwire's ComponentLoader: load the component, manipulate its
+ * `data` struct directly, invoke action methods as plain functions,
+ * and assert against the resulting state. Template rendering itself
+ * is covered by manual UI verification; the wire's behavior is
+ * covered here.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc    = getController().getWireBox().getInstance( "AgentService@agent" );
+        variables.loader = getController().getWireBox().getInstance( "ComponentLoader@cbwire" );
+    }
+
+    function run(){
+        describe( "AgentsList wire", function(){
+
+            it( "boots with the expected defaults", function(){
+                var d = newWire().getData();
+                expect( d.sort     ).toBe( "email" );
+                expect( d.dir      ).toBe( "asc" );
+                expect( d.page     ).toBe( 1 );
+                expect( d.pageSize ).toBe( 25 );
+                expect( d.status   ).toBe( "active" );
+            } );
+
+            it( "applySort flips dir on second click on the same column", function(){
+                var c = newWire();
+                c.applySort( "email" );
+                expect( c.getData().dir ).toBe( "desc" );
+                c.applySort( "email" );
+                expect( c.getData().dir ).toBe( "asc" );
+            } );
+
+            it( "applySort switching column resets dir to asc", function(){
+                var c = newWire();
+                c.applySort( "last_name" );
+                expect( c.getData().sort ).toBe( "last_name" );
+                expect( c.getData().dir  ).toBe( "asc" );
+            } );
+
+            it( "deactivate flips a row and surfaces the notice", function(){
+                var id = variables.svc.createAgent( data : {
+                    email    : uniqueEmail(),
+                    password : "p-test-1234"
+                } );
+                var c = newWire();
+                c.deactivate( id );
+                expect( c.getData().notice     ).toBe( "Agent deactivated." );
+                expect( c.getData().noticeKind ).toBe( "success" );
+                expect( variables.svc.getAgentById( id ).getIsActive() ).toBeFalse();
+                cleanupAgent( id );
+            } );
+
+            it( "bulkDeactivate iterates selectedIds and clears selection", function(){
+                var a = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var b = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var c = newWire();
+                c.getData().selectedIds = [ a, b ];
+                c.bulkDeactivate();
+                expect( c.getData().selectedIds ).toBeEmpty();
+                expect( variables.svc.getAgentById( a ).getIsActive() ).toBeFalse();
+                expect( variables.svc.getAgentById( b ).getIsActive() ).toBeFalse();
+                cleanupAgent( a );
+                cleanupAgent( b );
+            } );
+
+            it( "clearSelection empties selectedIds and the select-all flag", function(){
+                var c = newWire();
+                c.getData().selectedIds     = [ "x", "y" ];
+                c.getData().selectAllOnPage = true;
+                c.clearSelection();
+                expect( c.getData().selectedIds     ).toBeEmpty();
+                expect( c.getData().selectAllOnPage ).toBeFalse();
+            } );
+
+            it( "listResult returns a struct with rows/total/page/pageSize/totalPages", function(){
+                var c      = newWire();
+                var result = c.listResult();
+                expect( result ).toHaveKey( "rows" );
+                expect( result ).toHaveKey( "total" );
+                expect( result ).toHaveKey( "page" );
+                expect( result ).toHaveKey( "pageSize" );
+                expect( result ).toHaveKey( "totalPages" );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function newWire(){
+        return variables.loader.load( "AgentsList@admin", false );
+    }
+
+    private string function uniqueEmail(){
+        return "spec-list-" & replace( createUUID(), "-", "", "all" ) & "@example.com";
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_pending_email_changes WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles                 WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM team_members                WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents                       WHERE id       = :id", { id : arguments.agentId } );
+    }
+
+}

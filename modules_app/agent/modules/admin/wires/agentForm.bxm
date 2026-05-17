@@ -1,0 +1,235 @@
+<bx:output>
+<bx:script>
+    local.heading = isEdit ? "Edit agent" : "New agent";
+    local.roles   = roleCatalog();
+    local.mgrs    = isEdit ? managerCandidates() : [];
+</bx:script>
+
+<div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="mb-0">#encodeForHTML( local.heading )#</h2>
+            <bx:if isEdit>
+                <small class="text-body-secondary">#encodeForHTML( email )#</small>
+            </bx:if>
+        </div>
+        <a href="/agent/admin/users" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back to list
+        </a>
+    </div>
+
+    <bx:if arrayLen( errors )>
+        <div class="alert alert-danger" role="alert">
+            <strong>We could not save this agent.</strong>
+            <ul class="mb-0">
+                <bx:loop array="#errors#" item="local.err">
+                    <li>#encodeForHTML( local.err )#</li>
+                </bx:loop>
+            </ul>
+        </div>
+    </bx:if>
+
+    <bx:if len( notice )>
+        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )#" role="status">#encodeForHTML( notice )#</div>
+    </bx:if>
+
+    <form wire:submit.prevent="save" autocomplete="off">
+        <div class="row g-3">
+
+            <div class="col-lg-8">
+                <!-- Identity card -->
+                <div class="card mb-3">
+                    <div class="card-header"><strong>Identity</strong></div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Email <span class="text-danger">*</span></label>
+                                <input type="email" class="form-control" wire:model="email" #( isEdit ? 'disabled' : '' )#>
+                                <bx:if isEdit>
+                                    <div class="form-text">Email changes are made by the agent through My Account.</div>
+                                </bx:if>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Employee ID</label>
+                                <input type="text" class="form-control" wire:model="employeeId">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">First name</label>
+                                <input type="text" class="form-control" wire:model="firstName">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Last name</label>
+                                <input type="text" class="form-control" wire:model="lastName">
+                            </div>
+
+                            <bx:if !isEdit>
+                                <div class="col-md-6">
+                                    <label class="form-label">Initial password <span class="text-danger">*</span></label>
+                                    <input type="password" class="form-control" wire:model="password">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Confirm password <span class="text-danger">*</span></label>
+                                    <input type="password" class="form-control" wire:model="passwordConfirm">
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-text">
+                                        Tell the agent to sign in and change the password on My Account. They will be required to enroll MFA on first sign-in.
+                                    </div>
+                                </div>
+                            </bx:if>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Job + organization card -->
+                <div class="card mb-3">
+                    <div class="card-header"><strong>Job</strong></div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" wire:model="title">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Department</label>
+                                <input type="text" class="form-control" wire:model="department">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Hire date</label>
+                                <input type="date" class="form-control" wire:model="hireDate">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Termination date</label>
+                                <input type="date" class="form-control" wire:model="terminationDate">
+                            </div>
+                            <bx:if isEdit && arrayLen( local.mgrs )>
+                                <div class="col-md-12">
+                                    <label class="form-label">Manager</label>
+                                    <select class="form-select" wire:model="managerAgentId">
+                                        <option value="">(no manager)</option>
+                                        <bx:loop array="#local.mgrs#" item="local.m">
+                                            <option value="#encodeForHTMLAttribute( local.m.id )#" #( local.m.id == managerAgentId ? 'selected' : '' )#>
+                                                #encodeForHTML( local.m.label )#
+                                            </option>
+                                        </bx:loop>
+                                    </select>
+                                </div>
+                            </bx:if>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact card -->
+                <div class="card mb-3">
+                    <div class="card-header"><strong>Contact</strong></div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Work phone</label>
+                                <input type="tel" class="form-control" wire:model="phoneWork">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Mobile phone</label>
+                                <input type="tel" class="form-control" wire:model="phoneMobile">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Slack handle</label>
+                                <input type="text" class="form-control" wire:model="slackHandle" placeholder="@firstname.lastname">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Teams handle</label>
+                                <input type="text" class="form-control" wire:model="teamsHandle">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Localization card -->
+                <div class="card mb-3">
+                    <div class="card-header"><strong>Localization</strong></div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Time zone</label>
+                                <input type="text" class="form-control" wire:model="timezone" placeholder="UTC">
+                                <div class="form-text">IANA name, for example <code>America/Chicago</code>.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Locale</label>
+                                <input type="text" class="form-control" wire:model="locale" placeholder="en-US">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Long-form card -->
+                <div class="card mb-3">
+                    <div class="card-header"><strong>Profile</strong></div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Bio</label>
+                            <textarea class="form-control" rows="3" wire:model="bio"></textarea>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Email signature</label>
+                            <textarea class="form-control" rows="5" wire:model="emailSignature"></textarea>
+                            <div class="form-text">Appended to outbound ticket replies. Newlines are preserved.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <!-- Status card (edit only) -->
+                <bx:if isEdit>
+                    <div class="card mb-3">
+                        <div class="card-header"><strong>Status</strong></div>
+                        <div class="card-body">
+                            <bx:set local.amIMe = ( agentId == currentAgentId() ) >
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="isActive" wire:model="isActive" #( local.amIMe ? 'disabled' : '' )#>
+                                <label class="form-check-label" for="isActive">Account active</label>
+                            </div>
+                            <bx:if local.amIMe>
+                                <div class="form-text">You cannot deactivate your own account.</div>
+                            </bx:if>
+                        </div>
+                    </div>
+                </bx:if>
+
+                <!-- Roles card (edit only; create form has no agentId yet) -->
+                <bx:if isEdit>
+                    <div class="card mb-3">
+                        <div class="card-header"><strong>Roles</strong></div>
+                        <div class="list-group list-group-flush">
+                            <bx:loop array="#local.roles#" item="local.role">
+                                <div class="list-group-item">
+                                    <div class="form-check">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               id="role-#encodeForHTMLAttribute( local.role.key )#"
+                                               #( hasRole( local.role.key ) ? 'checked' : '' )#
+                                               wire:click="toggleRole('#encodeForHTMLAttribute( local.role.key )#')">
+                                        <label class="form-check-label fw-semibold" for="role-#encodeForHTMLAttribute( local.role.key )#">
+                                            #encodeForHTML( local.role.label )#
+                                        </label>
+                                    </div>
+                                    <div class="form-text small">#encodeForHTML( local.role.description )#</div>
+                                </div>
+                            </bx:loop>
+                        </div>
+                    </div>
+                </bx:if>
+
+                <!-- Submit -->
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> #( isEdit ? "Save changes" : "Create agent" )#
+                    </button>
+                    <a href="/agent/admin/users" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+</bx:output>

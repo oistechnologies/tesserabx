@@ -1,0 +1,220 @@
+/**
+ * AgentsList: the wire-driven admin user listing.
+ *
+ * Powers /agent/admin/users with debounced search, four filter
+ * dropdowns, sortable column headers, paginated rows, per-row
+ * activate/deactivate, and bulk activate/deactivate against the
+ * row checkboxes. URL state persists through the `queryString`
+ * array.
+ *
+ * State that should never round-trip to the client (currentAgentId,
+ * roleCatalog, team list, department list) is loaded lazily by
+ * helper methods called from the template; the wire's `data` struct
+ * stays focused on user-controlled filters and the active selection.
+ *
+ * cbantisamy is the project's request-body interceptor; the wire
+ * payload is JSON so the textarea-newline behavior documented in
+ * feedback_boxlang_textarea_newlines.md should not apply here. The
+ * AgentForm spec exercises a multi-line write to confirm.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="agentService" inject="AgentService@agent";
+    property name="rbacService"  inject="RbacService@agent";
+    property name="teamsService" inject="TeamsService@agent";
+    property name="auth"         inject="AuthenticationService@cbauth";
+    property name="messagebox"   inject="messagebox@cbmessagebox";
+
+    // Reactive state. All of these are user-controlled filters or
+    // pagination/sort knobs; URL-persisted via queryString below.
+    //
+    // notice + noticeKind hold a transient one-shot message for the
+    // user (e.g. "you cannot deactivate yourself"). Wire actions
+    // mutate them; the template renders an alert when notice has
+    // length and clears it on the next mutation.
+    data = {
+        "q"               : "",
+        "status"          : "active",
+        "roleKey"         : "",
+        "teamId"          : "",
+        "department"      : "",
+        "sort"            : "email",
+        "dir"             : "asc",
+        "page"            : 1,
+        "pageSize"        : 25,
+        "selectedIds"     : [],
+        "selectAllOnPage" : false,
+        "notice"          : "",
+        "noticeKind"      : "info"
+    };
+
+    queryString = [ "q", "status", "roleKey", "teamId", "department", "sort", "dir", "page", "pageSize" ];
+
+    // ---------------- Lifecycle ----------------
+
+    function onMount(){
+        // Coerce numeric query-string values that arrive as strings.
+        data.page     = max( 1, int( val( data.page ?: 1 ) ) );
+        data.pageSize = min( 100, max( 1, int( val( data.pageSize ?: 25 ) ) ) );
+    }
+
+    /**
+     * Any filter or pagination change clears the selection. Bulk
+     * actions reference current selection only; carrying selected
+     * IDs across filter changes invites the "I deactivated rows I
+     * couldn't see" mistake.
+     */
+    function onUpdate( name, value, oldValue ){
+        if ( arguments.name == "selectedIds" || arguments.name == "selectAllOnPage" ) return;
+        if ( arguments.name != "page" ) data.page = 1;
+        data.selectedIds     = [];
+        data.selectAllOnPage = false;
+    }
+
+    // ---------------- Server-side helpers (called from template) ----------------
+
+    /**
+     * Pulled on every render. Returns the full paged result struct
+     * { rows, total, page, pageSize, totalPages }.
+     */
+    function listResult(){
+        return agentService.listAgents(
+            filters  : {
+                q          : data.q,
+                isActive   : data.status,
+                roleKey    : data.roleKey,
+                teamId     : data.teamId,
+                department : data.department
+            },
+            sort     : data.sort,
+            dir      : data.dir,
+            page     : data.page,
+            pageSize : data.pageSize
+        );
+    }
+
+    function roleCatalog(){ return rbacService.roleCatalog(); }
+    function teams(){       return teamsService.listTeams(); }
+    function departments(){ return agentService.listDepartments(); }
+
+    /**
+     * Current signed-in agent id. cbauth is session-backed so this
+     * resolves even on the background /cbwire/update request the
+     * wire fires for re-renders.
+     */
+    function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        return isNull( u ) ? "" : u.getId();
+    }
+
+    // ---------------- Sort + pagination actions ----------------
+
+    function applySort( column ){
+        if ( data.sort == arguments.column ) {
+            data.dir = ( data.dir == "asc" ) ? "desc" : "asc";
+        } else {
+            data.sort = arguments.column;
+            data.dir  = "asc";
+        }
+        data.page = 1;
+    }
+
+    function goToPage( page ){
+        data.page = max( 1, int( val( arguments.page ) ) );
+    }
+
+    function setPageSize( size ){
+        data.pageSize = min( 100, max( 1, int( val( arguments.size ) ) ) );
+        data.page     = 1;
+    }
+
+    // ---------------- Single-row actions ----------------
+
+    function activate( id ){
+        agentService.setAgentActive( agentId : arguments.id, active : true, actorAgentId : currentAgentId() );
+        notice( "Agent reactivated.", "success" );
+    }
+
+    function deactivate( id ){
+        try {
+            agentService.setAgentActive( agentId : arguments.id, active : false, actorAgentId : currentAgentId() );
+            notice( "Agent deactivated.", "success" );
+        } catch ( AgentService.CannotDeactivateSelf e ) {
+            notice( "You cannot deactivate your own account.", "danger" );
+        }
+    }
+
+    // ---------------- Bulk actions ----------------
+
+    /**
+     * Lifecycle hook: fired automatically by cbwire whenever the
+     * selectAllOnPage checkbox flips. When checked, populate
+     * selectedIds with every row on the current page except the
+     * current agent's own row.
+     */
+    function onUpdateselectAllOnPage( value, oldValue ){
+        if ( !arguments.value ) {
+            data.selectedIds = [];
+            return;
+        }
+        var me    = currentAgentId();
+        var page  = listResult();
+        var ids   = [];
+        for ( var row in page.rows ) {
+            if ( row.id != me ) ids.append( row.id );
+        }
+        data.selectedIds = ids;
+    }
+
+    function clearSelection(){
+        data.selectedIds     = [];
+        data.selectAllOnPage = false;
+    }
+
+    function bulkActivate(){
+        var me     = currentAgentId();
+        var ok     = 0;
+        var failed = 0;
+        for ( var id in data.selectedIds ) {
+            if ( id == me ) { failed++; continue; }
+            try { agentService.setAgentActive( agentId : id, active : true, actorAgentId : me ); ok++; }
+            catch ( any e ) { failed++; }
+        }
+        flashBulkResult( "Reactivated", ok, failed );
+        clearSelection();
+    }
+
+    function bulkDeactivate(){
+        var me     = currentAgentId();
+        var ok     = 0;
+        var failed = 0;
+        for ( var id in data.selectedIds ) {
+            if ( id == me ) { failed++; continue; }
+            try { agentService.setAgentActive( agentId : id, active : false, actorAgentId : me ); ok++; }
+            catch ( any e ) { failed++; }
+        }
+        flashBulkResult( "Deactivated", ok, failed );
+        clearSelection();
+    }
+
+    // ---------------- internals ----------------
+
+    private void function notice( msg, kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+    private void function flashBulkResult( verb, ok, failed ){
+        if ( arguments.failed > 0 ) {
+            notice(
+                arguments.verb & " " & arguments.ok & " agent(s); "
+                    & arguments.failed & " skipped (including your own account).",
+                "warning"
+            );
+        } else {
+            notice( arguments.verb & " " & arguments.ok & " agent(s).", "success" );
+        }
+    }
+
+}

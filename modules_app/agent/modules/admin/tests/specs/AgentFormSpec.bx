@@ -1,0 +1,125 @@
+/**
+ * AgentFormSpec: behavioral coverage for the CBWire create/edit form.
+ *
+ * Drives the wire directly through cbwire's ComponentLoader (see the
+ * matching comment in AgentsListSpec for why we bypass BaseWireTest).
+ *
+ * Exercises both modes:
+ *  - load with no params       -> create form (isEdit false)
+ *  - load with { agentId }    -> edit form (prefilled, isEdit true)
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc    = getController().getWireBox().getInstance( "AgentService@agent" );
+        variables.loader = getController().getWireBox().getInstance( "ComponentLoader@cbwire" );
+    }
+
+    function run(){
+        describe( "AgentForm wire", function(){
+
+            it( "create mode is the default when no agentId is passed", function(){
+                var d = newWire().getData();
+                expect( d.isEdit  ).toBeFalse();
+                expect( d.agentId ).toBeEmpty();
+            } );
+
+            it( "edit mode prefills from the loaded agent", function(){
+                var id = variables.svc.createAgent( data : {
+                    email     : uniqueEmail(),
+                    password  : "p-test-1234",
+                    firstName : "Prefill",
+                    lastName  : "Probe",
+                    title     : "Prefilled Title",
+                    department: "QA"
+                } );
+                var d = newWire( { "agentId" : id } ).getData();
+                expect( d.isEdit     ).toBeTrue();
+                expect( d.agentId    ).toBe( id );
+                expect( d.firstName  ).toBe( "Prefill" );
+                expect( d.title      ).toBe( "Prefilled Title" );
+                expect( d.department ).toBe( "QA" );
+                cleanupAgent( id );
+            } );
+
+            it( "save in create mode rejects when required fields are missing", function(){
+                var c = newWire();
+                c.save();
+                expect( c.getData().errors.len() ).toBeGTE( 1 );
+                expect( c.getData().agentId      ).toBeEmpty();
+            } );
+
+            it( "save in create mode rejects when password and confirmation differ", function(){
+                var c = newWire();
+                c.getData().email           = uniqueEmail();
+                c.getData().password        = "longenoughpassword";
+                c.getData().passwordConfirm = "DIFFERENT";
+                c.save();
+                var matched = false;
+                for ( var e in c.getData().errors ) if ( e contains "do not match" ) matched = true;
+                expect( matched ).toBeTrue();
+            } );
+
+            it( "save in create mode persists when fields are valid", function(){
+                var email = uniqueEmail();
+                var c = newWire();
+                c.getData().email           = email;
+                c.getData().password        = "longenoughpassword";
+                c.getData().passwordConfirm = "longenoughpassword";
+                c.getData().firstName       = "Validated";
+                c.save();
+                var fresh = variables.svc.getAgentByEmail( email );
+                expect( fresh ).notToBeNull();
+                expect( fresh.getFirstName() ).toBe( "Validated" );
+                cleanupAgent( fresh.getId() );
+            } );
+
+            it( "toggleRole grants and revokes via RbacService", function(){
+                var id = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var c1 = newWire( { "agentId" : id } );
+                c1.toggleRole( "agent-admin" );
+                expect( hasRoleInDb( id, "agent-admin" ) ).toBeTrue();
+
+                var c2 = newWire( { "agentId" : id } );
+                c2.toggleRole( "agent-admin" );
+                expect( hasRoleInDb( id, "agent-admin" ) ).toBeFalse();
+
+                cleanupAgent( id );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function newWire( struct params = {} ){
+        // cbwire's _withParams calls onMount with the live event +
+        // rc/prc; without _withEvent first, that lookup blows up.
+        var event = getController().getRequestService().getContext();
+        return variables.loader.load( "AgentForm@admin", false )
+            ._withEvent( event )
+            ._withParams( arguments.params, false );
+    }
+
+    private boolean function hasRoleInDb( agentId, roleKey ){
+        var rows = queryExecute(
+            "SELECT id FROM agent_roles WHERE agent_id = :a AND role_key = :r",
+            { a : arguments.agentId, r : arguments.roleKey }
+        );
+        return rows.recordCount gt 0;
+    }
+
+    private string function uniqueEmail(){
+        return "spec-form-" & replace( createUUID(), "-", "", "all" ) & "@example.com";
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_pending_email_changes WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles                 WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM team_members                WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents                       WHERE id       = :id", { id : arguments.agentId } );
+    }
+
+}
