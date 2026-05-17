@@ -546,14 +546,72 @@ class {
             relocate( uri = "/agent/tickets/" & t.getId() );
             return;
         }
-        ticketsService.addMessage( {
+        var m = ticketsService.addMessage( {
             ticketId      : t.getId(),
             body          : rc.body,
             authorAgentId : currentAgentId(),
             isInternal    : arguments.isInternal
         } );
-        messagebox.info( arguments.flash );
+
+        // Attach any files posted alongside the message so the inline
+        // attachment list under this message renders them.
+        var attResult = processUploadedAttachments( t.getId(), m.getId() );
+        if ( attResult.ok > 0 && !arrayLen( attResult.failed ) ) {
+            messagebox.info( arguments.flash & " Attached " & attResult.ok & " file(s)." );
+        } else if ( attResult.ok > 0 ) {
+            messagebox.warn( arguments.flash & " Attached " & attResult.ok & " file(s); rejected: " & arrayToList( attResult.failed, "; " ) );
+        } else if ( arrayLen( attResult.failed ) ) {
+            messagebox.warn( arguments.flash & " Attachments rejected: " & arrayToList( attResult.failed, "; " ) );
+        } else {
+            messagebox.info( arguments.flash );
+        }
         relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    /**
+     * Shared file-upload loop used by both inline (reply / internal-
+     * note) and standalone (Attachments tab) upload paths. Pulls every
+     * file field named "attachments" off the request, persists each
+     * via TicketsService.addAttachment, and returns a small summary.
+     * messageId is optional: when present, each attachment is tied to
+     * the just-created message so per-message inline rendering picks
+     * them up. When the form contains no file fields, returns zeros
+     * (not an error).
+     */
+    private struct function processUploadedAttachments( required string ticketId, string messageId = "" ){
+        var result = { "ok" : 0, "failed" : [] };
+        if ( !structKeyExists( form, "attachments" ) || !len( form.attachments ?: "" ) ) {
+            return result;
+        }
+        var destDir = getTempDirectory() & "/ticket-att-" & createUUID() & "/";
+        directoryCreate( destDir );
+        try {
+            var results = fileUploadAll( destination = destDir, nameConflict = "makeUnique" );
+            for ( var r in results ) {
+                var srcPath = destDir & r.serverFile;
+                var ctype   = r.contentType & "/" & r.contentSubType;
+                try {
+                    var data = {
+                        ticketId         : arguments.ticketId,
+                        originalFilename : r.clientFile,
+                        contentType      : ctype,
+                        sizeBytes        : r.fileSize,
+                        sourcePath       : srcPath,
+                        uploaderAgentId  : currentAgentId()
+                    };
+                    if ( len( arguments.messageId ) ) data.messageId = arguments.messageId;
+                    ticketsService.addAttachment( data );
+                    result.ok++;
+                } catch ( any e ) {
+                    result.failed.append( r.clientFile & " (" & e.message & ")" );
+                }
+                try { fileDelete( srcPath ); } catch ( any e ) {}
+            }
+        } catch ( any e ) {
+            result.failed.append( "(upload error) " & e.message );
+        }
+        try { directoryDelete( destDir, true ); } catch ( any e ) {}
+        return result;
     }
 
     private void function loadShowContext( required struct prc, required any ticket ){
@@ -702,42 +760,13 @@ class {
             relocate( uri = "/agent/tickets/" & rc.ticketId );
             return;
         }
-        var ok       = 0;
-        var failed   = [];
-        var destDir  = getTempDirectory() & "/ticket-att-" & createUUID() & "/";
-        directoryCreate( destDir );
-        try {
-            // fileUploadAll handles a multi-file <input name="attachments" multiple>.
-            var results = fileUploadAll( destination = destDir, nameConflict = "makeUnique" );
-            for ( var r in results ) {
-                var srcPath = destDir & r.serverFile;
-                var ctype   = r.contentType & "/" & r.contentSubType;
-                try {
-                    ticketsService.addAttachment( {
-                        ticketId         : rc.ticketId,
-                        originalFilename : r.clientFile,
-                        contentType      : ctype,
-                        sizeBytes        : r.fileSize,
-                        sourcePath       : srcPath,
-                        uploaderAgentId  : currentAgentId()
-                    } );
-                    ok++;
-                } catch ( any e ) {
-                    failed.append( r.clientFile & " (" & e.message & ")" );
-                }
-                try { fileDelete( srcPath ); } catch ( any e ) {}
-            }
-        } catch ( any e ) {
-            messagebox.error( "Upload failed: " & e.message );
-        }
-        try { directoryDelete( destDir, true ); } catch ( any e ) {}
-
-        if ( ok > 0 && !arrayLen( failed ) ) {
-            messagebox.info( "Uploaded " & ok & " file(s)." );
-        } else if ( ok > 0 ) {
-            messagebox.warn( "Uploaded " & ok & " file(s); rejected: " & arrayToList( failed, "; " ) );
-        } else if ( arrayLen( failed ) ) {
-            messagebox.error( "All uploads rejected: " & arrayToList( failed, "; " ) );
+        var result = processUploadedAttachments( rc.ticketId );
+        if ( result.ok > 0 && !arrayLen( result.failed ) ) {
+            messagebox.info( "Uploaded " & result.ok & " file(s)." );
+        } else if ( result.ok > 0 ) {
+            messagebox.warn( "Uploaded " & result.ok & " file(s); rejected: " & arrayToList( result.failed, "; " ) );
+        } else if ( arrayLen( result.failed ) ) {
+            messagebox.error( "All uploads rejected: " & arrayToList( result.failed, "; " ) );
         }
         relocate( uri = "/agent/tickets/" & rc.ticketId );
     }

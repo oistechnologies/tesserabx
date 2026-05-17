@@ -202,8 +202,14 @@
                             <bx:set local.replyBody = prc.toneReview.draft >
                         </bx:if>
 
-                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply" enctype="multipart/form-data">
                             <textarea class="form-control mb-2" name="body" id="reply-body-#encodeForHTMLAttribute( local.t.getId() )#" rows="4" placeholder="Reply visible to the requester...">#encodeForHTML( local.replyBody )#</textarea>
+                            <div class="mb-2">
+                                <label class="form-label small text-body-secondary mb-1">
+                                    <i class="bi bi-paperclip"></i> Attachments (optional)
+                                </label>
+                                <input type="file" name="attachments" class="form-control form-control-sm" multiple>
+                            </div>
                             <div class="d-flex justify-content-between align-items-center">
                                 <bx:if prc.aiEnabled ?: false>
                                     <button class="btn btn-outline-secondary btn-sm" type="submit" formaction="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/check-tone">
@@ -217,8 +223,14 @@
                         </form>
                     </div>
                     <div class="tab-pane fade" id="internal-pane" role="tabpanel">
-                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/internal-note">
+                        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/internal-note" enctype="multipart/form-data">
                             <textarea class="form-control mb-2" name="body" rows="4" placeholder="Note visible only to agents..."></textarea>
+                            <div class="mb-2">
+                                <label class="form-label small text-body-secondary mb-1">
+                                    <i class="bi bi-paperclip"></i> Attachments (optional)
+                                </label>
+                                <input type="file" name="attachments" class="form-control form-control-sm" multiple>
+                            </div>
                             <div class="d-flex justify-content-end">
                                 <button class="btn btn-warning" type="submit">Add internal note</button>
                             </div>
