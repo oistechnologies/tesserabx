@@ -111,7 +111,7 @@ class singleton=true {
             var t = ticketsService.getTicket( replyTicketId );
             if ( !isNull( t ) ) {
                 var contact = contactsService.getContactByEmail( sender );
-                ticketsService.addMessage( {
+                var msg = ticketsService.addMessage( {
                     ticketId        : t.getId(),
                     body            : arguments.message.body ?: "",
                     authorContactId : isNull( contact ) ? "" : contact.getId(),
@@ -119,6 +119,13 @@ class singleton=true {
                     isInternal      : false,
                     messageId       : messageId
                 } );
+                attachInboundFiles(
+                    t,
+                    msg,
+                    arguments.message.attachments ?: [],
+                    isNull( contact ) ? "" : contact.getId(),
+                    sender
+                );
                 return logInbound(
                     sender, subject, messageId, inReplyTo, refs,
                     "message_appended",
@@ -147,7 +154,7 @@ class singleton=true {
                 actorType        : "system"
             } );
         }
-        ticketsService.addMessage( {
+        var msg = ticketsService.addMessage( {
             ticketId        : ticket.getId(),
             body            : arguments.message.body ?: "",
             authorContactId : isNull( contact ) ? "" : contact.getId(),
@@ -155,12 +162,90 @@ class singleton=true {
             isInternal      : false,
             messageId       : messageId
         } );
+        attachInboundFiles(
+            ticket,
+            msg,
+            arguments.message.attachments ?: [],
+            isNull( contact ) ? "" : contact.getId(),
+            sender
+        );
         return logInbound(
             sender, subject, messageId, inReplyTo, refs,
             "ticket_created",
             ticket.getId(),
             ""
         );
+    }
+
+    /**
+     * Persist email attachments alongside the just-created message.
+     *
+     * Refuses the whole batch and posts an internal note instead when
+     * the aggregate exceeds EMAIL_ATTACHMENT_AGGREGATE_MAX_BYTES so
+     * one fat email cannot blow past the per-email storage budget.
+     * Per-file rejections (oversize, bad extension, magic-byte
+     * mismatch) are caught individually and reported in the same
+     * internal note so the agent knows what came in and what was
+     * dropped.
+     */
+    private void function attachInboundFiles(
+        required any ticket,
+        required any message,
+        required array attachments,
+        required string uploaderContactId,
+        required string sender
+    ){
+        if ( !arrayLen( arguments.attachments ) ) return;
+
+        var aggCap = int( getSystemSetting( "EMAIL_ATTACHMENT_AGGREGATE_MAX_BYTES", "52428800" ) );
+        var total  = 0;
+        for ( var a in arguments.attachments ) total += val( a.sizeBytes ?: 0 );
+        if ( total > aggCap ) {
+            ticketsService.addMessage( {
+                ticketId   : arguments.ticket.getId(),
+                body       : "Inbound email from " & arguments.sender & " carried " & arrayLen( arguments.attachments )
+                             & " attachment(s) totalling " & total & " bytes, exceeding the " & aggCap
+                             & "-byte aggregate cap. Files were dropped; ask the sender to resend smaller pieces.",
+                isInternal : true
+            } );
+            return;
+        }
+
+        var failed    = [];
+        var ok        = 0;
+        for ( var att in arguments.attachments ) {
+            try {
+                var data = {
+                    ticketId         : arguments.ticket.getId(),
+                    messageId        : arguments.message.getId(),
+                    originalFilename : att.originalFilename ?: "attachment",
+                    contentType      : att.contentType ?: "application/octet-stream",
+                    sizeBytes        : att.sizeBytes ?: 0,
+                    sourcePath       : att.path ?: ""
+                };
+                if ( len( arguments.uploaderContactId ) ) data.uploaderContactId = arguments.uploaderContactId;
+                ticketsService.addAttachment( data );
+                ok++;
+            } catch ( any e ) {
+                failed.append( ( att.originalFilename ?: "attachment" ) & " (" & e.message & ")" );
+                writeLog(
+                    text : "Inbound attachment rejected on ticket [#arguments.ticket.getId()#]: " & e.message,
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+            }
+            // The IMAP temp dir is wiped at the end of the poll loop;
+            // unlinking eagerly here would race with the poller, so
+            // leave individual files to the bulk cleanup.
+        }
+
+        if ( arrayLen( failed ) ) {
+            ticketsService.addMessage( {
+                ticketId   : arguments.ticket.getId(),
+                body       : "Some inbound attachments were rejected: " & arrayToList( failed, "; " ),
+                isInternal : true
+            } );
+        }
     }
 
     // ---------------- helpers ----------------

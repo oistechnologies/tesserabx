@@ -213,7 +213,195 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupTicket( result.getTicketId() );
             } );
 
+            it( "persists email attachments on the resulting ticket message", function(){
+                var sender  = "att-" & createUUID() & "@example.com";
+                var tmpFile = makeTempPng();
+                var result  = variables.processor.process( {
+                    messageId   : "msg-" & createUUID() & "@example.com",
+                    from        : sender,
+                    subject     : "Screenshot of the issue",
+                    body        : "See attached.",
+                    headers     : {},
+                    attachments : [ {
+                        path             : tmpFile,
+                        originalFilename : "shot.png",
+                        contentType      : "image/png",
+                        sizeBytes        : getFileInfo( tmpFile ).size
+                    } ]
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+
+                var atts = variables.tickets.listAttachmentsForTicket(
+                    result.getTicketId(),
+                    { type : "agent", id : "system-spec" }
+                );
+                expect( arrayLen( atts ) ).toBe( 1 );
+                expect( atts[ 1 ].getOriginalFilename() ).toBe( "shot.png" );
+                expect( len( atts[ 1 ].getMessageId() ?: "" ) ).toBeGT( 0 );
+
+                cleanupAttachments( result.getTicketId() );
+                cleanupInbound( result.getId() );
+                cleanupTicket( result.getTicketId() );
+                try { fileDelete( tmpFile ); } catch ( any e ) {}
+            } );
+
+            it( "drops the whole batch and posts an internal note when aggregate cap is exceeded", function(){
+                // Squeeze the cap to 100 bytes for this spec so a small
+                // file trips the limit; restore on the way out.
+                // getSystemSetting walks java system properties before
+                // env vars, so flipping the property is enough to
+                // override for one spec without touching the OS env.
+                var sys   = createObject( "java", "java.lang.System" );
+                var prior = sys.getProperty( "EMAIL_ATTACHMENT_AGGREGATE_MAX_BYTES" ) ?: "";
+                sys.setProperty( "EMAIL_ATTACHMENT_AGGREGATE_MAX_BYTES", "100" );
+
+                var sender  = "agg-" & createUUID() & "@example.com";
+                var tmpFile = makeTempPng();
+                var fileSize = getFileInfo( tmpFile ).size;
+                var result   = variables.processor.process( {
+                    messageId   : "msg-" & createUUID() & "@example.com",
+                    from        : sender,
+                    subject     : "Big bundle",
+                    body        : "Original.",
+                    headers     : {},
+                    attachments : [ {
+                        path             : tmpFile,
+                        originalFilename : "fat.png",
+                        contentType      : "image/png",
+                        sizeBytes        : fileSize
+                    } ]
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+
+                var atts = variables.tickets.listAttachmentsForTicket(
+                    result.getTicketId(),
+                    { type : "agent", id : "system-spec" }
+                );
+                expect( arrayLen( atts ) ).toBe( 0 );
+
+                // The body posts + an internal note explains the drop.
+                var messages = variables.tickets.listMessagesForTicket( result.getTicketId(), true );
+                var hasNote = false;
+                for ( var m in messages ) {
+                    if ( m.getIsInternal() && findNoCase( "aggregate cap", m.getBody() ) ) {
+                        hasNote = true;
+                        break;
+                    }
+                }
+                expect( hasNote ).toBeTrue();
+
+                if ( len( prior ) ) {
+                    sys.setProperty( "EMAIL_ATTACHMENT_AGGREGATE_MAX_BYTES", prior );
+                } else {
+                    sys.clearProperty( "EMAIL_ATTACHMENT_AGGREGATE_MAX_BYTES" );
+                }
+                cleanupAttachments( result.getTicketId() );
+                cleanupInbound( result.getId() );
+                cleanupTicket( result.getTicketId() );
+                try { fileDelete( tmpFile ); } catch ( any e ) {}
+            } );
+
+            it( "rejects an inbound attachment whose magic bytes do not match its declared type", function(){
+                var sender  = "magic-" & createUUID() & "@example.com";
+                // Real ZIP local-file-header bytes (50 4B 03 04) with a
+                // .pdf extension + application/pdf content type. The
+                // sniffer should catch the mismatch and reject. Plain
+                // fileWrite would utf-8-encode 0x50/0x4B safely but
+                // chars >= 0x80 expand to two bytes, so go through
+                // FileOutputStream + javaCast to write the exact bytes.
+                var tmpFile = getTempDirectory() & "/bad-" & createUUID() & ".pdf";
+                writeRawBytes( tmpFile, [ 80, 75, 3, 4, 0, 0, 0, 0, 120, 120, 120, 120, 120, 120, 120, 120 ] );
+
+                var result = variables.processor.process( {
+                    messageId   : "msg-" & createUUID() & "@example.com",
+                    from        : sender,
+                    subject     : "Doc",
+                    body        : "See attached.",
+                    headers     : {},
+                    attachments : [ {
+                        path             : tmpFile,
+                        originalFilename : "doc.pdf",
+                        contentType      : "application/pdf",
+                        sizeBytes        : getFileInfo( tmpFile ).size
+                    } ]
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+
+                var atts = variables.tickets.listAttachmentsForTicket(
+                    result.getTicketId(),
+                    { type : "agent", id : "system-spec" }
+                );
+                expect( arrayLen( atts ) ).toBe( 0 );
+
+                // Rejection should leave an internal-note breadcrumb.
+                var messages = variables.tickets.listMessagesForTicket( result.getTicketId(), true );
+                var hasRejection = false;
+                for ( var m in messages ) {
+                    if ( m.getIsInternal() && findNoCase( "rejected", m.getBody() ) ) {
+                        hasRejection = true;
+                        break;
+                    }
+                }
+                expect( hasRejection ).toBeTrue();
+
+                cleanupInbound( result.getId() );
+                cleanupTicket( result.getTicketId() );
+                try { fileDelete( tmpFile ); } catch ( any e ) {}
+            } );
+
         } );
+    }
+
+    /**
+     * Build a small but real PNG on disk so addAttachment's magic-byte
+     * sniff sees the PNG signature instead of rejecting our fixture.
+     * Goes through ImageIO so the bytes are also a decodable PNG —
+     * the thumbnail pipeline runs sync in addAttachment and we don't
+     * want it logging a parse-failure warning during specs.
+     */
+    private string function makeTempPng(){
+        var img = createObject( "java", "java.awt.image.BufferedImage" )
+            .init( 32, 32, createObject( "java", "java.awt.image.BufferedImage" ).TYPE_INT_RGB );
+        var g = img.createGraphics();
+        try {
+            g.setColor( createObject( "java", "java.awt.Color" ).BLUE );
+            g.fillRect( 0, 0, 32, 32 );
+        } finally {
+            g.dispose();
+        }
+        var path = getTempDirectory() & "/spec-png-" & createUUID() & ".png";
+        var fos  = createObject( "java", "java.io.FileOutputStream" ).init( path );
+        try {
+            createObject( "java", "javax.imageio.ImageIO" ).write( img, "png", fos );
+        } finally {
+            fos.close();
+        }
+        return path;
+    }
+
+    /**
+     * Write an exact byte sequence to disk. fileWrite() of an ad-hoc
+     * String round-trips through UTF-8 and turns any char >= 0x80 into
+     * two bytes, which clobbers magic-byte headers.
+     */
+    private void function writeRawBytes( required string path, required array bytes ){
+        var fos = createObject( "java", "java.io.FileOutputStream" ).init( arguments.path );
+        try {
+            fos.write( javaCast( "byte[]", arguments.bytes ) );
+        } finally {
+            fos.close();
+        }
+    }
+
+    private void function cleanupAttachments( required string ticketId ){
+        queryExecute(
+            "DELETE FROM audit_events
+              WHERE entity_id IN (
+                  SELECT id FROM attachments WHERE ticket_id = :id
+              )",
+            { id : arguments.ticketId }
+        );
+        queryExecute( "DELETE FROM attachments WHERE ticket_id = :id", { id : arguments.ticketId } );
     }
 
     private void function cleanupInbound( required string id ){

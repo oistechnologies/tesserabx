@@ -59,6 +59,12 @@ class singleton=true {
         var maxPerRun = int( getSystemSetting( "IMAP_MAX_PER_POLL", "50" ) );
         var markRead  = lCase( getSystemSetting( "IMAP_MARK_READ", "true" ) ) == "true";
 
+        // Per-poll temp dir for any attachments cfimap pulls out of
+        // multi-part messages. Cleaned at the end of the run so a
+        // hung poll cannot leak megabytes into /tmp.
+        var attachDir = getTempDirectory() & "/imap-poll-" & createUUID() & "/";
+        directoryCreate( attachDir );
+
         var fetched = "";
         try {
             cfimap(
@@ -69,12 +75,13 @@ class singleton=true {
                 password   = password,
                 folder     = folder,
                 secure     = useSSL,
-                attachmentPath = "",
+                attachmentPath = attachDir,
                 name       = "fetched",
                 maxRows    = maxPerRun,
                 generateUniqueFilenames = true
             );
         } catch ( any e ) {
+            try { directoryDelete( attachDir, true ); } catch ( any ignored ) {}
             writeLog(
                 text : "IMAP fetch failed: " & e.message,
                 log  : "tesserabx-scheduler",
@@ -103,6 +110,8 @@ class singleton=true {
                 result.errors++;
             }
         }
+
+        try { directoryDelete( attachDir, true ); } catch ( any ignored ) {}
 
         if ( markRead && arrayLen( messageIdsToMark ) ) {
             try {
@@ -156,15 +165,71 @@ class singleton=true {
         }
 
         return {
-            messageId  : stripBrackets( arguments.row.messageid ?: arguments.row.messageId ?: "" ),
-            from       : arguments.row.from ?: "",
-            subject    : arguments.row.subject ?: "(no subject)",
-            body       : arguments.row.body ?: arguments.row.textBody ?: "",
-            inReplyTo  : stripBrackets( arguments.row.inReplyTo ?: arguments.row[ "in-reply-to" ] ?: "" ),
-            references : arguments.row.references ?: arguments.row[ "references" ] ?: "",
-            headers    : headers,
-            imapUID    : arguments.row.uid ?: ""
+            messageId   : stripBrackets( arguments.row.messageid ?: arguments.row.messageId ?: "" ),
+            from        : arguments.row.from ?: "",
+            subject     : arguments.row.subject ?: "(no subject)",
+            body        : arguments.row.body ?: arguments.row.textBody ?: "",
+            inReplyTo   : stripBrackets( arguments.row.inReplyTo ?: arguments.row[ "in-reply-to" ] ?: "" ),
+            references  : arguments.row.references ?: arguments.row[ "references" ] ?: "",
+            headers     : headers,
+            imapUID     : arguments.row.uid ?: "",
+            attachments : extractAttachments( arguments.row )
         };
+    }
+
+    /**
+     * Walk a cfimap row's attachmentFiles list (delimiter is the
+     * server-local path separator; cfimap returns absolute paths) and
+     * build the small struct the processor expects. Missing or
+     * unreadable files are silently dropped because cfimap occasionally
+     * lists inline-image cids that never actually land on disk.
+     */
+    private array function extractAttachments( required any row ){
+        var out = [];
+        var raw = arguments.row.attachmentFiles ?: arguments.row.attachmentfiles ?: "";
+        if ( !len( raw ) ) return out;
+
+        // cfimap separates paths with the OS path-separator. Splitting
+        // on both `;` (legacy CF behaviour) and the platform separator
+        // keeps the same code working on Linux dev + CI.
+        var paths = listToArray( raw, ";" & ( createObject( "java", "java.io.File" ).pathSeparator ) );
+        for ( var p in paths ) {
+            p = trim( p );
+            if ( !len( p ) || !fileExists( p ) ) continue;
+            var info = getFileInfo( p );
+            out.append( {
+                path             : p,
+                originalFilename : info.name,
+                contentType      : guessContentType( info.name ),
+                sizeBytes        : info.size
+            } );
+        }
+        return out;
+    }
+
+    /**
+     * Best-effort MIME guess by file extension. The TicketsService
+     * upload validator runs its own magic-byte sniff regardless, so a
+     * wrong-but-plausible guess here gets corrected (or rejected)
+     * downstream.
+     */
+    private string function guessContentType( required string filename ){
+        var ext = lCase( listLast( arguments.filename, "." ) );
+        switch ( ext ) {
+            case "jpg":  case "jpeg": return "image/jpeg";
+            case "png":               return "image/png";
+            case "gif":               return "image/gif";
+            case "webp":              return "image/webp";
+            case "pdf":               return "application/pdf";
+            case "zip":               return "application/zip";
+            case "txt":  case "log":  return "text/plain";
+            case "csv":               return "text/csv";
+            case "doc":               return "application/msword";
+            case "docx":              return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xls":               return "application/vnd.ms-excel";
+            case "xlsx":              return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            default:                  return "application/octet-stream";
+        }
     }
 
     private string function stripBrackets( required string value ){
