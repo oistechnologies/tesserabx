@@ -28,9 +28,22 @@ component {
         // and this migration becomes a no-op; in that case the
         // operator must copy avatar objects between buckets manually
         // (one-time `aws s3 cp` or equivalent).
-        var secureRoot = expandPath( "/storage" );
-        var publicRoot = expandPath( "/public-files" );
+        //
+        // expandPath("/public-files") returns the literal "/public-files"
+        // on contexts that have no mapping for it (cfmigrations CLI,
+        // CI runners). Resolve relative to this migration's own file
+        // path instead so the same code works in Docker dev and on
+        // GitHub Actions.
+        var migrationDir = getDirectoryFromPath( getCurrentTemplatePath() );
+        // migrationDir = <project>/resources/database/migrations/
+        var projectRoot  = getCanonicalPath( migrationDir & "../../../" );
+        var secureRoot   = projectRoot & "/storage";
+        var publicRoot   = projectRoot & "/public-files";
 
+        if ( !directoryExists( secureRoot ) ) {
+            // No local source files anywhere; nothing to migrate.
+            return;
+        }
         if ( !directoryExists( publicRoot ) ) directoryCreate( publicRoot, true );
 
         var rows = queryExecute(
