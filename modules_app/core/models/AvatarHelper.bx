@@ -1,0 +1,160 @@
+/**
+ * AvatarHelper: render an agent avatar as an HTML fragment.
+ *
+ * When the agent has uploaded a picture, returns an <img> pointing at
+ * the size-specific avatar route; otherwise renders an initials badge
+ * with a stable HSL background derived from a hash of the agent id.
+ *
+ * Two ways to use it:
+ *   - From a view: view( view = "_partials/avatar", module = "core",
+ *                        args = { agent : agentMini, size : 24 } )
+ *   - From code:   getInstance("AvatarHelper@core").renderFromStruct( agentMini, size )
+ *
+ * Both paths share the same rendering logic in this class. The
+ * service form is the one called from email templates, notification
+ * bodies, or anywhere outside the view layer.
+ *
+ * Allowed sizes are 32, 64, 128, 256. Requesting an out-of-band size
+ * falls back to the next-larger allowed value.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.ALLOWED_SIZES = [ 32, 64, 128, 256 ];
+
+    /**
+     * Look up the agent by id and render. Convenience for callers
+     * that have only the id at hand.
+     */
+    public string function render( required string agentId, numeric size = 32 ){
+        if ( !len( arguments.agentId ) ) return renderInitials( "?", "?", arguments.size );
+        var agent = wirebox.getInstance( "AgentService@agent" ).getAgentById( arguments.agentId );
+        if ( isNull( agent ) ) return renderInitials( "?", arguments.agentId, arguments.size );
+        return renderFromStruct(
+            {
+                id        : agent.getId(),
+                firstName : agent.getFirstName() ?: "",
+                lastName  : agent.getLastName()  ?: "",
+                email     : agent.getEmail()     ?: "",
+                hasAvatar : len( agent.getProfileImageOriginalPath() ?: "" ) > 0,
+                uploadedAt: agent.getProfileImageUploadedAt()
+            },
+            arguments.size
+        );
+    }
+
+    /**
+     * Render from a pre-loaded agent struct. Views use this so they
+     * don't trigger a per-row DB hit; the calling handler/wire pulls
+     * the needed fields once when it builds its row collection.
+     *
+     * Required keys on agent struct:
+     *   - id          (string)
+     *   - firstName, lastName, email (strings, can be empty)
+     *   - hasAvatar   (boolean)
+     *   - uploadedAt  (timestamp or null/empty when hasAvatar is false)
+     */
+    public string function renderFromStruct( required struct agent, numeric size = 32 ){
+        var resolvedSize = resolveSize( arguments.size );
+
+        if ( arguments.agent.hasAvatar ?: false ) {
+            // Append upload timestamp as a cache-buster so a fresh
+            // upload bypasses the browser cache while the URL path
+            // stays stable.
+            var bust = "";
+            if ( structKeyExists( arguments.agent, "uploadedAt" ) && !isNull( arguments.agent.uploadedAt ) ) {
+                try {
+                    bust = "?v=" & getTickCount( arguments.agent.uploadedAt );
+                } catch ( any e ) {
+                    bust = "";
+                }
+            }
+            var src = "/agent/avatars/" & encodeForURL( arguments.agent.id ) & "/" & resolvedSize & bust;
+            var alt = initialsOf( arguments.agent );
+            return "<img src=""" & src & """ width=""" & resolvedSize & """ height=""" & resolvedSize
+                & """ class=""rounded-circle"" alt=""" & encodeForHTMLAttribute( alt ) & """ "
+                & "style=""object-fit:cover"" loading=""lazy"">";
+        }
+
+        return renderInitials(
+            initialsOf( arguments.agent ),
+            arguments.agent.id ?: "",
+            resolvedSize
+        );
+    }
+
+    /**
+     * The colored circle. Public so views or other helpers can use it
+     * to display a placeholder for a missing user (e.g. an orphan
+     * inbound email author).
+     */
+    public string function renderInitials( required string initials, required string idHashKey, numeric size = 32 ){
+        var hue       = hueFor( arguments.idHashKey );
+        var fontSize  = max( 10, int( arguments.size * 0.4 ) );
+        var styleCSS  = "display:inline-flex;align-items:center;justify-content:center;"
+            & "width:" & arguments.size & "px;"
+            & "height:" & arguments.size & "px;"
+            & "border-radius:50%;"
+            & "background-color:hsl(" & hue & ",55%,45%);"
+            & "color:##fff;"
+            & "font-weight:600;"
+            & "font-size:" & fontSize & "px;"
+            & "line-height:1;"
+            & "user-select:none;";
+        return "<span class=""avatar-initials"" style=""" & styleCSS & """>"
+            & encodeForHTML( arguments.initials )
+            & "</span>";
+    }
+
+    // ---------------- internals ----------------
+
+    private string function initialsOf( required struct agent ){
+        var first = trim( arguments.agent.firstName ?: "" );
+        var last  = trim( arguments.agent.lastName  ?: "" );
+        if ( len( first ) && len( last ) ) {
+            return uCase( left( first, 1 ) & left( last, 1 ) );
+        }
+        if ( len( first ) ) return uCase( left( first, min( 2, len( first ) ) ) );
+        if ( len( last  ) ) return uCase( left( last,  min( 2, len( last  ) ) ) );
+        var email = trim( arguments.agent.email ?: "" );
+        if ( len( email ) ) return uCase( left( email, min( 2, len( email ) ) ) );
+        return "?";
+    }
+
+    /**
+     * Deterministic hue (0..359) from an arbitrary string. SHA-256
+     * over the key, take the first 4 hex chars as an int, mod 360.
+     * Stable across runs; same agent always renders the same color.
+     */
+    private numeric function hueFor( required string key ){
+        var k = arguments.key;
+        if ( !len( k ) ) k = "?";
+        var hex   = left( hash( k, "SHA-256" ), 4 );
+        var value = inputBaseN( hex, 16 );
+        return value % 360;
+    }
+
+    /**
+     * Map any requested size up to the smallest configured thumbnail
+     * that is >= the request. The avatar handler will 404 if a size
+     * outside the allowed set is requested; this guard keeps callers
+     * from hitting that path by accident.
+     */
+    private numeric function resolveSize( required numeric size ){
+        for ( var allowed in variables.ALLOWED_SIZES ) {
+            if ( arguments.size <= allowed ) return allowed;
+        }
+        return variables.ALLOWED_SIZES[ arrayLen( variables.ALLOWED_SIZES ) ];
+    }
+
+    /**
+     * Best-effort epoch tick generation from a timestamp. Some BoxLang
+     * drivers return strings rather than dates from queryExecute; the
+     * try/catch on the caller side hides any parser-level failure.
+     */
+    private numeric function getTickCount( required any value ){
+        return arguments.value.getTime();
+    }
+
+}

@@ -1,0 +1,108 @@
+/**
+ * AvatarsHandlerSpec: integration coverage for /agent/avatars/:id/:size.
+ *
+ * Dispatches to the handler action directly via execute(event=...)
+ * with the rc values set up by hand. This avoids ColdBox's test
+ * router which doesn't reliably propagate the renderData statusCode
+ * through to event.getStatusCode() under our setup. The auth
+ * firewall is bypassed in this test context.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.agentSvc = getController().getWireBox().getInstance( "AgentService@agent" );
+        variables.imgSvc   = getController().getWireBox().getInstance( "ImageProcessingService@core" );
+    }
+
+    function run(){
+        describe( "Avatars handler", function(){
+
+            it( "returns 404 for an unknown agent id", function(){
+                var event = invokeShow( "does-not-exist", 64 );
+                expect( event.getStatusCode() ).toBe( 404 );
+            } );
+
+            it( "returns 404 for a non-allowed size", function(){
+                var id = variables.agentSvc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var event = invokeShow( id, 999 );
+                expect( event.getStatusCode() ).toBe( 404 );
+                cleanupAgent( id );
+            } );
+
+            it( "returns 404 when the agent has no avatar uploaded", function(){
+                var id = variables.agentSvc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var event = invokeShow( id, 64 );
+                expect( event.getStatusCode() ).toBe( 404 );
+                cleanupAgent( id );
+            } );
+
+            it( "returns 200 with image/jpeg when the size exists", function(){
+                var id   = variables.agentSvc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var path = writeTempJpeg( 200, 200 );
+                var paths = variables.imgSvc.processProfileImage( id, path, "image/jpeg" );
+                variables.agentSvc.setProfileImage( id, paths.original, "image/jpeg" );
+
+                var event = invokeShow( id, 64 );
+                expect( event.getStatusCode() ).toBe( 200 );
+                var rd = event.getRenderData();
+                expect( rd.contentType ).toBe( "image/jpeg" );
+
+                variables.imgSvc.deleteProfileImages( id );
+                fileDelete( path );
+                cleanupAgent( id );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function invokeShow( required string agentId, required numeric size ){
+        // renderResults = true is required so ColdBox runs its
+        // post-action render phase, which is where the statusCode
+        // from renderData propagates onto the request context via
+        // setStatusCode(). Without it, getStatusCode() always
+        // returns 200.
+        var rc = getRequestContext();
+        rc.setValue( "id",   arguments.agentId );
+        rc.setValue( "size", toString( arguments.size ) );
+        return execute(
+            event         : "agent:Avatars.show",
+            renderResults : true
+        );
+    }
+
+    private string function writeTempJpeg( required numeric width, required numeric height ){
+        var BufferedImage = createObject( "java", "java.awt.image.BufferedImage" );
+        var img = BufferedImage.init( arguments.width, arguments.height, BufferedImage.TYPE_INT_RGB );
+        var g   = img.createGraphics();
+        try {
+            g.setColor( createObject( "java", "java.awt.Color" ).BLUE );
+            g.fillRect( 0, 0, arguments.width, arguments.height );
+        } finally {
+            g.dispose();
+        }
+        var path = getTempDirectory() & "/avatar-spec-" & createUUID() & ".jpg";
+        var fos  = createObject( "java", "java.io.FileOutputStream" ).init( path );
+        try {
+            createObject( "java", "javax.imageio.ImageIO" ).write( img, "jpg", fos );
+        } finally {
+            fos.close();
+        }
+        return path;
+    }
+
+    private string function uniqueEmail(){
+        return "spec-avatar-" & replace( createUUID(), "-", "", "all" ) & "@example.com";
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_pending_email_changes WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles                 WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM team_members                WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents                       WHERE id       = :id", { id : arguments.agentId } );
+    }
+
+}

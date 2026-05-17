@@ -1,0 +1,259 @@
+/**
+ * ImageProcessingService: square-thumbnail generation for the
+ * avatar pipeline.
+ *
+ * One public entry point per concern:
+ *   - validateUpload( sourcePath, contentType ): extension whitelist,
+ *     content-type check, size check against PROFILE_IMAGE_MAX_BYTES.
+ *   - processProfileImage( agentId, sourcePath, contentType ): reads
+ *     the original from disk, center-crops to a square, scales to
+ *     each thumbnail size (32, 64, 128, 256), writes the original +
+ *     all four sizes to CBFS, returns the path struct.
+ *   - deleteProfileImages( agentId ): clears everything under the
+ *     agent's profile prefix in CBFS.
+ *
+ * Image decoding/encoding uses javax.imageio + java.awt directly.
+ * That sidesteps the BoxLang image-BIF surface (which varies across
+ * runtime versions) and works against any JVM.
+ *
+ * JPEG output for every thumbnail regardless of source format. PNG
+ * sources with alpha lose transparency; the trade-off is consistent
+ * storage and serving.
+ *
+ * Every disk.create() passes mode = "600" per
+ * feedback_cbfs_private_mode_zero.md.
+ */
+class singleton=true {
+
+    property name="cbfs"    inject="DiskService@cbfs";
+    property name="wirebox" inject="wirebox";
+
+    // Pixel sizes generated for each profile image. Order doesn't
+    // matter; the caller may serve any subset.
+    variables.THUMBNAIL_SIZES = [ 32, 64, 128, 256 ];
+
+    // Allowed source extensions (case-insensitive).
+    variables.ALLOWED_EXTENSIONS = [ "jpg", "jpeg", "png", "gif", "webp" ];
+
+    // CBFS path components are computed deterministically from the
+    // agent id so the avatar handler can reconstruct them without a
+    // database hit.
+    variables.PREFIX = "agents";
+
+    // -------------------------------------------------------------
+    //  validateUpload
+    // -------------------------------------------------------------
+
+    /**
+     * Validate an uploaded image. Returns { ok : boolean, error : string }.
+     * Does not throw; callers branch on .ok and surface .error.
+     */
+    public struct function validateUpload(
+        required string sourcePath,
+        required string contentType
+    ){
+        if ( !fileExists( arguments.sourcePath ) ) {
+            return { ok : false, error : "Uploaded file is missing on disk." };
+        }
+        var ext = lCase( listLast( arguments.sourcePath, "." ) );
+        if ( !arrayFindNoCase( variables.ALLOWED_EXTENSIONS, ext ) ) {
+            return {
+                ok    : false,
+                error : "Unsupported image format. Allowed: " & arrayToList( variables.ALLOWED_EXTENSIONS, ", " ) & "."
+            };
+        }
+        if ( !len( arguments.contentType ) || left( lCase( arguments.contentType ), 6 ) != "image/" ) {
+            return { ok : false, error : "Uploaded file is not declared as an image (content-type mismatch)." };
+        }
+        var sizeBytes = getFileInfo( arguments.sourcePath ).size;
+        var maxBytes  = int( getSystemSetting( "PROFILE_IMAGE_MAX_BYTES", "5242880" ) );
+        if ( sizeBytes > maxBytes ) {
+            return {
+                ok    : false,
+                error : "Image exceeds the configured maximum (" & maxBytes & " bytes)."
+            };
+        }
+        return { ok : true, error : "" };
+    }
+
+    // -------------------------------------------------------------
+    //  processProfileImage
+    // -------------------------------------------------------------
+
+    /**
+     * Center-crop the source to a square, scale to every configured
+     * thumbnail size, and persist the original + all sizes to CBFS.
+     *
+     * Returns a struct:
+     *   {
+     *       original : "agents/<id>/profile/original.<ext>",
+     *       "32"     : "agents/<id>/profile/32.jpg",
+     *       "64"     : "agents/<id>/profile/64.jpg",
+     *       "128"    : "agents/<id>/profile/128.jpg",
+     *       "256"    : "agents/<id>/profile/256.jpg"
+     *   }
+     *
+     * Callers persist the original path on the agent row and
+     * derive the size paths deterministically when serving.
+     */
+    public struct function processProfileImage(
+        required string agentId,
+        required string sourcePath,
+        required string contentType
+    ){
+        var ext   = lCase( listLast( arguments.sourcePath, "." ) );
+        var disk  = cbfs.defaultDisk();
+        var base  = variables.PREFIX & "/" & arguments.agentId & "/profile";
+        var paths = { original : base & "/original." & ext };
+
+        // Wipe any previously cached thumbnails so an upload with a
+        // different aspect ratio doesn't leave stale crops behind.
+        deleteProfileImages( arguments.agentId );
+
+        // Persist the original first; the resize path consumes the
+        // same bytes from memory rather than re-reading from CBFS.
+        // BoxLang's fileRead(path, "binary") rejects "binary" as a
+        // charset; use the explicit binary read.
+        var originalBytes = fileReadBinary( arguments.sourcePath );
+        disk.create(
+            path      : paths.original,
+            contents  : originalBytes,
+            overwrite : true,
+            mode      : "600"
+        );
+
+        // Decode once; reuse the BufferedImage across every size.
+        var source = decode( originalBytes );
+        if ( isNull( source ) ) {
+            throw(
+                type    : "ImageProcessingService.InvalidImage",
+                message : "Could not decode image bytes (unknown or corrupt format)."
+            );
+        }
+        var cropped = centerCropSquare( source );
+
+        for ( var size in variables.THUMBNAIL_SIZES ) {
+            var bytes  = resizeToJpegBytes( cropped, size );
+            var pkey   = toString( size );
+            paths[ pkey ] = base & "/" & pkey & ".jpg";
+            disk.create(
+                path      : paths[ pkey ],
+                contents  : bytes,
+                overwrite : true,
+                mode      : "600"
+            );
+        }
+        return paths;
+    }
+
+    // -------------------------------------------------------------
+    //  deleteProfileImages
+    // -------------------------------------------------------------
+
+    /**
+     * Delete every file under agents/<agentId>/profile/. Used on
+     * agent.clearProfileImage and as a pre-step in processProfileImage
+     * so a re-upload replaces all artifacts atomically.
+     *
+     * Silent on failure: if a file is already gone, the next caller
+     * shouldn't fail.
+     */
+    public void function deleteProfileImages( required string agentId ){
+        var disk = cbfs.defaultDisk();
+        var base = variables.PREFIX & "/" & arguments.agentId & "/profile";
+
+        // Try every known extension for the original; thumbnails are
+        // always .jpg.
+        for ( var ext in variables.ALLOWED_EXTENSIONS ) {
+            tryDelete( disk, base & "/original." & ext );
+        }
+        for ( var size in variables.THUMBNAIL_SIZES ) {
+            tryDelete( disk, base & "/" & size & ".jpg" );
+        }
+    }
+
+    // -------------------------------------------------------------
+    //  internals
+    // -------------------------------------------------------------
+
+    /**
+     * Decode raw bytes into a BufferedImage. Returns null when the
+     * format is unrecognized.
+     */
+    private any function decode( required any bytes ){
+        var bais = createObject( "java", "java.io.ByteArrayInputStream" ).init( arguments.bytes );
+        var ImageIO = createObject( "java", "javax.imageio.ImageIO" );
+        return ImageIO.read( bais );
+    }
+
+    /**
+     * Crop the largest centered square from the source.
+     */
+    private any function centerCropSquare( required any source ){
+        var w = arguments.source.getWidth();
+        var h = arguments.source.getHeight();
+        if ( w == h ) return arguments.source;
+        var side = min( w, h );
+        var x    = int( ( w - side ) / 2 );
+        var y    = int( ( h - side ) / 2 );
+        return arguments.source.getSubimage( x, y, side, side );
+    }
+
+    /**
+     * Scale to size x size and encode as JPEG byte[].
+     */
+    private any function resizeToJpegBytes( required any cropped, required numeric size ){
+        var BufferedImage = createObject( "java", "java.awt.image.BufferedImage" );
+        var RenderingHints = createObject( "java", "java.awt.RenderingHints" );
+
+        // TYPE_INT_RGB drops the alpha channel; JPEG would discard
+        // it anyway and otherwise renders as black.
+        var target = BufferedImage.init(
+            arguments.size,
+            arguments.size,
+            BufferedImage.TYPE_INT_RGB
+        );
+        var g = target.createGraphics();
+        try {
+            g.setRenderingHint(
+                RenderingHints.KEY_INTERPOLATION,
+                RenderingHints.VALUE_INTERPOLATION_BICUBIC
+            );
+            g.setRenderingHint(
+                RenderingHints.KEY_RENDERING,
+                RenderingHints.VALUE_RENDER_QUALITY
+            );
+            g.setRenderingHint(
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON
+            );
+            g.drawImage( arguments.cropped, 0, 0, arguments.size, arguments.size, javaCast( "null", "" ) );
+        } finally {
+            g.dispose();
+        }
+
+        var baos    = createObject( "java", "java.io.ByteArrayOutputStream" ).init();
+        var ImageIO = createObject( "java", "javax.imageio.ImageIO" );
+        ImageIO.write( target, "jpg", baos );
+        return baos.toByteArray();
+    }
+
+    /**
+     * Best-effort delete: swallow exceptions so a missing or already
+     * deleted file doesn't break the flow.
+     */
+    private void function tryDelete( required any disk, required string path ){
+        try {
+            if ( arguments.disk.exists( arguments.path ) ) {
+                arguments.disk.delete( arguments.path );
+            }
+        } catch ( any e ) {
+            writeLog(
+                text : "ImageProcessingService.delete failed [#arguments.path#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

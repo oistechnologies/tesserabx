@@ -12,9 +12,11 @@
  */
 class {
 
-    property name="rbacService" inject="RbacService@agent";
-    property name="messagebox"  inject="messagebox@cbmessagebox";
-    property name="auth"        inject="AuthenticationService@cbauth";
+    property name="rbacService"     inject="RbacService@agent";
+    property name="agentService"    inject="AgentService@agent";
+    property name="imageProcessing" inject="ImageProcessingService@core";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
@@ -34,6 +36,11 @@ class {
         param rc.id = "";
         prc.pageTitle = "Edit agent";
         prc.agentId   = rc.id;
+        var agent     = agentService.getAgentById( rc.id );
+        prc.hasAvatar      = !isNull( agent ) && len( agent.getProfileImageOriginalPath() ?: "" ) > 0;
+        prc.uploadVersion  = prc.hasAvatar && !isNull( agent.getProfileImageUploadedAt() )
+            ? agent.getProfileImageUploadedAt().getTime()
+            : 0;
         event.setView( "users/edit" );
     }
 
@@ -101,6 +108,81 @@ class {
         );
         messagebox.info( "User deactivated." );
         relocate( uri = "/agent/admin/users" );
+    }
+
+    /**
+     * Conventional multipart form POST for the profile-image upload.
+     * Sits outside the AgentForm wire because cbwire's FileUpload
+     * object isn't duplicate-able on BoxLang (its wire reference
+     * transitively holds a non-clonable ScheduledThreadPoolExecutor).
+     * After processing, redirects back to the edit page.
+     */
+    function uploadAvatar( event, rc, prc ){
+        param rc.id = "";
+        if ( !len( rc.id ) ) {
+            messagebox.error( "Agent id is required." );
+            relocate( uri = "/agent/admin/users" );
+            return;
+        }
+        if ( !structKeyExists( form, "profileImage" ) || !len( form.profileImage ?: "" ) ) {
+            messagebox.error( "Pick a file before submitting." );
+            relocate( uri = "/agent/admin/users/" & rc.id & "/edit" );
+            return;
+        }
+        try {
+            var dest   = getTempDirectory() & "/avatar-upload-" & createUUID() & "/";
+            directoryCreate( dest );
+            var result = fileUpload(
+                destination = dest,
+                fileField   = "profileImage",
+                accept      = "image/jpeg,image/png,image/gif,image/webp",
+                nameConflict= "makeUnique"
+            );
+            var srcPath  = dest & result.serverFile;
+            var contentType = result.contentType & "/" & result.contentSubType;
+
+            var v = imageProcessing.validateUpload( srcPath, contentType );
+            if ( !v.ok ) {
+                messagebox.error( v.error );
+                fileDelete( srcPath );
+                directoryDelete( dest );
+                relocate( uri = "/agent/admin/users/" & rc.id & "/edit" );
+                return;
+            }
+
+            var paths = imageProcessing.processProfileImage( rc.id, srcPath, contentType );
+            agentService.setProfileImage(
+                agentId      : rc.id,
+                originalPath : paths.original,
+                contentType  : contentType
+            );
+            fileDelete( srcPath );
+            directoryDelete( dest );
+            messagebox.info( "Avatar uploaded." );
+        } catch ( any e ) {
+            messagebox.error( "Avatar upload failed: " & e.message );
+        }
+        relocate( uri = "/agent/admin/users/" & rc.id & "/edit" );
+    }
+
+    function clearAvatar( event, rc, prc ){
+        param rc.id = "";
+        if ( !len( rc.id ) ) {
+            messagebox.error( "Agent id is required." );
+            relocate( uri = "/agent/admin/users" );
+            return;
+        }
+        try {
+            imageProcessing.deleteProfileImages( rc.id );
+            agentService.clearProfileImage(
+                agentId      : rc.id,
+                actorAgentId : currentAgentId()
+            );
+            messagebox.info( "Avatar cleared." );
+        } catch ( any e ) {
+            messagebox.error( "Could not clear avatar: " & e.message );
+        }
+        relocate( uri = "/agent/admin/users/" & rc.id & "/edit" );
     }
 
     function resetMfa( event, rc, prc ){

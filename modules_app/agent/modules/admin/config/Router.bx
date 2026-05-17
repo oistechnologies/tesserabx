@@ -110,6 +110,11 @@ class {
         route( "users/activate" ).withVerbs( "POST" ).to( "Users.activate" );
         route( "users/deactivate" ).withVerbs( "POST" ).to( "Users.deactivate" );
         route( "users/reset-mfa" ).withVerbs( "POST" ).to( "Users.resetMfa" );
+        // Profile image upload: conventional multipart form, not
+        // cbwire, because cbwire's FileUpload can't survive
+        // BoxLang's strict duplicate() during snapshot.
+        route( "users/:id/avatar/clear" ).withVerbs( "POST" ).to( "Users.clearAvatar" );
+        route( "users/:id/avatar" ).withVerbs( "POST" ).to( "Users.uploadAvatar" );
         route( "users/:id/edit" ).to( "Users.edit" );
         route( "users" ).to( "Users.index" );
 

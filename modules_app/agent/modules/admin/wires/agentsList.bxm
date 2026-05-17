@@ -147,6 +147,14 @@
                     </bx:if>
                     <bx:loop array="#local.result.rows#" item="local.row">
                         <bx:set local.isMe = ( local.row.id == local.me ) >
+                        <bx:set local.agentMini = {
+                            id        : local.row.id,
+                            firstName : local.row.firstName,
+                            lastName  : local.row.lastName,
+                            email     : local.row.email,
+                            hasAvatar : len( local.row.profileImageOriginalPath ?: "" ) > 0,
+                            uploadedAt: local.row.profileImageUploadedAt
+                        } >
                         <tr class="#local.row.isActive ? '' : 'table-secondary'#">
                             <td class="text-center">
                                 <bx:if !local.isMe>
@@ -157,12 +165,17 @@
                                 </bx:if>
                             </td>
                             <td>
-                                <a href="/agent/admin/users/#encodeForHTMLAttribute( local.row.id )#/edit" class="text-decoration-none">
-                                    #encodeForHTML( local.row.email )#
-                                </a>
-                                <bx:if local.isMe>
-                                    <span class="badge text-bg-info ms-1">You</span>
-                                </bx:if>
+                                <div class="d-flex align-items-center gap-2">
+                                    #view( view = "_partials/avatar", module = "core", args = { agent : local.agentMini, size : 32 } )#
+                                    <div>
+                                        <a href="/agent/admin/users/#encodeForHTMLAttribute( local.row.id )#/edit" class="text-decoration-none">
+                                            #encodeForHTML( local.row.email )#
+                                        </a>
+                                        <bx:if local.isMe>
+                                            <span class="badge text-bg-info ms-1">You</span>
+                                        </bx:if>
+                                    </div>
+                                </div>
                             </td>
                             <td>
                                 #encodeForHTML( trim( local.row.firstName & " " & local.row.lastName ) )#

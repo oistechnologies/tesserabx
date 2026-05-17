@@ -59,6 +59,12 @@ class {
         binder.map( "StorageVerifyService@core" )
               .to( "#moduleMapping#.models.StorageVerifyService" )
               .asSingleton();
+        binder.map( "ImageProcessingService@core" )
+              .to( "#moduleMapping#.models.ImageProcessingService" )
+              .asSingleton();
+        binder.map( "AvatarHelper@core" )
+              .to( "#moduleMapping#.models.AvatarHelper" )
+              .asSingleton();
         // Patched cbq DBProvider that quotes "reservedBy" in its
         // orderByRaw fragments. Required for Postgres + cbq.
         binder.map( "PostgresDBProvider@core" )

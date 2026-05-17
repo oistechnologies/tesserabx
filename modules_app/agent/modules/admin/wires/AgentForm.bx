@@ -51,7 +51,13 @@ class extends="cbwire.models.Component" {
         // Role state: array of role_keys currently granted.
         "grantedRoles"     : [],
 
-        // Transient UI feedback.
+        // Transient UI feedback. The avatar upload UI is rendered
+        // outside the wire (in views/users/edit.bxm) so the wire
+        // view stays under the cbwire+BoxLang preprocessor size
+        // limit (~15.5KB) and so cbwire's FileUpload object never
+        // enters the wire's data struct (BoxLang's duplicate() can't
+        // clone the ScheduledThreadPoolExecutor it transitively
+        // holds).
         "errors"           : [],
         "notice"           : "",
         "noticeKind"       : "info"

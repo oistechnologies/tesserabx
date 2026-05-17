@@ -38,6 +38,11 @@ class {
         // trying to reach /agent/admin/*).
         route( "unauthorized" ).to( "Session.unauthorized" );
 
+        // Avatar serving: /agent/avatars/:id/:size streams a stored
+        // thumbnail from CBFS. Declared before the catchall so the
+        // two-segment pattern wins.
+        route( "avatars/:id/:size" ).withVerbs( "GET" ).to( "Avatars.show" );
+
         // Contacts: agent-created provisioning. Most-specific patterns
         // first so /contacts/new and /contacts/:id/edit win over
         // /contacts/:id.

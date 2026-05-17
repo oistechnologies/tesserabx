@@ -1,0 +1,5 @@
+<bx:output>
+<bx:set local.agent = args.agent ?: { hasAvatar : false } >
+<bx:set local.size  = args.size  ?: 32 >
+#getInstance( "AvatarHelper@core" ).renderFromStruct( local.agent, local.size )#
+</bx:output>

@@ -1,0 +1,65 @@
+/**
+ * /agent/avatars/:id/:size — stream a stored thumbnail.
+ *
+ * Returns 404 when:
+ *   - the requested size is outside the allowed set (32, 64, 128, 256)
+ *   - the agent has no profile image uploaded
+ *   - the underlying CBFS file is missing
+ *
+ * Cache-Control: private, max-age=86400. Browsers cache for 24h but
+ * the avatar partial appends a ?v=<uploadedAtUnix> query string so a
+ * fresh upload bypasses that cache without needing to invalidate.
+ *
+ * cbSecurity already gates /agent/* on the "agent" role; no extra
+ * guards needed here.
+ */
+class {
+
+    property name="agentService" inject="AgentService@agent";
+    property name="cbfs"         inject="DiskService@cbfs";
+
+    variables.ALLOWED_SIZES = [ 32, 64, 128, 256 ];
+
+    function show( event, rc, prc ){
+        param rc.id   = "";
+        param rc.size = "";
+
+        var size = int( val( rc.size ) );
+        if ( !arrayFindNoCase( variables.ALLOWED_SIZES, size ) ) {
+            return notFound( event );
+        }
+        if ( !len( rc.id ) ) return notFound( event );
+
+        var agent = agentService.getAgentById( rc.id );
+        if ( isNull( agent ) ) return notFound( event );
+        if ( !len( agent.getProfileImageOriginalPath() ?: "" ) ) return notFound( event );
+
+        var path = "agents/" & rc.id & "/profile/" & size & ".jpg";
+        var disk = cbfs.defaultDisk();
+        if ( !disk.exists( path ) ) return notFound( event );
+
+        var raw = disk.get( path );
+        // disk.get() returns String for the local provider and byte[]
+        // for the S3 family. Coerce to a byte[] before streaming so
+        // Undertow writes raw bytes, not character data.
+        var bytes = isBinary( raw )
+            ? raw
+            : ( isInstanceOf( raw, "[B" )
+                ? raw
+                : charsetDecode( toString( raw ), "ISO-8859-1" ) );
+
+        event.setHTTPHeader( name = "Cache-Control", value = "private, max-age=86400" );
+        event.renderData(
+            type        = "plain",
+            data        = bytes,
+            contentType = "image/jpeg",
+            isBinary    = true
+        );
+    }
+
+    private void function notFound( event ){
+        event.setHTTPHeader( statusCode = 404, statusText = "Not Found" );
+        event.renderData( type = "plain", data = "", statusCode = 404 );
+    }
+
+}

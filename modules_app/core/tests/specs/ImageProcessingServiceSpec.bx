@@ -1,0 +1,166 @@
+/**
+ * ImageProcessingServiceSpec: validation + thumbnail generation +
+ * cleanup, executed against the local-disk CBFS provider.
+ *
+ * Test fixtures are synthesized at spec time via ImageIO so the
+ * repo doesn't carry binary blobs.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc  = getController().getWireBox().getInstance( "ImageProcessingService@core" );
+        variables.cbfs = getController().getWireBox().getInstance( "DiskService@cbfs" );
+    }
+
+    function run(){
+        describe( "ImageProcessingService", function(){
+
+            describe( "validateUpload", function(){
+
+                it( "accepts a valid JPEG fixture", function(){
+                    var path = writeTempJpeg( 200, 200 );
+                    var v = variables.svc.validateUpload( path, "image/jpeg" );
+                    expect( v.ok    ).toBeTrue();
+                    expect( v.error ).toBeEmpty();
+                    fileDelete( path );
+                } );
+
+                it( "rejects unsupported extensions", function(){
+                    var path = getTempDirectory() & "/img-spec-" & createUUID() & ".bmp";
+                    fileWrite( path, "fake-bytes" );
+                    var v = variables.svc.validateUpload( path, "image/bmp" );
+                    expect( v.ok ).toBeFalse();
+                    expect( v.error ).toInclude( "Unsupported" );
+                    fileDelete( path );
+                } );
+
+                it( "rejects a non-image content type", function(){
+                    var path = writeTempJpeg( 50, 50 );
+                    var v = variables.svc.validateUpload( path, "application/pdf" );
+                    expect( v.ok ).toBeFalse();
+                    expect( v.error ).toInclude( "content-type" );
+                    fileDelete( path );
+                } );
+
+            } );
+
+            describe( "processProfileImage", function(){
+
+                it( "writes the original plus all four square thumbnails", function(){
+                    var agentId = "spec-img-" & replace( createUUID(), "-", "", "all" );
+                    var path    = writeTempJpeg( 400, 200 );  // wide source
+
+                    var paths = variables.svc.processProfileImage( agentId, path, "image/jpeg" );
+
+                    expect( paths ).toHaveKey( "original" );
+                    expect( paths ).toHaveKey( "32" );
+                    expect( paths ).toHaveKey( "64" );
+                    expect( paths ).toHaveKey( "128" );
+                    expect( paths ).toHaveKey( "256" );
+
+                    var disk = variables.cbfs.defaultDisk();
+                    expect( disk.exists( paths.original ) ).toBeTrue();
+                    for ( var size in [ 32, 64, 128, 256 ] ) {
+                        var pkey = toString( size );
+                        expect( disk.exists( paths[ pkey ] ) ).toBeTrue();
+
+                        // Each thumbnail decodes as a square of the
+                        // requested size.
+                        var bytes  = asBinary( disk.get( paths[ pkey ] ) );
+                        var dims   = readPng( bytes );
+                        expect( dims.width  ).toBe( size );
+                        expect( dims.height ).toBe( size );
+                    }
+
+                    variables.svc.deleteProfileImages( agentId );
+                    fileDelete( path );
+                } );
+
+                it( "re-upload replaces previous thumbnails (no orphans on different aspect ratio)", function(){
+                    var agentId = "spec-img-" & replace( createUUID(), "-", "", "all" );
+                    var wide    = writeTempJpeg( 400, 100 );
+                    var tall    = writeTempJpeg( 100, 400 );
+
+                    variables.svc.processProfileImage( agentId, wide, "image/jpeg" );
+                    var paths = variables.svc.processProfileImage( agentId, tall, "image/jpeg" );
+                    var disk  = variables.cbfs.defaultDisk();
+                    expect( disk.exists( paths.original ) ).toBeTrue();
+
+                    variables.svc.deleteProfileImages( agentId );
+                    fileDelete( wide );
+                    fileDelete( tall );
+                } );
+
+            } );
+
+            describe( "deleteProfileImages", function(){
+
+                it( "removes every file under the agent's profile prefix", function(){
+                    var agentId = "spec-img-" & replace( createUUID(), "-", "", "all" );
+                    var path    = writeTempJpeg( 100, 100 );
+
+                    var paths = variables.svc.processProfileImage( agentId, path, "image/jpeg" );
+                    variables.svc.deleteProfileImages( agentId );
+
+                    var disk = variables.cbfs.defaultDisk();
+                    expect( disk.exists( paths.original ) ).toBeFalse();
+                    for ( var size in [ 32, 64, 128, 256 ] ) {
+                        expect( disk.exists( paths[ toString( size ) ] ) ).toBeFalse();
+                    }
+                    fileDelete( path );
+                } );
+
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    /**
+     * Synthesize a solid-color JPEG at the requested dimensions and
+     * write it to the temp dir. Returns the absolute file path.
+     */
+    private string function writeTempJpeg( required numeric width, required numeric height ){
+        var BufferedImage = createObject( "java", "java.awt.image.BufferedImage" );
+        var img = BufferedImage.init( arguments.width, arguments.height, BufferedImage.TYPE_INT_RGB );
+        var g   = img.createGraphics();
+        try {
+            var Color = createObject( "java", "java.awt.Color" );
+            g.setColor( Color.RED );
+            g.fillRect( 0, 0, arguments.width, arguments.height );
+        } finally {
+            g.dispose();
+        }
+        var path = getTempDirectory() & "/img-spec-" & createUUID() & ".jpg";
+        var fos  = createObject( "java", "java.io.FileOutputStream" ).init( path );
+        try {
+            createObject( "java", "javax.imageio.ImageIO" ).write( img, "jpg", fos );
+        } finally {
+            fos.close();
+        }
+        return path;
+    }
+
+    /**
+     * Read raw bytes and return { width, height } using ImageIO. Works
+     * for JPEG, PNG, GIF, etc.
+     */
+    private struct function readPng( required any bytes ){
+        var bais = createObject( "java", "java.io.ByteArrayInputStream" ).init( arguments.bytes );
+        var img  = createObject( "java", "javax.imageio.ImageIO" ).read( bais );
+        return { width : img.getWidth(), height : img.getHeight() };
+    }
+
+    /**
+     * Normalize a disk.get() result to a Java byte[].
+     */
+    private any function asBinary( required any value ){
+        if ( isBinary( arguments.value ) ) return arguments.value;
+        if ( isInstanceOf( arguments.value, "[B" ) ) return arguments.value;
+        return charsetDecode( toString( arguments.value ), "ISO-8859-1" );
+    }
+
+}
