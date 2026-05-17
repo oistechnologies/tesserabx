@@ -1,0 +1,323 @@
+/**
+ * AttachmentSecuritySpec: Phase 8.2 access-check, soft-delete,
+ * and magic-byte validation coverage.
+ *
+ * Fixtures bypass addAttachment so the spec doesn't depend on the
+ * default CBFS provider being local. We INSERT attachment rows
+ * directly and only call read paths that don't require CBFS to be
+ * working in the test session.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.tickets  = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "Attachment security", function(){
+
+            it( "agent viewer is allowed by getAttachmentForViewer on a normal attachment", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                var got = variables.tickets.getAttachmentForViewer(
+                    attId,
+                    { type : "agent", id : f.agentId }
+                );
+                expect( got.getId() ).toBe( attId );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "contact in the same org is allowed on a public attachment", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                var got = variables.tickets.getAttachmentForViewer(
+                    attId,
+                    { type : "contact", id : f.contact.getId() }
+                );
+                expect( got.getId() ).toBe( attId );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "contact from a different org is denied", function(){
+                var f      = makeFixture();
+                var other  = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                expect( function(){
+                    variables.tickets.getAttachmentForViewer(
+                        attId,
+                        { type : "contact", id : other.contact.getId() }
+                    );
+                } ).toThrow( type = "TicketsService.AttachmentAccessDenied" );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+                cleanupFixture( other, [] );
+            } );
+
+            it( "contact is denied on internal-note attachments", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), true );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                expect( function(){
+                    variables.tickets.getAttachmentForViewer(
+                        attId,
+                        { type : "contact", id : f.contact.getId() }
+                    );
+                } ).toThrow( type = "TicketsService.AttachmentAccessDenied" );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "contact is denied on soft-deleted attachments", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                variables.tickets.softDeleteAttachment(
+                    attachmentId : attId,
+                    agentId      : f.agentId,
+                    reason       : "spec - clearly inappropriate"
+                );
+                expect( function(){
+                    variables.tickets.getAttachmentForViewer(
+                        attId,
+                        { type : "contact", id : f.contact.getId() }
+                    );
+                } ).toThrow( type = "TicketsService.AttachmentAccessDenied" );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "softDeleteAttachment rejects an empty reason", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                expect( function(){
+                    variables.tickets.softDeleteAttachment(
+                        attachmentId : attId,
+                        agentId      : f.agentId,
+                        reason       : "   "
+                    );
+                } ).toThrow( type = "TicketsService.MissingDeletionReason" );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "softDeleteAttachment writes the audit row", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var msgId  = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var attId  = insertAttachment( ticket.getId(), msgId, f.contact.getId(), f.org.getId() );
+
+                variables.tickets.softDeleteAttachment(
+                    attachmentId : attId,
+                    agentId      : f.agentId,
+                    reason       : "spec - off topic"
+                );
+                var rows = queryExecute(
+                    "SELECT id FROM audit_events
+                     WHERE  event_type = 'ticket.attachment_deleted'
+                       AND  actor_id   = :actor",
+                    { actor : f.agentId }
+                );
+                expect( rows.recordCount ).toBeGTE( 1 );
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "listAttachmentsForTicket filters internal attachments for contact viewers", function(){
+                var f      = makeFixture();
+                var ticket = makeTicket( f );
+                var publicMsg   = makeMessage( ticket.getId(), f.contact.getId(), false );
+                var internalMsg = makeMessage( ticket.getId(), f.contact.getId(), true );
+                var attPub      = insertAttachment( ticket.getId(), publicMsg,   f.contact.getId(), f.org.getId() );
+                var attInt      = insertAttachment( ticket.getId(), internalMsg, f.contact.getId(), f.org.getId() );
+
+                var list = variables.tickets.listAttachmentsForTicket(
+                    ticket.getId(),
+                    { type : "contact", id : f.contact.getId() }
+                );
+                var ids = [];
+                for ( var a in list ) ids.append( a.getId() );
+                expect( arrayFindNoCase( ids, attPub ) ).toBeGTE( 1 );
+                expect( arrayFindNoCase( ids, attInt ) ).toBe( 0 );
+
+                cleanupFixture( f, [ ticket.getId() ] );
+            } );
+
+            it( "magic-byte validation rejects a ZIP file disguised as .png", function(){
+                var path = getTempDirectory() & "/spec-att-" & createUUID() & ".png";
+                var fos = createObject( "java", "java.io.FileOutputStream" ).init( path );
+                try {
+                    // ZIP local-file-header magic: PK \x03 \x04 + padding
+                    fos.write( javaCast( "byte[]", [ 80, 75, 3, 4, 0, 0, 0, 0 ] ) );
+                } finally {
+                    fos.close();
+                }
+                var v = variables.tickets.validateUpload(
+                    filename    : "evil.png",
+                    sizeBytes   : getFileInfo( path ).size,
+                    sourcePath  : path,
+                    contentType : "image/png"
+                );
+                expect( v.ok ).toBeFalse();
+                expect( v.error ).toInclude( "do not match" );
+                fileDelete( path );
+            } );
+
+            it( "validateUpload accepts a real JPEG", function(){
+                var path = writeTempJpeg();
+                var v = variables.tickets.validateUpload(
+                    filename    : "real.jpg",
+                    sizeBytes   : getFileInfo( path ).size,
+                    sourcePath  : path,
+                    contentType : "image/jpeg"
+                );
+                expect( v.ok ).toBeTrue();
+                fileDelete( path );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Att Spec Org " & createUUID(),
+            slug : "att-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "att-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var agentId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :hash, false, true )",
+            {
+                id    : agentId,
+                email : "att-spec-agent-" & createUUID() & "@example.com",
+                hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
+        return { org : org, contact : contact, agentId : agentId };
+    }
+
+    private any function makeTicket( required struct fixture ){
+        return variables.tickets.createTicket( {
+            requesterContactId : arguments.fixture.contact.getId(),
+            organizationId     : arguments.fixture.org.getId(),
+            subject            : "Att spec ticket",
+            initialMessage     : "Body",
+            source             : "agent"
+        } );
+    }
+
+    private string function makeMessage(
+        required string ticketId,
+        required string contactId,
+        required boolean isInternal
+    ){
+        var m = variables.tickets.addMessage( {
+            ticketId        : arguments.ticketId,
+            body            : arguments.isInternal ? "internal note" : "public reply",
+            authorContactId : arguments.contactId,
+            isInternal      : arguments.isInternal
+        } );
+        return m.getId();
+    }
+
+    /**
+     * Insert a fake attachment row directly. Bypasses CBFS entirely
+     * so the spec is decoupled from the default-disk provider.
+     */
+    private string function insertAttachment(
+        required string ticketId,
+        required string messageId,
+        required string contactId,
+        required string organizationId
+    ){
+        var id = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO attachments
+                ( id, ticket_id, message_id, organization_id, uploader_contact_id,
+                  original_filename, content_type, size_bytes, cbfs_path,
+                  thumbnail_status )
+             VALUES
+                ( :id, :tid, :mid, :oid, :cid,
+                  :fn, :ct, cast( :sz as bigint ), :path,
+                  :ts )",
+            {
+                id   : id,
+                tid  : arguments.ticketId,
+                mid  : arguments.messageId,
+                oid  : arguments.organizationId,
+                cid  : arguments.contactId,
+                fn   : "spec.jpg",
+                ct   : "image/jpeg",
+                sz   : 1024,
+                path : "org/" & arguments.organizationId & "/tickets/" & arguments.ticketId & "/" & id & ".jpg",
+                ts   : "pending"
+            }
+        );
+        return id;
+    }
+
+    private string function writeTempJpeg(){
+        var BufferedImage = createObject( "java", "java.awt.image.BufferedImage" );
+        var img = BufferedImage.init( 60, 60, BufferedImage.TYPE_INT_RGB );
+        var g   = img.createGraphics();
+        try {
+            g.setColor( createObject( "java", "java.awt.Color" ).GREEN );
+            g.fillRect( 0, 0, 60, 60 );
+        } finally {
+            g.dispose();
+        }
+        var path = getTempDirectory() & "/spec-att-" & createUUID() & ".jpg";
+        var fos  = createObject( "java", "java.io.FileOutputStream" ).init( path );
+        try {
+            createObject( "java", "javax.imageio.ImageIO" ).write( img, "jpg", fos );
+        } finally {
+            fos.close();
+        }
+        return path;
+    }
+
+    private void function cleanupFixture( required struct fixture, array ticketIds = [] ){
+        for ( var tid in arguments.ticketIds ) {
+            queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM attachments WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM tickets WHERE id = :id", { id : tid } );
+        }
+        if ( !structIsEmpty( arguments.fixture ) ) {
+            queryExecute( "DELETE FROM audit_events WHERE actor_id = :id", { id : arguments.fixture.agentId } );
+            queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+            queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+            queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.fixture.agentId } );
+        }
+    }
+
+}

@@ -1,13 +1,14 @@
 /**
  * Attachment: one file stored against a Ticket and optionally a
- * specific TicketMessage. The bytes live in the configured CBFS
- * disk; this row records the relative path plus the original
- * filename, content type, and byte count.
+ * specific TicketMessage. The bytes live on the configured SECURE
+ * CBFS disk; this row records the relative path plus the original
+ * filename, content type, byte count, the org for tenant scoping,
+ * the soft-delete trail, and the thumbnail-generation state.
  *
- * Phase 1 enforces size and content-type limits in the service
- * layer based on .env config (UPLOAD_MAX_BYTES,
- * UPLOAD_ALLOWED_EXTENSIONS). Malware scanning is explicitly out
- * of scope for Phase 1 per the build plan.
+ * Access control runs in TicketsService (canViewAttachment); there
+ * is no Quick global scope on this entity. Service callers must
+ * always pass through the chokepoint so the audit trail is
+ * complete and the 403 path is uniform.
  */
 class
     extends="tesserabx.modules.contacts.models.TesseraBXEntity"
@@ -16,15 +17,21 @@ class
 {
 
     property name="id";
-    property name="ticketId"            column="ticket_id";
-    property name="messageId"           column="message_id";
-    property name="uploaderContactId"   column="uploader_contact_id";
-    property name="uploaderAgentId"     column="uploader_agent_id";
-    property name="originalFilename"    column="original_filename";
-    property name="contentType"         column="content_type";
-    property name="sizeBytes"           column="size_bytes";
-    property name="cbfsPath"            column="cbfs_path";
-    property name="createdAt"           column="created_at" sqltype="timestamp";
+    property name="ticketId"               column="ticket_id";
+    property name="messageId"              column="message_id";
+    property name="organizationId"         column="organization_id";
+    property name="uploaderContactId"      column="uploader_contact_id";
+    property name="uploaderAgentId"        column="uploader_agent_id";
+    property name="originalFilename"       column="original_filename";
+    property name="contentType"            column="content_type";
+    property name="sizeBytes"              column="size_bytes";
+    property name="cbfsPath"               column="cbfs_path";
+    property name="createdAt"              column="created_at" sqltype="timestamp";
+    property name="deletedAt"              column="deleted_at" sqltype="timestamp";
+    property name="deletedByAgentId"       column="deleted_by_agent_id";
+    property name="deletionReason"         column="deletion_reason";
+    property name="thumbnailStatus"        column="thumbnail_status";
+    property name="thumbnailGeneratedAt"   column="thumbnail_generated_at" sqltype="timestamp";
 
     function ticket(){
         return belongsTo( "Ticket@tickets", "ticket_id" );
@@ -32,6 +39,34 @@ class
 
     function message(){
         return belongsTo( "TicketMessage@tickets", "message_id" );
+    }
+
+    /**
+     * True when the extension is in the image whitelist that
+     * ImageProcessingService can thumbnail.
+     */
+    public boolean function isImage(){
+        var ext = lCase( listLast( getOriginalFilename() ?: "", "." ) );
+        return arrayFindNoCase( [ "jpg", "jpeg", "png", "gif", "webp" ], ext ) > 0;
+    }
+
+    /**
+     * True when the soft-delete columns are populated.
+     */
+    public boolean function isDeleted(){
+        var d = getDeletedAt();
+        return !isNull( d ) && len( toString( d ) );
+    }
+
+    /**
+     * Human-readable size. 1.4 MB / 312 KB / 78 B style.
+     */
+    public string function displaySize(){
+        var b = val( getSizeBytes() ?: 0 );
+        if ( b < 1024 )         return numberFormat( b )         & " B";
+        if ( b < 1048576 )      return numberFormat( b / 1024,         "0.0" ) & " KB";
+        if ( b < 1073741824 )   return numberFormat( b / 1048576,      "0.0" ) & " MB";
+        return numberFormat( b / 1073741824, "0.00" ) & " GB";
     }
 
 }

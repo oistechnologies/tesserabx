@@ -144,11 +144,65 @@ class singleton=true {
             .get();
     }
 
-    public array function listAttachmentsForTicket( required string ticketId ){
-        return wirebox.getInstance( "Attachment@tickets" )
-            .where( "ticket_id", arguments.ticketId )
-            .orderBy( "created_at", "asc" )
-            .get();
+    /**
+     * Attachments visible to the supplied viewer.
+     *
+     * viewer is a struct with at least .type ("agent" or "contact")
+     * and .id. Agents see all non-deleted attachments AND deleted
+     * rows (so the UI can render a "deleted" badge with the audit
+     * trail). Contacts see only non-deleted, non-internal, same-org
+     * attachments. The caller must already have proven they're
+     * allowed to see the parent ticket; this method scopes within
+     * that ticket.
+     */
+    public array function listAttachmentsForTicket(
+        required string ticketId,
+        struct viewer = { type : "agent", id : "" }
+    ){
+        var q = wirebox.getInstance( "Attachment@tickets" )
+            .where( "ticket_id", arguments.ticketId );
+
+        if ( ( arguments.viewer.type ?: "" ) == "contact" ) {
+            // Hide soft-deleted from contacts entirely.
+            q = q.whereNull( "deleted_at" );
+            // Strip attachments belonging to internal notes.
+            q = q.whereNotExists( function( q2 ){
+                q2.from( "ticket_messages tm" )
+                    .whereColumn( "tm.id", "attachments.message_id" )
+                    .where( "tm.is_internal", true );
+            } );
+        }
+
+        return q.orderBy( "created_at", "asc" ).get();
+    }
+
+    /**
+     * Look up a single attachment and enforce viewer access.
+     * Throws TicketsService.AttachmentNotFound on missing,
+     * TicketsService.AttachmentAccessDenied on access fail.
+     *
+     * The single chokepoint every download handler uses.
+     */
+    public any function getAttachmentForViewer(
+        required string attachmentId,
+        required struct viewer
+    ){
+        var a = wirebox.getInstance( "Attachment@tickets" )
+            .where( "id", arguments.attachmentId )
+            .first();
+        if ( isNull( a ) ) {
+            throw(
+                type    : "TicketsService.AttachmentNotFound",
+                message : "No attachment with id [" & arguments.attachmentId & "]."
+            );
+        }
+        if ( !canViewAttachment( a, arguments.viewer ) ) {
+            throw(
+                type    : "TicketsService.AttachmentAccessDenied",
+                message : "Viewer cannot access this attachment."
+            );
+        }
+        return a;
     }
 
     /**
@@ -601,35 +655,64 @@ class singleton=true {
 
     /**
      * Persist an uploaded file against a ticket (and optionally a
-     * specific message). Caller passes the temporary path on disk
-     * (where cffile uploaded it) plus its original filename, content
-     * type, and size. The service validates against the
-     * UPLOAD_MAX_BYTES / UPLOAD_ALLOWED_EXTENSIONS environment limits,
-     * copies the bytes into CBFS under tickets/<ticketId>/, and
-     * records the Attachment row.
+     * specific message). Caller passes the temp path on disk + the
+     * original filename + content type + size + uploader id.
+     *
+     * The service:
+     *   - validates extension, size, and magic bytes
+     *   - writes to the SECURE CBFS disk at
+     *     org/<orgId>/tickets/<ticketId>/<uuid>.<ext>
+     *     (or tickets/_no_org/<ticketId>/... when accountless)
+     *   - records the Attachment row with organization_id +
+     *     thumbnail_status
+     *   - emits ticket.attachment_added through both the per-ticket
+     *     timeline and the central audit log
      */
     public any function addAttachment( required struct data ){
         var t = getTicket( arguments.data.ticketId );
         if ( isNull( t ) ) {
-            throw( type="TicketsService.UnknownTicket", message="No ticket with id [#arguments.data.ticketId#]." );
+            throw(
+                type    : "TicketsService.UnknownTicket",
+                message : "No ticket with id [" & arguments.data.ticketId & "]."
+            );
         }
-        var filename = arguments.data.originalFilename;
-        var size     = int( arguments.data.sizeBytes );
-        var ctype    = arguments.data.contentType ?: "application/octet-stream";
+        var filename    = arguments.data.originalFilename;
+        var size        = int( arguments.data.sizeBytes );
+        var ctype       = arguments.data.contentType ?: "application/octet-stream";
+        var sourcePath  = arguments.data.sourcePath;
 
-        validateUpload( filename, size );
-
-        var ext   = listLast( filename, "." );
-        var path  = "tickets/" & t.getId() & "/" & newId() & "." & ext;
-        cbfs.defaultDisk().create(
-            path     = path,
-            contents = fileRead( arguments.data.sourcePath, "binary" ),
-            overwrite = true
+        var validation = validateUpload(
+            filename    : filename,
+            sizeBytes   : size,
+            sourcePath  : sourcePath,
+            contentType : ctype
         );
+        if ( !validation.ok ) {
+            throw(
+                type    : "TicketsService.UploadRejected",
+                message : validation.error
+            );
+        }
+
+        var orgId = t.getOrganizationId() ?: "";
+        var orgSegment = len( orgId ) ? ( "org/" & orgId ) : "tickets/_no_org";
+        var ext   = lCase( listLast( filename, "." ) );
+        var path  = orgSegment & "/tickets/" & t.getId() & "/" & newId() & "." & ext;
+
+        cbfs.defaultDisk().create(
+            path      : path,
+            contents  : fileReadBinary( sourcePath ),
+            overwrite : true,
+            mode      : "600"
+        );
+
+        var imageExts = [ "jpg", "jpeg", "png", "gif", "webp" ];
+        var thumbStatus = arrayFindNoCase( imageExts, ext ) > 0 ? "pending" : "unsupported";
 
         var a = wirebox.getInstance( "Attachment@tickets" );
         a.setId( newId() );
         a.setTicketId( t.getId() );
+        if ( len( orgId ) ) a.setOrganizationId( orgId );
         if ( len( arguments.data.messageId ?: "" ) ) a.setMessageId( arguments.data.messageId );
         if ( len( arguments.data.uploaderAgentId ?: "" ) ) a.setUploaderAgentId( arguments.data.uploaderAgentId );
         if ( len( arguments.data.uploaderContactId ?: "" ) ) a.setUploaderContactId( arguments.data.uploaderContactId );
@@ -637,56 +720,325 @@ class singleton=true {
         a.setContentType( ctype );
         a.setSizeBytes( size );
         a.setCbfsPath( path );
+        a.setThumbnailStatus( thumbStatus );
         a.save();
 
         touchTicket( t );
 
+        var actorType = len( arguments.data.uploaderAgentId ?: "" ) ? "agent" : "contact";
+        var actorId   = arguments.data.uploaderAgentId ?: arguments.data.uploaderContactId ?: "";
+        var metadata  = {
+            "attachmentId"   : a.getId(),
+            "filename"       : filename,
+            "sizeBytes"      : size,
+            "contentType"    : ctype,
+            "organizationId" : orgId
+        };
         recordTicketEvent(
             ticketId  : t.getId(),
             eventType : "ticket.attachment_added",
-            actorType : len( arguments.data.uploaderAgentId ?: "" ) ? "agent" : "contact",
-            actorId   : arguments.data.uploaderAgentId ?: arguments.data.uploaderContactId ?: "",
-            metadata  : {
+            actorType : actorType,
+            actorId   : actorId,
+            metadata  : metadata
+        );
+        recordAudit(
+            eventType      : "ticket.attachment_added",
+            entityId       : t.getId(),
+            organizationId : orgId,
+            actorType      : actorType,
+            actorId        : actorId,
+            metadata       : metadata
+        );
+
+        return a;
+    }
+
+    /**
+     * Read raw bytes for an attachment through the access-check
+     * chokepoint. Records ticket.attachment_downloaded on success.
+     * Callers stream the returned bytes; the CBFS path never leaves
+     * the service layer.
+     */
+    public any function readAttachmentBytes(
+        required string attachmentId,
+        required struct viewer
+    ){
+        var a = getAttachmentForViewer( arguments.attachmentId, arguments.viewer );
+
+        // Soft-deleted: agents see metadata in the listing but get
+        // a 403 on the bytes. canViewAttachment enforces; this is
+        // defense-in-depth.
+        if ( a.isDeleted() ) {
+            throw(
+                type    : "TicketsService.AttachmentAccessDenied",
+                message : "Attachment has been deleted."
+            );
+        }
+
+        var bytes = cbfs.defaultDisk().get( a.getCbfsPath() );
+
+        recordAudit(
+            eventType      : "ticket.attachment_downloaded",
+            entityId       : a.getTicketId(),
+            organizationId : a.getOrganizationId() ?: "",
+            actorType      : arguments.viewer.type ?: "",
+            actorId        : arguments.viewer.id ?: "",
+            metadata       : {
                 "attachmentId" : a.getId(),
-                "filename"     : filename,
-                "sizeBytes"    : size,
-                "contentType"  : ctype
+                "ticketId"     : a.getTicketId(),
+                "viewerType"   : arguments.viewer.type ?: "",
+                "viewerId"     : arguments.viewer.id ?: ""
+            }
+        );
+
+        return bytes;
+    }
+
+    /**
+     * Soft delete: stamp the trail columns, record the audit event,
+     * leave the CBFS bytes in place. Agents only; a non-empty reason
+     * is required.
+     */
+    public any function softDeleteAttachment(
+        required string attachmentId,
+        required string agentId,
+        required string reason
+    ){
+        if ( !len( trim( arguments.reason ) ) ) {
+            throw(
+                type    : "TicketsService.MissingDeletionReason",
+                message : "Deletion reason is required."
+            );
+        }
+        var a = wirebox.getInstance( "Attachment@tickets" )
+            .where( "id", arguments.attachmentId )
+            .first();
+        if ( isNull( a ) ) {
+            throw(
+                type    : "TicketsService.AttachmentNotFound",
+                message : "No attachment with id [" & arguments.attachmentId & "]."
+            );
+        }
+        if ( a.isDeleted() ) {
+            // Idempotent: re-deleting is a no-op.
+            return a;
+        }
+        a.setDeletedAt( now() );
+        a.setDeletedByAgentId( arguments.agentId );
+        a.setDeletionReason( trim( arguments.reason ) );
+        a.save();
+
+        recordTicketEvent(
+            ticketId  : a.getTicketId(),
+            eventType : "ticket.attachment_deleted",
+            actorType : "agent",
+            actorId   : arguments.agentId,
+            metadata  : {
+                "attachmentId"   : a.getId(),
+                "ticketId"       : a.getTicketId(),
+                "deletionReason" : trim( arguments.reason )
+            }
+        );
+        recordAudit(
+            eventType      : "ticket.attachment_deleted",
+            entityId       : a.getTicketId(),
+            organizationId : a.getOrganizationId() ?: "",
+            actorType      : "agent",
+            actorId        : arguments.agentId,
+            metadata       : {
+                "attachmentId"   : a.getId(),
+                "ticketId"       : a.getTicketId(),
+                "deletionReason" : trim( arguments.reason )
             }
         );
         return a;
     }
 
     /**
-     * Read the raw bytes for an attachment back from CBFS. Callers
-     * stream this to the client; the path itself never reaches a
-     * browser.
+     * Mark a queued thumbnail "ready" once the bytes are persisted
+     * on the CBFS path <originalPath>.thumb.jpg. Called by Phase 8.3
+     * thumbnail pipeline.
      */
-    public any function readAttachmentBytes( required string attachmentId ){
+    public void function markThumbnailReady( required string attachmentId ){
         var a = wirebox.getInstance( "Attachment@tickets" )
             .where( "id", arguments.attachmentId )
             .first();
-        if ( isNull( a ) ) {
-            throw( type="TicketsService.UnknownAttachment", message="No attachment with id [#arguments.attachmentId#]." );
-        }
-        return cbfs.defaultDisk().get( a.getCbfsPath() );
+        if ( isNull( a ) ) return;
+        a.setThumbnailStatus( "ready" );
+        a.setThumbnailGeneratedAt( now() );
+        a.save();
+        recordAudit(
+            eventType      : "ticket.attachment_thumbnail_generated",
+            entityId       : a.getTicketId(),
+            organizationId : a.getOrganizationId() ?: "",
+            metadata       : {
+                "attachmentId" : a.getId(),
+                "ticketId"     : a.getTicketId()
+            }
+        );
     }
 
-    private void function validateUpload( required string filename, required numeric sizeBytes ){
+    public void function markThumbnailFailed( required string attachmentId ){
+        var a = wirebox.getInstance( "Attachment@tickets" )
+            .where( "id", arguments.attachmentId )
+            .first();
+        if ( isNull( a ) ) return;
+        a.setThumbnailStatus( "failed" );
+        a.save();
+    }
+
+    /**
+     * Validate an upload: extension whitelist, size cap, and
+     * magic-byte sanity check against the declared content type.
+     *
+     * Returns { ok : boolean, error : string }. Does not throw.
+     * The caller (handler or service entry) decides whether to
+     * surface as a flash or to throw.
+     */
+    public struct function validateUpload(
+        required string filename,
+        required numeric sizeBytes,
+        string sourcePath  = "",
+        string contentType = ""
+    ){
         var maxBytes = int( getSystemSetting( "UPLOAD_MAX_BYTES", "26214400" ) );
         if ( arguments.sizeBytes > maxBytes ) {
-            throw(
-                type    = "TicketsService.UploadTooLarge",
-                message = "Upload exceeds configured maximum (#maxBytes# bytes)."
-            );
+            return { ok : false, error : "Upload exceeds configured maximum (" & maxBytes & " bytes)." };
         }
-        var allowed = listToArray( getSystemSetting( "UPLOAD_ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,txt,csv,xls,xlsx,doc,docx,zip" ) );
+        var allowed = listToArray(
+            getSystemSetting( "UPLOAD_ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,txt,csv,xls,xlsx,doc,docx,zip" )
+        );
         var ext = lCase( listLast( arguments.filename, "." ) );
         if ( !arrayFindNoCase( allowed, ext ) ) {
-            throw(
-                type    = "TicketsService.UploadTypeForbidden",
-                message = "File type [.#ext#] is not in the allowed list."
-            );
+            return { ok : false, error : "File type [." & ext & "] is not allowed." };
         }
+        // Magic-byte sniff. We can only verify what we have a
+        // signature for; unknown-but-allowed extensions pass through
+        // (text/csv/etc. have no reliable header). Mismatches between
+        // declared content type / extension and actual bytes are the
+        // common attack: rename evil.exe to evil.pdf.
+        if ( len( arguments.sourcePath ) && fileExists( arguments.sourcePath ) ) {
+            var sniffed = sniffMimeType( arguments.sourcePath );
+            if ( len( sniffed ) && !mimeMatches( sniffed, ext, arguments.contentType ) ) {
+                return {
+                    ok    : false,
+                    error : "File contents do not match declared type (." & ext & " / " & arguments.contentType & " vs detected " & sniffed & ")."
+                };
+            }
+        }
+        return { ok : true, error : "" };
+    }
+
+    /**
+     * Read the first 16 bytes of a file and return the MIME family
+     * we can identify. Empty string when unknown (caller treats that
+     * as "no opinion" and passes validation).
+     */
+    private string function sniffMimeType( required string sourcePath ){
+        try {
+            var raf = createObject( "java", "java.io.RandomAccessFile" ).init( arguments.sourcePath, "r" );
+            try {
+                // Allocate the byte[] directly via Array.newInstance
+                // because the newByteArray BIF isn't reliably present
+                // in every BoxLang module set.
+                var buf = createObject( "java", "java.lang.reflect.Array" )
+                    .newInstance( createObject( "java", "java.lang.Byte" ).TYPE, 16 );
+                var read = raf.read( buf );
+                if ( read < 4 ) return "";
+                var b0 = bitAnd( buf[ 1 ], 255 );
+                var b1 = bitAnd( buf[ 2 ], 255 );
+                var b2 = bitAnd( buf[ 3 ], 255 );
+                var b3 = bitAnd( buf[ 4 ], 255 );
+                // JPEG: FF D8 FF
+                if ( b0 == 255 && b1 == 216 && b2 == 255 ) return "image/jpeg";
+                // PNG: 89 50 4E 47
+                if ( b0 == 137 && b1 == 80 && b2 == 78 && b3 == 71 ) return "image/png";
+                // GIF: 47 49 46 38
+                if ( b0 == 71 && b1 == 73 && b2 == 70 && b3 == 56 ) return "image/gif";
+                // PDF: 25 50 44 46  ("%PDF")
+                if ( b0 == 37 && b1 == 80 && b2 == 68 && b3 == 70 ) return "application/pdf";
+                // ZIP / OOXML (docx/xlsx/pptx are zip containers):
+                // 50 4B 03 04
+                if ( b0 == 80 && b1 == 75 && b2 == 3 && b3 == 4 ) return "application/zip";
+                // WebP: RIFF....WEBP — bytes 0-3 = "RIFF", 8-11 = "WEBP"
+                if ( b0 == 82 && b1 == 73 && b2 == 70 && b3 == 70 && read >= 12 ) {
+                    var b8  = bitAnd( buf[ 9  ], 255 );
+                    var b9  = bitAnd( buf[ 10 ], 255 );
+                    var b10 = bitAnd( buf[ 11 ], 255 );
+                    var b11 = bitAnd( buf[ 12 ], 255 );
+                    if ( b8 == 87 && b9 == 69 && b10 == 66 && b11 == 80 ) return "image/webp";
+                }
+                return "";
+            } finally {
+                raf.close();
+            }
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    /**
+     * True when the sniffed MIME is consistent with the declared
+     * extension + content-type. Allows the common synonym pairs
+     * (jpg/jpeg, zip/office-docs).
+     */
+    private boolean function mimeMatches(
+        required string sniffed,
+        required string ext,
+        required string declaredContentType
+    ){
+        var s = lCase( arguments.sniffed );
+        var e = lCase( arguments.ext );
+        var d = lCase( arguments.declaredContentType );
+
+        // Extension family expected for the sniffed type
+        var expectedExts = {
+            "image/jpeg"      : [ "jpg", "jpeg" ],
+            "image/png"       : [ "png" ],
+            "image/gif"       : [ "gif" ],
+            "image/webp"      : [ "webp" ],
+            "application/pdf" : [ "pdf" ],
+            "application/zip" : [ "zip", "docx", "xlsx", "pptx" ]
+        };
+        if ( !structKeyExists( expectedExts, s ) ) return true;
+        return arrayFindNoCase( expectedExts[ s ], e ) > 0;
+    }
+
+    /**
+     * Access decision for a single attachment.
+     *   - viewer.type=="agent": any signed-in agent allowed (the
+     *     /agent firewall already covers role gating). Includes
+     *     soft-deleted rows so the agent UI can show "deleted" badges.
+     *   - viewer.type=="contact": parent ticket must belong to the
+     *     contact's organization. Internal-note attachments are
+     *     denied. Soft-deleted is denied.
+     */
+    private boolean function canViewAttachment(
+        required any attachment,
+        required struct viewer
+    ){
+        var vType = arguments.viewer.type ?: "";
+        if ( vType == "agent" ) return true;
+
+        if ( vType == "contact" ) {
+            if ( arguments.attachment.isDeleted() ) return false;
+            var ticket = getTicket( arguments.attachment.getTicketId() );
+            if ( isNull( ticket ) ) return false;
+            var ticketOrg  = ticket.getOrganizationId() ?: "";
+            if ( !len( ticketOrg ) ) return false; // accountless never visible to contacts
+            var contact = contactsService.getContactById( arguments.viewer.id ?: "" );
+            if ( isNull( contact ) ) return false;
+            if ( ( contact.getOrganizationId() ?: "" ) != ticketOrg ) return false;
+            // Internal-note attachments hidden from contacts.
+            var msgId = arguments.attachment.getMessageId() ?: "";
+            if ( len( msgId ) ) {
+                var msg = wirebox.getInstance( "TicketMessage@tickets" )
+                    .where( "id", msgId ).first();
+                if ( !isNull( msg ) && msg.getIsInternal() ) return false;
+            }
+            return true;
+        }
+        return false;
     }
 
     // ---------- helpers ----------
