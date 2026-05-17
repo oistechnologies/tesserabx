@@ -1,0 +1,786 @@
+/**
+ * AgentService: CRUD over the Agent account family.
+ *
+ * Parallels ContactsService (which owns the client-side Contact
+ * accounts). Role grant/revoke and activate/deactivate audit events
+ * still flow through RbacService; this service owns everything else
+ * for an Agent record: lookup, list (filtered/sorted/paginated),
+ * create, update, self-edit, password change, email change with
+ * verification, and profile image metadata.
+ *
+ * All writes go through targeted UPDATE statements rather than
+ * Quick's save() because the row carries timestamp columns. Quick
+ * re-binds every column on save() and Postgres rejects timestamp
+ * binds typed as varchar (see Mfa.bx for the same workaround).
+ *
+ * Every state-changing method records to audit_events via the
+ * recordAudit() helper, which swallows audit failures with a warning
+ * log so a broken audit table cannot break a CRUD path.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+    property name="rbacService"  inject="RbacService@agent";
+    property name="bcrypt"       inject="@BCrypt";
+
+    // Whitelist for sortable columns on listAgents. Anything outside
+    // this set falls back to email.
+    variables.sortWhitelist = [
+        "email", "first_name", "last_name", "title", "department",
+        "hire_date", "last_login_at", "created_at", "is_active"
+    ];
+
+    // Whitelist for fields an agent may edit on their own profile.
+    // Email, password, MFA, activation, role, and admin-managed
+    // fields (title, department, hire_date, etc.) have their own
+    // dedicated methods or are admin-only.
+    variables.ownProfileWhitelist = [
+        "firstName", "lastName", "phone_work", "phone_mobile",
+        "timezone", "locale", "bio", "email_signature",
+        "slack_handle", "teams_handle"
+    ];
+
+    // Email change tokens expire after this many minutes.
+    variables.emailTokenTtlMinutes = 60;
+
+    // -------------------------------------------------------------
+    //  Lookup
+    // -------------------------------------------------------------
+
+    /**
+     * Return the Agent Quick entity for id, or null when missing.
+     */
+    public any function getAgentById( required string id ){
+        if ( !len( arguments.id ) ) return javaCast( "null", "" );
+        var hits = wirebox.getInstance( "Agent@agent" )
+            .where( "id", arguments.id )
+            .get();
+        if ( !hits.len() ) return javaCast( "null", "" );
+        return hits[ 1 ];
+    }
+
+    /**
+     * Lookup by email, case-insensitive. The agents.email column is
+     * stored lowercased on every write so this stays a single
+     * equality check.
+     */
+    public any function getAgentByEmail( required string email ){
+        if ( !len( trim( arguments.email ) ) ) return javaCast( "null", "" );
+        var hits = wirebox.getInstance( "Agent@agent" )
+            .where( "email", lCase( trim( arguments.email ) ) )
+            .get();
+        if ( !hits.len() ) return javaCast( "null", "" );
+        return hits[ 1 ];
+    }
+
+    /**
+     * Paginated agent list with filters and a sortable column.
+     *
+     * filters: struct with optional keys:
+     *   - q          (string, free-text on email/first_name/last_name/title)
+     *   - isActive   ("active" | "inactive" | "any"; default "active")
+     *   - roleKey    (string, filter to agents holding this role)
+     *   - teamId     (string, filter to agents on this team)
+     *   - department (string, exact match)
+     *
+     * sort: column name from sortWhitelist (default "email")
+     * dir:  "asc" | "desc"      (default "asc")
+     * page: 1-based             (default 1)
+     * pageSize: positive int    (default 25, capped at 100)
+     *
+     * Returns { rows, total, page, pageSize, totalPages }. Each row
+     * is a struct with the core display columns; service-layer
+     * consumers that need more fields can call getAgentById.
+     */
+    public struct function listAgents(
+        struct filters = {},
+        string sort    = "email",
+        string dir     = "asc",
+        numeric page   = 1,
+        numeric pageSize = 25
+    ){
+        var f = arguments.filters;
+
+        // Sanitize sort + dir against the whitelist; anything outside
+        // resets to email asc.
+        var sortCol = arrayFindNoCase( variables.sortWhitelist, arguments.sort ) ? arguments.sort : "email";
+        var sortDir = ( uCase( arguments.dir ) == "DESC" ) ? "DESC" : "ASC";
+
+        var pageNum  = max( 1, int( arguments.page ) );
+        var perPage  = min( 100, max( 1, int( arguments.pageSize ) ) );
+        var offset   = ( pageNum - 1 ) * perPage;
+
+        // Build the shared WHERE fragment + bind struct once so
+        // count() and the page query stay in lock-step.
+        var whereSql = [ "1 = 1" ];
+        var binds    = {};
+
+        var activeMode = lCase( f.isActive ?: "active" );
+        if ( activeMode == "active" ) {
+            whereSql.append( "a.is_active = cast( :is_active as boolean )" );
+            binds[ "is_active" ] = "true";
+        } else if ( activeMode == "inactive" ) {
+            whereSql.append( "a.is_active = cast( :is_active as boolean )" );
+            binds[ "is_active" ] = "false";
+        }
+
+        if ( len( trim( f.q ?: "" ) ) ) {
+            var qLike = "%" & lCase( trim( f.q ) ) & "%";
+            whereSql.append( "(
+                LOWER( a.email )      LIKE :q OR
+                LOWER( COALESCE( a.first_name, '' ) ) LIKE :q OR
+                LOWER( COALESCE( a.last_name,  '' ) ) LIKE :q OR
+                LOWER( COALESCE( a.title,      '' ) ) LIKE :q
+            )" );
+            binds[ "q" ] = qLike;
+        }
+
+        if ( len( trim( f.department ?: "" ) ) ) {
+            whereSql.append( "a.department = :department" );
+            binds[ "department" ] = f.department;
+        }
+
+        // Join fragments built up so role/team filters can hit the
+        // join tables without contaminating the SELECT shape.
+        var joins = [];
+        if ( len( trim( f.roleKey ?: "" ) ) ) {
+            joins.append( "JOIN agent_roles ar ON ar.agent_id = a.id AND ar.role_key = :role_key" );
+            binds[ "role_key" ] = f.roleKey;
+        }
+        if ( len( trim( f.teamId ?: "" ) ) ) {
+            joins.append( "JOIN team_members tm ON tm.agent_id = a.id AND tm.team_id = :team_id" );
+            binds[ "team_id" ] = f.teamId;
+        }
+
+        var whereClause = whereSql.toList( " AND " );
+        var joinClause  = joins.toList( " " );
+
+        // Total first; needed for totalPages.
+        var countRow = queryExecute(
+            "SELECT COUNT( DISTINCT a.id ) AS n
+             FROM agents a " & joinClause & "
+             WHERE " & whereClause,
+            binds
+        );
+        var total = val( countRow.n[ 1 ] );
+
+        // Page query. DISTINCT keeps the role/team joins from
+        // duplicating rows when an agent matches multiple role rows.
+        var rows = queryExecute(
+            "SELECT DISTINCT a.id, a.email, a.first_name, a.last_name,
+                    a.title, a.department, a.phone_work, a.phone_mobile,
+                    a.timezone, a.locale, a.hire_date, a.last_login_at,
+                    a.is_active, a.is_admin, a.mfa_enabled,
+                    a.profile_image_original_path, a.profile_image_uploaded_at,
+                    a.created_at
+             FROM agents a " & joinClause & "
+             WHERE " & whereClause & "
+             ORDER BY a." & sortCol & " " & sortDir & " NULLS LAST, a.email ASC
+             LIMIT " & perPage & " OFFSET " & offset,
+            binds
+        );
+
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                id                         : rows.id[ i ],
+                email                      : rows.email[ i ],
+                firstName                  : rows.first_name[ i ] ?: "",
+                lastName                   : rows.last_name[ i ]  ?: "",
+                title                      : rows.title[ i ]      ?: "",
+                department                 : rows.department[ i ] ?: "",
+                phoneWork                  : rows.phone_work[ i ] ?: "",
+                phoneMobile                : rows.phone_mobile[ i ] ?: "",
+                timezone                   : rows.timezone[ i ]   ?: "UTC",
+                locale                     : rows.locale[ i ]     ?: "en-US",
+                hireDate                   : rows.hire_date[ i ],
+                lastLoginAt                : rows.last_login_at[ i ],
+                isActive                   : !!rows.is_active[ i ],
+                isAdmin                    : !!rows.is_admin[ i ],
+                mfaEnabled                 : !!rows.mfa_enabled[ i ],
+                profileImageOriginalPath   : rows.profile_image_original_path[ i ] ?: "",
+                profileImageUploadedAt     : rows.profile_image_uploaded_at[ i ],
+                createdAt                  : rows.created_at[ i ]
+            } );
+        }
+
+        var totalPages = ( total == 0 ) ? 0 : ceiling( total / perPage );
+        return {
+            rows       : out,
+            total      : total,
+            page       : pageNum,
+            pageSize   : perPage,
+            totalPages : totalPages
+        };
+    }
+
+    /**
+     * Distinct non-null departments currently in use. Powers the
+     * admin list's Department filter dropdown.
+     */
+    public array function listDepartments(){
+        var rows = queryExecute(
+            "SELECT DISTINCT department
+             FROM   agents
+             WHERE  department IS NOT NULL AND department <> ''
+             ORDER BY department"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.department[ i ] );
+        return out;
+    }
+
+    // -------------------------------------------------------------
+    //  Create
+    // -------------------------------------------------------------
+
+    /**
+     * Create a new agent. data struct keys:
+     *   - email           (required)
+     *   - password        (required; bcrypt-hashed)
+     *   - firstName, lastName, title, department, phoneWork,
+     *     phoneMobile, timezone, locale, hireDate, terminationDate,
+     *     employeeId, bio, emailSignature, slackHandle, teamsHandle,
+     *     managerAgentId   (all optional)
+     *   - isAdmin         (optional boolean, defaults false)
+     *
+     * Validation is the caller's responsibility (handler/wire). This
+     * trusts its inputs. Email is lowercased on write.
+     *
+     * Returns the new agent id.
+     */
+    public string function createAgent(
+        required struct data,
+        string actorAgentId = ""
+    ){
+        if ( !len( trim( arguments.data.email ?: "" ) ) ) {
+            throw( type : "AgentService.MissingEmail",    message : "email is required." );
+        }
+        if ( !len( arguments.data.password ?: "" ) ) {
+            throw( type : "AgentService.MissingPassword", message : "password is required." );
+        }
+
+        var newId = createUUID();
+        var email = lCase( trim( arguments.data.email ) );
+        var hash  = bcrypt.hashPassword( arguments.data.password );
+
+        // Build a struct of all the optional column binds; SQL below
+        // references them by name. Building incrementally and patching
+        // missing keys to null at the end avoids the var-null-init
+        // crash documented in the memory file.
+        var binds = {
+            id              : newId,
+            email           : email,
+            password_hash   : hash,
+            is_admin        : ( ( arguments.data.isAdmin ?: false ) ? "true" : "false" )
+        };
+
+        var optionalString = {
+            first_name        : arguments.data.firstName       ?: "",
+            last_name         : arguments.data.lastName        ?: "",
+            title             : arguments.data.title           ?: "",
+            department        : arguments.data.department      ?: "",
+            phone_work        : arguments.data.phoneWork       ?: "",
+            phone_mobile      : arguments.data.phoneMobile     ?: "",
+            timezone          : arguments.data.timezone        ?: "UTC",
+            locale            : arguments.data.locale          ?: "en-US",
+            employee_id       : arguments.data.employeeId      ?: "",
+            bio               : arguments.data.bio             ?: "",
+            email_signature   : arguments.data.emailSignature  ?: "",
+            slack_handle      : arguments.data.slackHandle     ?: "",
+            teams_handle      : arguments.data.teamsHandle     ?: "",
+            manager_agent_id  : arguments.data.managerAgentId  ?: ""
+        };
+        for ( var col in optionalString ) {
+            binds[ col ] = len( optionalString[ col ] ) ? optionalString[ col ] : javaCast( "null", "" );
+        }
+
+        var optionalDate = {
+            hire_date        : arguments.data.hireDate        ?: "",
+            termination_date : arguments.data.terminationDate ?: ""
+        };
+        for ( var col in optionalDate ) {
+            binds[ col ] = len( optionalDate[ col ] ) ? optionalDate[ col ] : javaCast( "null", "" );
+        }
+
+        queryExecute(
+            "INSERT INTO agents (
+                id, email, password_hash,
+                first_name, last_name, title, department,
+                phone_work, phone_mobile, timezone, locale,
+                hire_date, termination_date, employee_id,
+                bio, email_signature, slack_handle, teams_handle,
+                manager_agent_id, is_admin, is_active, created_at, updated_at
+             ) VALUES (
+                :id, :email, :password_hash,
+                :first_name, :last_name, :title, :department,
+                :phone_work, :phone_mobile, :timezone, :locale,
+                cast( :hire_date as date ), cast( :termination_date as date ), :employee_id,
+                :bio, :email_signature, :slack_handle, :teams_handle,
+                :manager_agent_id, cast( :is_admin as boolean ), TRUE, NOW(), NOW()
+             )",
+            binds
+        );
+
+        recordAudit( "agent.created", newId, arguments.actorAgentId, {
+            "email"      : email,
+            "firstName"  : optionalString.first_name,
+            "lastName"   : optionalString.last_name,
+            "title"      : optionalString.title,
+            "department" : optionalString.department
+        } );
+
+        return newId;
+    }
+
+    // -------------------------------------------------------------
+    //  Update
+    // -------------------------------------------------------------
+
+    /**
+     * Partial update of an agent (admin-side). data keys that are
+     * present cause those columns to update; absent keys leave the
+     * row alone. Records audit with the diff of changed fields.
+     *
+     * Self-deactivate guard: if data.isActive is false and the actor
+     * is the same agent, throws AgentService.CannotDeactivateSelf.
+     * The wire also hides the button; the service is the safety net.
+     *
+     * Email change is NOT performed here; use requestEmailChange +
+     * confirmEmailChange. Password change uses changePassword.
+     */
+    public void function updateAgent(
+        required string id,
+        required struct data,
+        string actorAgentId = ""
+    ){
+        var existing = getAgentById( arguments.id );
+        if ( isNull( existing ) ) {
+            throw( type : "AgentService.NotFound", message : "agent not found: " & arguments.id );
+        }
+
+        // Self-deactivate guard.
+        if ( structKeyExists( arguments.data, "isActive" )
+             && !arguments.data.isActive
+             && len( arguments.actorAgentId )
+             && arguments.actorAgentId == arguments.id ) {
+            throw(
+                type    : "AgentService.CannotDeactivateSelf",
+                message : "An agent cannot deactivate their own account."
+            );
+        }
+
+        // Map of incoming data key -> DB column + bind cast (if any).
+        var fieldMap = {
+            firstName       : { column : "first_name",       cast : "" },
+            lastName        : { column : "last_name",        cast : "" },
+            title           : { column : "title",            cast : "" },
+            department      : { column : "department",       cast : "" },
+            phoneWork       : { column : "phone_work",       cast : "" },
+            phoneMobile     : { column : "phone_mobile",     cast : "" },
+            timezone        : { column : "timezone",         cast : "" },
+            locale          : { column : "locale",           cast : "" },
+            employeeId      : { column : "employee_id",      cast : "" },
+            bio             : { column : "bio",              cast : "" },
+            emailSignature  : { column : "email_signature",  cast : "" },
+            slackHandle     : { column : "slack_handle",     cast : "" },
+            teamsHandle     : { column : "teams_handle",     cast : "" },
+            managerAgentId  : { column : "manager_agent_id", cast : "" },
+            hireDate        : { column : "hire_date",        cast : "date" },
+            terminationDate : { column : "termination_date", cast : "date" },
+            isActive        : { column : "is_active",        cast : "boolean" },
+            isAdmin         : { column : "is_admin",         cast : "boolean" }
+        };
+
+        var sets  = [];
+        var binds = { id : arguments.id };
+        var diff  = {};
+
+        for ( var key in fieldMap ) {
+            if ( !structKeyExists( arguments.data, key ) ) continue;
+            var col   = fieldMap[ key ].column;
+            var cast  = fieldMap[ key ].cast;
+            var value = arguments.data[ key ];
+
+            // Normalize the bind value per cast type.
+            var bindValue = "";
+            if ( cast == "boolean" ) {
+                bindValue = ( value ? "true" : "false" );
+            } else if ( cast == "date" ) {
+                bindValue = len( value ?: "" ) ? value : javaCast( "null", "" );
+            } else {
+                bindValue = len( value ?: "" ) ? value : javaCast( "null", "" );
+            }
+
+            // Compute the previous value for the diff. Cast booleans
+            // consistently.
+            var oldValue = "";
+            try {
+                if ( cast == "boolean" ) {
+                    var getter = "get" & uCase( left( key, 1 ) ) & mid( key, 2, len( key ) - 1 );
+                    oldValue = !!invoke( existing, getter );
+                    if ( bindValue == ( oldValue ? "true" : "false" ) ) continue;
+                } else {
+                    var getter = "get" & uCase( left( key, 1 ) ) & mid( key, 2, len( key ) - 1 );
+                    oldValue = invoke( existing, getter ) ?: "";
+                    if ( ( isNull( bindValue ) ? "" : toString( bindValue ) ) == ( isNull( oldValue ) ? "" : toString( oldValue ) ) ) {
+                        continue;
+                    }
+                }
+            } catch ( any e ) {
+                // Getter mismatch shouldn't happen; if it does, fall
+                // through and apply the update without diff entry.
+                oldValue = "";
+            }
+
+            // Compose the SET fragment with any required cast.
+            if ( cast == "boolean" ) {
+                sets.append( col & " = cast( :" & col & " as boolean )" );
+            } else if ( cast == "date" ) {
+                sets.append( col & " = cast( :" & col & " as date )" );
+            } else {
+                sets.append( col & " = :" & col );
+            }
+            binds[ col ] = bindValue;
+            diff[ key ]  = {
+                old : ( cast == "boolean" ) ? oldValue : toString( oldValue ),
+                new : ( cast == "boolean" ) ? ( bindValue == "true" ) : ( isNull( bindValue ) ? "" : toString( bindValue ) )
+            };
+        }
+
+        if ( !sets.len() ) return;
+
+        sets.append( "updated_at = NOW()" );
+        queryExecute(
+            "UPDATE agents SET " & sets.toList() & " WHERE id = :id",
+            binds
+        );
+
+        // Record activate/deactivate as their own event type when
+        // is_active flipped, so the audit search filters surface them
+        // alongside the RbacService-emitted equivalents.
+        if ( structKeyExists( diff, "isActive" ) ) {
+            recordAudit(
+                diff.isActive.new ? "agent.activated" : "agent.deactivated",
+                arguments.id,
+                arguments.actorAgentId,
+                { "diff" : diff }
+            );
+        } else {
+            recordAudit( "agent.updated", arguments.id, arguments.actorAgentId, { "diff" : diff } );
+        }
+    }
+
+    /**
+     * Self-edit. Whitelist enforced: any key in data that is not in
+     * ownProfileWhitelist is silently dropped. No actorAgentId
+     * argument because the actor is always the agent themselves.
+     */
+    public void function updateOwnProfile(
+        required string agentId,
+        required struct data
+    ){
+        var filtered = {};
+        for ( var key in arguments.data ) {
+            if ( arrayFindNoCase( variables.ownProfileWhitelist, key ) ) {
+                filtered[ key ] = arguments.data[ key ];
+            }
+        }
+        if ( structIsEmpty( filtered ) ) return;
+
+        // Reuse updateAgent for the actual write but tag the audit
+        // event as a self_update for the audit log. To avoid
+        // double-audit, build the SET fragment locally here.
+        var existing = getAgentById( arguments.agentId );
+        if ( isNull( existing ) ) {
+            throw( type : "AgentService.NotFound", message : "agent not found: " & arguments.agentId );
+        }
+
+        var fieldMap = {
+            firstName      : "first_name",
+            lastName       : "last_name",
+            phone_work     : "phone_work",
+            phone_mobile   : "phone_mobile",
+            timezone       : "timezone",
+            locale         : "locale",
+            bio            : "bio",
+            email_signature: "email_signature",
+            slack_handle   : "slack_handle",
+            teams_handle   : "teams_handle"
+        };
+
+        var sets  = [];
+        var binds = { id : arguments.agentId };
+        var diff  = {};
+
+        for ( var key in filtered ) {
+            // The whitelist mixes camelCase (firstName, lastName) and
+            // snake_case (the rest, matching column names). Resolve
+            // both styles to the underlying column.
+            var col = structKeyExists( fieldMap, key ) ? fieldMap[ key ] : key;
+            var value = filtered[ key ];
+            sets.append( col & " = :" & col );
+            binds[ col ] = len( value ?: "" ) ? value : javaCast( "null", "" );
+            diff[ key ] = { new : ( isNull( binds[ col ] ) ? "" : toString( binds[ col ] ) ) };
+        }
+
+        if ( !sets.len() ) return;
+
+        sets.append( "updated_at = NOW()" );
+        queryExecute(
+            "UPDATE agents SET " & sets.toList() & " WHERE id = :id",
+            binds
+        );
+
+        recordAudit( "agent.self_updated", arguments.agentId, arguments.agentId, { "diff" : diff } );
+    }
+
+    /**
+     * Active/inactive toggle with the self-deactivate guard. Wires
+     * the audit event ("agent.activated" / "agent.deactivated")
+     * through the same path RbacService.setAgentActive uses.
+     */
+    public void function setAgentActive(
+        required string agentId,
+        required boolean active,
+        string actorAgentId = ""
+    ){
+        if ( !arguments.active
+             && len( arguments.actorAgentId )
+             && arguments.actorAgentId == arguments.agentId ) {
+            throw(
+                type    : "AgentService.CannotDeactivateSelf",
+                message : "An agent cannot deactivate their own account."
+            );
+        }
+        rbacService.setAgentActive(
+            agentId      : arguments.agentId,
+            active       : arguments.active,
+            actorAgentId : arguments.actorAgentId
+        );
+    }
+
+    /**
+     * Verify the current password then swap in a new bcrypt hash.
+     * Throws AgentService.WrongPassword on mismatch.
+     */
+    public void function changePassword(
+        required string agentId,
+        required string currentPassword,
+        required string newPassword
+    ){
+        if ( !len( arguments.newPassword ) ) {
+            throw( type : "AgentService.MissingPassword", message : "newPassword is required." );
+        }
+        var agent = getAgentById( arguments.agentId );
+        if ( isNull( agent ) ) {
+            throw( type : "AgentService.NotFound", message : "agent not found: " & arguments.agentId );
+        }
+        if ( !bcrypt.checkPassword( arguments.currentPassword, agent.getPasswordHash() ) ) {
+            throw(
+                type    : "AgentService.WrongPassword",
+                message : "Current password does not match."
+            );
+        }
+        var hash = bcrypt.hashPassword( arguments.newPassword );
+        queryExecute(
+            "UPDATE agents SET password_hash = :h, updated_at = NOW() WHERE id = :id",
+            { id : arguments.agentId, h : hash }
+        );
+        recordAudit( "agent.password_changed", arguments.agentId, arguments.agentId, {} );
+    }
+
+    // -------------------------------------------------------------
+    //  Email change with verification
+    // -------------------------------------------------------------
+
+    /**
+     * Begin an email change. Generates a raw URL-safe token (returned
+     * to the caller so they can email it), stores only the SHA-256
+     * hash in the database, sets expires_at to now + 60 minutes.
+     *
+     * The caller is responsible for sending the verification email
+     * (typically through cbmailservices) and for refusing requests
+     * where newEmail already belongs to another agent.
+     */
+    public string function requestEmailChange(
+        required string agentId,
+        required string newEmail
+    ){
+        if ( !len( trim( arguments.newEmail ) ) ) {
+            throw( type : "AgentService.MissingEmail", message : "newEmail is required." );
+        }
+        var agent = getAgentById( arguments.agentId );
+        if ( isNull( agent ) ) {
+            throw( type : "AgentService.NotFound", message : "agent not found: " & arguments.agentId );
+        }
+        var normalized = lCase( trim( arguments.newEmail ) );
+
+        // Reject if another agent already owns that address.
+        var existing = getAgentByEmail( normalized );
+        if ( !isNull( existing ) && existing.getId() != arguments.agentId ) {
+            throw(
+                type    : "AgentService.EmailTaken",
+                message : "That email is already in use."
+            );
+        }
+
+        var rawToken  = replace( createUUID(), "-", "", "all" ) & replace( createUUID(), "-", "", "all" );
+        var tokenHash = hash( rawToken, "SHA-256" );
+
+        // Compute the expiry in Postgres rather than in BoxLang so we
+        // avoid any date-format mismatch in the JDBC bind. The TTL
+        // bind is a string like "60 minutes" cast to an interval.
+        queryExecute(
+            "INSERT INTO agent_pending_email_changes
+                ( id, agent_id, new_email, token_hash, expires_at, created_at )
+             VALUES
+                ( :id, :agent_id, :new_email, :token_hash,
+                  NOW() + cast( :ttl as interval ),
+                  NOW() )",
+            {
+                id          : createUUID(),
+                agent_id    : arguments.agentId,
+                new_email   : normalized,
+                token_hash  : tokenHash,
+                ttl         : variables.emailTokenTtlMinutes & " minutes"
+            }
+        );
+
+        recordAudit( "agent.email_change_requested", arguments.agentId, arguments.agentId, {
+            "newEmail" : normalized
+        } );
+
+        return rawToken;
+    }
+
+    /**
+     * Confirm a pending email change. Returns true on success, false
+     * when the token is unknown, expired, or already consumed.
+     */
+    public boolean function confirmEmailChange( required string token ){
+        if ( !len( arguments.token ) ) return false;
+        var tokenHash = hash( arguments.token, "SHA-256" );
+
+        // Expire/consumed checks run in SQL so we avoid BoxLang null
+        // handling on query columns: zero rows means invalid, expired,
+        // or already used; one row means valid and ready to swap.
+        var rows = queryExecute(
+            "SELECT id, agent_id, new_email
+             FROM   agent_pending_email_changes
+             WHERE  token_hash  = :h
+               AND  consumed_at IS NULL
+               AND  expires_at  > NOW()",
+            { h : tokenHash }
+        );
+        if ( !rows.recordCount ) return false;
+
+        var pendingId = rows.id[ 1 ];
+        var agentId   = rows.agent_id[ 1 ];
+        var newEmail  = rows.new_email[ 1 ];
+
+        // Race-safe sequence: swap the email, then mark consumed.
+        queryExecute(
+            "UPDATE agents SET email = :e, updated_at = NOW() WHERE id = :id",
+            { id : agentId, e : newEmail }
+        );
+        queryExecute(
+            "UPDATE agent_pending_email_changes SET consumed_at = NOW() WHERE id = :id",
+            { id : pendingId }
+        );
+        recordAudit( "agent.email_changed", agentId, agentId, { "newEmail" : newEmail } );
+        return true;
+    }
+
+    // -------------------------------------------------------------
+    //  Profile image metadata
+    // -------------------------------------------------------------
+
+    /**
+     * Persist the profile image metadata on the agent row. File
+     * processing (thumbnail generation, CBFS writes) happens in
+     * ImageProcessingService, added in Phase 3. This service just
+     * records the original path + content type + upload time.
+     */
+    public void function setProfileImage(
+        required string agentId,
+        required string originalPath,
+        required string contentType
+    ){
+        queryExecute(
+            "UPDATE agents
+             SET    profile_image_original_path = :p,
+                    profile_image_content_type  = :ct,
+                    profile_image_uploaded_at   = NOW(),
+                    updated_at                  = NOW()
+             WHERE  id = :id",
+            {
+                id : arguments.agentId,
+                p  : arguments.originalPath,
+                ct : arguments.contentType
+            }
+        );
+        recordAudit( "agent.avatar_uploaded", arguments.agentId, arguments.agentId, {
+            "originalPath" : arguments.originalPath,
+            "contentType"  : arguments.contentType
+        } );
+    }
+
+    /**
+     * Clear the profile image columns. Phase 3 wires up file deletion
+     * through ImageProcessingService; for now this only nulls the
+     * metadata so Phase 1 stays self-contained.
+     */
+    public void function clearProfileImage(
+        required string agentId,
+        string actorAgentId = ""
+    ){
+        queryExecute(
+            "UPDATE agents
+             SET    profile_image_original_path = NULL,
+                    profile_image_content_type  = NULL,
+                    profile_image_uploaded_at   = NULL,
+                    updated_at                  = NOW()
+             WHERE  id = :id",
+            { id : arguments.agentId }
+        );
+        recordAudit( "agent.avatar_cleared",
+            arguments.agentId,
+            len( arguments.actorAgentId ) ? arguments.actorAgentId : arguments.agentId,
+            {}
+        );
+    }
+
+    // -------------------------------------------------------------
+    //  internals
+    // -------------------------------------------------------------
+
+    private void function recordAudit(
+        required string eventType,
+        required string targetAgentId,
+        required string actorAgentId,
+        required struct metadata
+    ){
+        try {
+            var args = {
+                eventType  : arguments.eventType,
+                entityType : "agent",
+                entityId   : arguments.targetAgentId,
+                metadata   : arguments.metadata
+            };
+            if ( len( arguments.actorAgentId ) ) {
+                args.actorType = "agent";
+                args.actorId   = arguments.actorAgentId;
+            }
+            auditService.record( argumentCollection = args );
+        } catch ( any e ) {
+            writeLog(
+                text : "AgentService audit failed [#arguments.eventType#]: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

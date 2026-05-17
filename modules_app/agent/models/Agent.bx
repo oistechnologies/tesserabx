@@ -28,6 +28,50 @@ class
     property name="createdAt"         column="created_at";
     property name="updatedAt"         column="updated_at";
 
+    // Profile columns added in the Phase 1 schema expansion. Title
+    // and department are admin-only on the application layer; the
+    // others are self-editable through My Account.
+    property name="title";
+    property name="hireDate"          column="hire_date";
+    property name="terminationDate"   column="termination_date";
+    property name="phoneWork"         column="phone_work";
+    property name="phoneMobile"       column="phone_mobile";
+    property name="department";
+    property name="employeeId"        column="employee_id";
+    property name="bio";
+    property name="emailSignature"    column="email_signature";
+    property name="slackHandle"       column="slack_handle";
+    property name="teamsHandle"       column="teams_handle";
+    property name="timezone";
+    property name="locale";
+    property name="managerAgentId"    column="manager_agent_id";
+
+    property name="profileImageOriginalPath"  column="profile_image_original_path";
+    property name="profileImageContentType"   column="profile_image_content_type";
+    property name="profileImageUploadedAt"    column="profile_image_uploaded_at";
+
+    // mementifier defaults for the API module. Excludes password_hash,
+    // mfa_secret, mfa_recovery_codes; consumers that need more fields
+    // (e.g. the agent's own profile API) can opt them in explicitly.
+    this.memento = {
+        defaultIncludes : [
+            "id", "email", "firstName", "lastName", "title", "department",
+            "phoneWork", "phoneMobile", "timezone", "locale",
+            "hireDate", "terminationDate", "employeeId",
+            "bio", "emailSignature", "slackHandle", "teamsHandle",
+            "managerAgentId", "isActive", "isAdmin", "mfaEnabled",
+            "lastLoginAt", "createdAt", "updatedAt",
+            "profileImageOriginalPath", "profileImageContentType",
+            "profileImageUploadedAt"
+        ],
+        defaultExcludes : [
+            "passwordHash", "mfaSecret", "mfaRecoveryCodes"
+        ],
+        neverInclude : [
+            "passwordHash", "mfaSecret", "mfaRecoveryCodes"
+        ]
+    };
+
     // No global scopes. Agents see across organizations.
 
     public string function getUsername(){ return getEmail(); }
@@ -41,6 +85,37 @@ class
     public string function surface(){ return "agent"; }
     public boolean function isContact(){ return false; }
     public boolean function isAgent(){ return true; }
+
+    /**
+     * Human-readable display name for views and emails. Falls back
+     * to the email address when no name is set so the avatar/initials
+     * helper always has something to render.
+     */
+    public string function displayName(){
+        var first = getFirstName() ?: "";
+        var last  = getLastName()  ?: "";
+        var full  = trim( first & " " & last );
+        return len( full ) ? full : ( getEmail() ?: "" );
+    }
+
+    /**
+     * Two-character initials for the avatar fallback badge. Drops
+     * non-letters, uppercases, falls back to the first letter of the
+     * email when no name is set, and to "?" when even the email is
+     * missing (should not happen in practice).
+     */
+    public string function initials(){
+        var first = trim( getFirstName() ?: "" );
+        var last  = trim( getLastName()  ?: "" );
+        if ( len( first ) && len( last ) ) {
+            return uCase( left( first, 1 ) & left( last, 1 ) );
+        }
+        if ( len( first ) ) return uCase( left( first, min( 2, len( first ) ) ) );
+        if ( len( last  ) ) return uCase( left( last,  min( 2, len( last  ) ) ) );
+        var email = trim( getEmail() ?: "" );
+        if ( len( email ) ) return uCase( left( email, min( 2, len( email ) ) ) );
+        return "?";
+    }
 
     // ---- cbsecurity role / permission interface ----
 

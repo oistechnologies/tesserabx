@@ -73,6 +73,9 @@ class {
         binder.map( "TeamsService@agent" )
               .to( "#moduleMapping#.models.TeamsService" )
               .asSingleton();
+        binder.map( "AgentService@agent" )
+              .to( "#moduleMapping#.models.AgentService" )
+              .asSingleton();
         binder.map( "TotpService@agent" )
               .to( "#moduleMapping#.models.TotpService" )
               .asSingleton();

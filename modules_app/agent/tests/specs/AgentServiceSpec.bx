@@ -1,0 +1,261 @@
+/**
+ * AgentServiceSpec: coverage for the Phase 1 CRUD service.
+ *
+ * Mirrors the TeamsServiceSpec pattern (BaseTestCase + uniqueName
+ * helpers + per-test seedAgent/cleanupAgent). Each spec creates its
+ * own row(s) and tears them down so we don't leave orphans between
+ * runs.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc    = getController().getWireBox().getInstance( "AgentService@agent" );
+        variables.rbac   = getController().getWireBox().getInstance( "RbacService@agent" );
+        variables.bcrypt = getController().getWireBox().getInstance( "@BCrypt" );
+    }
+
+    function run(){
+        describe( "AgentService", function(){
+
+            describe( "createAgent + lookups", function(){
+
+                it( "createAgent hashes the password and getAgentById returns the row", function(){
+                    var email = uniqueEmail();
+                    var id    = variables.svc.createAgent( data : {
+                        email     : email,
+                        password  : "correct-horse-battery-staple",
+                        firstName : "Ada",
+                        lastName  : "Lovelace",
+                        title     : "Lead Analyst",
+                        department: "Engineering"
+                    } );
+                    var agent = variables.svc.getAgentById( id );
+                    expect( agent ).notToBeNull();
+                    expect( agent.getEmail() ).toBe( lCase( email ) );
+                    expect( agent.getFirstName() ).toBe( "Ada" );
+                    expect( agent.getTitle() ).toBe( "Lead Analyst" );
+                    expect( variables.bcrypt.checkPassword( "correct-horse-battery-staple", agent.getPasswordHash() ) ).toBeTrue();
+                    cleanupAgent( id );
+                } );
+
+                it( "getAgentByEmail is case-insensitive", function(){
+                    var email = uniqueEmail();
+                    var id    = variables.svc.createAgent( data : {
+                        email    : email,
+                        password : "secret-pass-1234"
+                    } );
+                    expect( variables.svc.getAgentByEmail( uCase( email ) ) ).notToBeNull();
+                    cleanupAgent( id );
+                } );
+
+                it( "createAgent rejects empty email or password", function(){
+                    expect( function(){ variables.svc.createAgent( data : { password : "x" } ); } ).toThrow();
+                    expect( function(){ variables.svc.createAgent( data : { email : "a@b.c" } ); } ).toThrow();
+                } );
+
+            } );
+
+            describe( "listAgents", function(){
+
+                it( "paginates and reports a total", function(){
+                    var ids = [];
+                    for ( var i = 1; i <= 3; i++ ) {
+                        ids.append( variables.svc.createAgent( data : {
+                            email    : uniqueEmail(),
+                            password : "test-pass-1234",
+                            firstName: "ListSpec"
+                        } ) );
+                    }
+                    var result = variables.svc.listAgents( filters : { q : "ListSpec" }, page : 1, pageSize : 2 );
+                    expect( result.total ).toBeGTE( 3 );
+                    expect( result.rows.len() ).toBe( 2 );
+                    expect( result.totalPages ).toBeGTE( 2 );
+                    for ( var id in ids ) cleanupAgent( id );
+                } );
+
+                it( "filters by isActive 'inactive' surfaces only deactivated rows", function(){
+                    var id = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "test-pass-1234"
+                    } );
+                    variables.svc.setAgentActive( agentId : id, active : false );
+                    var result = variables.svc.listAgents( filters : { isActive : "inactive" } );
+                    var found = false;
+                    for ( var row in result.rows ) if ( row.id == id ) found = true;
+                    expect( found ).toBeTrue();
+                    cleanupAgent( id );
+                } );
+
+                it( "free-text filter matches against email, name, and title", function(){
+                    var marker = "x" & replace( createUUID(), "-", "", "all" );
+                    var id     = variables.svc.createAgent( data : {
+                        email    : marker & "@example.com",
+                        password : "test-pass-1234",
+                        title    : "Senior " & marker
+                    } );
+                    var result = variables.svc.listAgents( filters : { q : marker } );
+                    expect( result.total ).toBeGTE( 1 );
+                    cleanupAgent( id );
+                } );
+
+                it( "sort whitelist falls back to email when an unknown column is requested", function(){
+                    var result = variables.svc.listAgents( sort : "drop_table_agents" );
+                    expect( result ).toHaveKey( "rows" );
+                } );
+
+            } );
+
+            describe( "updateAgent", function(){
+
+                it( "partial update touches only the supplied columns", function(){
+                    var id = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "test-pass-1234",
+                        firstName: "Before",
+                        title    : "Keep"
+                    } );
+                    variables.svc.updateAgent( id : id, data : { firstName : "After" } );
+                    var agent = variables.svc.getAgentById( id );
+                    expect( agent.getFirstName() ).toBe( "After" );
+                    expect( agent.getTitle() ).toBe( "Keep" );
+                    cleanupAgent( id );
+                } );
+
+                it( "refuses self-deactivation", function(){
+                    var id = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "test-pass-1234"
+                    } );
+                    expect( function(){
+                        variables.svc.updateAgent( id : id, data : { isActive : false }, actorAgentId : id );
+                    } ).toThrow();
+                    cleanupAgent( id );
+                } );
+
+            } );
+
+            describe( "updateOwnProfile", function(){
+
+                it( "silently drops fields outside the whitelist", function(){
+                    var id = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "test-pass-1234",
+                        title    : "Original",
+                        firstName: "Original"
+                    } );
+                    variables.svc.updateOwnProfile( agentId : id, data : {
+                        firstName : "Updated",
+                        title     : "ATTEMPTED",
+                        isAdmin   : true,
+                        isActive  : false
+                    } );
+                    var agent = variables.svc.getAgentById( id );
+                    expect( agent.getFirstName() ).toBe( "Updated" );
+                    expect( agent.getTitle() ).toBe( "Original" );
+                    expect( agent.getIsAdmin() ).toBeFalse();
+                    expect( agent.getIsActive() ).toBeTrue();
+                    cleanupAgent( id );
+                } );
+
+            } );
+
+            describe( "changePassword", function(){
+
+                it( "rejects the wrong current password", function(){
+                    var id = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "original-pass"
+                    } );
+                    expect( function(){
+                        variables.svc.changePassword( agentId : id, currentPassword : "wrong", newPassword : "new-pass-1234" );
+                    } ).toThrow();
+                    cleanupAgent( id );
+                } );
+
+                it( "swaps the hash when the current password matches", function(){
+                    var id = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "original-pass"
+                    } );
+                    variables.svc.changePassword( agentId : id, currentPassword : "original-pass", newPassword : "rotated-pass" );
+                    var agent = variables.svc.getAgentById( id );
+                    expect( variables.bcrypt.checkPassword( "rotated-pass", agent.getPasswordHash() ) ).toBeTrue();
+                    expect( variables.bcrypt.checkPassword( "original-pass", agent.getPasswordHash() ) ).toBeFalse();
+                    cleanupAgent( id );
+                } );
+
+            } );
+
+            describe( "email change", function(){
+
+                it( "request returns a raw token; confirm swaps the email; second confirm fails", function(){
+                    var id       = variables.svc.createAgent( data : {
+                        email    : uniqueEmail(),
+                        password : "test-pass-1234"
+                    } );
+                    var newEmail = uniqueEmail();
+                    var token    = variables.svc.requestEmailChange( agentId : id, newEmail : newEmail );
+                    expect( len( token ) ).toBeGTE( 32 );
+
+                    expect( variables.svc.confirmEmailChange( token ) ).toBeTrue();
+                    var agent = variables.svc.getAgentById( id );
+                    expect( agent.getEmail() ).toBe( lCase( newEmail ) );
+
+                    // Idempotency: replaying the same token fails.
+                    expect( variables.svc.confirmEmailChange( token ) ).toBeFalse();
+                    cleanupAgent( id );
+                } );
+
+                it( "rejects an email already owned by another agent", function(){
+                    var a = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                    var b = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                    var bEmail = variables.svc.getAgentById( b ).getEmail();
+                    expect( function(){
+                        variables.svc.requestEmailChange( agentId : a, newEmail : bEmail );
+                    } ).toThrow();
+                    cleanupAgent( a );
+                    cleanupAgent( b );
+                } );
+
+                it( "confirmEmailChange returns false for an unknown token", function(){
+                    expect( variables.svc.confirmEmailChange( "deadbeef" ) ).toBeFalse();
+                } );
+
+            } );
+
+            describe( "profile image metadata", function(){
+
+                it( "setProfileImage and clearProfileImage round-trip", function(){
+                    var id = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                    variables.svc.setProfileImage( agentId : id, originalPath : "agents/" & id & "/profile/original.png", contentType : "image/png" );
+                    var agent = variables.svc.getAgentById( id );
+                    expect( agent.getProfileImageOriginalPath() ).toInclude( id );
+                    expect( agent.getProfileImageContentType() ).toBe( "image/png" );
+
+                    variables.svc.clearProfileImage( agentId : id );
+                    agent = variables.svc.getAgentById( id );
+                    expect( isNull( agent.getProfileImageOriginalPath() ) || !len( agent.getProfileImageOriginalPath() ) ).toBeTrue();
+                    cleanupAgent( id );
+                } );
+
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function uniqueEmail(){
+        return "agent-spec-" & replace( createUUID(), "-", "", "all" ) & "@example.com";
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_pending_email_changes WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles                 WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM team_members                WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents                       WHERE id       = :id", { id : arguments.agentId } );
+    }
+
+}
