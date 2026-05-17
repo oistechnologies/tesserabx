@@ -38,15 +38,19 @@ class {
         // trying to reach /agent/admin/*).
         route( "unauthorized" ).to( "Session.unauthorized" );
 
-        // Avatar serving: /agent/avatars/:id/:size streams a stored
-        // thumbnail from CBFS. Declared before the catchall so the
-        // two-segment pattern wins.
-        route( "avatars/:id/:size" ).withVerbs( "GET" ).to( "Avatars.show" );
+        // (The former /agent/avatars/:id/:size handler was removed in
+        // Phase 8.0. Avatars now serve directly from the public CBFS
+        // disk at <CBFS_PUBLIC_BASE_URL>/agents/<id>/profile/<size>.jpg,
+        // no app round-trip required.)
 
         // My Account surface: self-service for any logged-in agent.
         // confirm-email consumes the verification token; most-specific
-        // pattern first.
+        // pattern first. Avatar upload + clear use plain multipart
+        // POSTs (not cbwire) because the cbwire FileUpload object
+        // can't survive BoxLang's snapshot duplicate().
         route( "account/confirm-email" ).to( "Account.confirmEmail" );
+        route( "account/avatar/clear" ).withVerbs( "POST" ).to( "Account.clearAvatar" );
+        route( "account/avatar" ).withVerbs( "POST" ).to( "Account.uploadAvatar" );
         route( "account" ).to( "Account.index" );
 
         // Contacts: agent-created provisioning. Most-specific patterns

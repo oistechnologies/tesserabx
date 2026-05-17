@@ -12,6 +12,13 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         super.setup();
         variables.svc  = getController().getWireBox().getInstance( "ImageProcessingService@core" );
         variables.cbfs = getController().getWireBox().getInstance( "DiskService@cbfs" );
+        // Phase 8.0 moved avatars to the public CBFS disk; assert
+        // through the same disk the service writes to.
+        variables.publicDiskName = getController().getSetting( "cbfsPublicProvider" );
+    }
+
+    private any function avatarDisk(){
+        return variables.cbfs.get( variables.publicDiskName );
     }
 
     function run(){
@@ -60,7 +67,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     expect( paths ).toHaveKey( "128" );
                     expect( paths ).toHaveKey( "256" );
 
-                    var disk = variables.cbfs.defaultDisk();
+                    var disk = avatarDisk();
                     expect( disk.exists( paths.original ) ).toBeTrue();
                     for ( var size in [ 32, 64, 128, 256 ] ) {
                         var pkey = toString( size );
@@ -85,7 +92,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
                     variables.svc.processProfileImage( agentId, wide, "image/jpeg" );
                     var paths = variables.svc.processProfileImage( agentId, tall, "image/jpeg" );
-                    var disk  = variables.cbfs.defaultDisk();
+                    var disk = avatarDisk();
                     expect( disk.exists( paths.original ) ).toBeTrue();
 
                     variables.svc.deleteProfileImages( agentId );
@@ -104,7 +111,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     var paths = variables.svc.processProfileImage( agentId, path, "image/jpeg" );
                     variables.svc.deleteProfileImages( agentId );
 
-                    var disk = variables.cbfs.defaultDisk();
+                    var disk = avatarDisk();
                     expect( disk.exists( paths.original ) ).toBeFalse();
                     for ( var size in [ 32, 64, 128, 256 ] ) {
                         expect( disk.exists( paths[ toString( size ) ] ) ).toBeFalse();

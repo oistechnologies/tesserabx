@@ -19,7 +19,11 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
+    property name="wirebox"        inject="wirebox";
+    // Avatars are served from the public CBFS disk. The base URL
+    // env-driven via cbfsPublicBaseUrl ("/public-files" in dev,
+    // a CDN/bucket URL in prod).
+    property name="publicBaseUrl"  inject="coldbox:setting:cbfsPublicBaseUrl";
 
     variables.ALLOWED_SIZES = [ 32, 64, 128, 256 ];
 
@@ -70,7 +74,14 @@ class singleton=true {
                     bust = "";
                 }
             }
-            var src = "/agent/avatars/" & encodeForURL( arguments.agent.id ) & "/" & resolvedSize & bust;
+            // The thumbnail layout on the public disk is
+            //   agents/<agentId>/profile/<size>.jpg
+            // produced by ImageProcessingService.processProfileImage.
+            // publicBaseUrl is the configured URL prefix; in dev it
+            // resolves to "/public-files".
+            var src = variables.publicBaseUrl
+                & "/agents/" & encodeForURL( arguments.agent.id )
+                & "/profile/" & resolvedSize & ".jpg" & bust;
             var alt = initialsOf( arguments.agent );
             return "<img src=""" & src & """ width=""" & resolvedSize & """ height=""" & resolvedSize
                 & """ class=""rounded-circle"" alt=""" & encodeForHTMLAttribute( alt ) & """ "

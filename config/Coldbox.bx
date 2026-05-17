@@ -75,6 +75,14 @@ class {
             uploadAllowedExtensions : getSystemSetting( "UPLOAD_ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,txt,csv,xls,xlsx,doc,docx,zip" ),
             backupRetentionDays     : getSystemSetting( "BACKUP_RETENTION_DAYS", "14" ),
             cbfsDefaultProvider     : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" ),
+            // Public CBFS disk name. local in dev, public-s3 / public-b2 in prod.
+            // Helpers like AvatarHelper read this to resolve cbfs.disk(...).
+            cbfsPublicProvider      : getSystemSetting( "CBFS_PUBLIC_PROVIDER", "public-local" ),
+            // Base URL the browser will use to fetch public files.
+            // Local dev: empty string + leading "/public-files/" path
+            // is served by runwar's static handler. Production: a
+            // CDN/bucket URL ("https://cdn.tesserabx.com" or similar).
+            cbfsPublicBaseUrl       : getSystemSetting( "CBFS_PUBLIC_BASE_URL", "/public-files" ),
 
             // Curated North American IANA time zones used by every
             // user-facing time-zone picker (admin agent form, agent
@@ -134,17 +142,23 @@ class {
                 requestPanelDock : false
             },
 
-            // CBFS: file persistence. Three providers — pick one
-            // per environment via CBFS_DEFAULT_PROVIDER:
-            //   local — disk on the running container (dev)
-            //   s3    — genuine AWS S3 via cbfs's stock S3Provider
-            //   b2    — Backblaze B2 (or any non-AWS S3-compatible
-            //           endpoint whose hostname embeds the region)
-            //           via our B2Provider@core, which wraps s3sdk
-            //           with a path-style URL builder fix.
+            // CBFS: file persistence. The project runs with TWO
+            // logical disks:
             //
-            // s3 and b2 share one set of credentials env vars
+            //   defaultDisk (CBFS_DEFAULT_PROVIDER) — the SECURE
+            //     disk. App-gated reads only. Ticket attachments,
+            //     anything sensitive. Pick local / s3 / b2 per env.
+            //   "public" disk (CBFS_PUBLIC_PROVIDER) — the
+            //     web-reachable disk. <img src> / <a href> straight
+            //     from the browser, no app round-trip. Agent
+            //     avatars, public KB downloads. Pick public-local /
+            //     public-s3 / public-b2 per env.
+            //
+            // local/s3/b2 share one set of credentials env vars
             // (CBFS_PROVIDER_*) since only one is active at a time.
+            // public-* use their own CBFS_PUBLIC_* set so the public
+            // bucket can be a different AWS account / Backblaze key
+            // than the secure one.
             cbfs : {
                 defaultDisk : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" ),
                 disks : {
@@ -154,6 +168,69 @@ class {
                             path       : expandPath( "/storage" ),
                             autoExpand : true,
                             visibility : "private"
+                        }
+                    },
+                    // Public-readable local disk (dev default for the
+                    // "public" logical disk). Files land at
+                    // /app/public-files/ and runwar serves them as
+                    // static content at /public-files/...
+                    //
+                    // We deliberately do NOT use expandPath("/public-files")
+                    // because BoxLang's expandPath returns the literal
+                    // string "/public-files" (no /app/ prefix) when no
+                    // mapping covers that path — sending files to the
+                    // JVM root, out of runwar's reach. The other disk
+                    // (/storage) works because cbox has a mapping for
+                    // it; we don't have one for public-files. Concat
+                    // the web-root expandPath onto the segment instead.
+                    "public-local" : {
+                        provider   : "LocalProvider@cbfs",
+                        properties : {
+                            path       : expandPath( "/" ) & "public-files",
+                            autoExpand : true,
+                            visibility : "public"
+                        }
+                    },
+                    // Genuine AWS S3 bucket for prod public assets.
+                    // The bucket itself MUST have public-read on
+                    // objects (handled outside this config: bucket
+                    // policy or per-object ACL). cbfs writes do not
+                    // set ACL by default; the upstream object should
+                    // be public-by-default at the bucket level.
+                    "public-s3" : {
+                        provider   : "S3Provider@cbfs",
+                        properties : {
+                            accessKey         : getSystemSetting( "CBFS_PUBLIC_ACCESS_KEY", "" ),
+                            secretKey         : getSystemSetting( "CBFS_PUBLIC_SECRET_KEY", "" ),
+                            defaultBucketName : getSystemSetting( "CBFS_PUBLIC_BUCKET",     "" ),
+                            awsRegion         : getSystemSetting( "CBFS_PUBLIC_REGION",     "us-east-1" ),
+                            awsDomain         : "amazonaws.com",
+                            defaultACL        : "public-read",
+                            visibility        : "public",
+                            ssl               : true,
+                            path              : ""
+                        }
+                    },
+                    // Backblaze B2 / any S3-compatible endpoint, for
+                    // prod public assets. Uses our B2Provider with
+                    // the path-style URL fix.
+                    "public-b2" : {
+                        provider   : "B2Provider@core",
+                        properties : {
+                            accessKey         : getSystemSetting( "CBFS_PUBLIC_ACCESS_KEY", "" ),
+                            secretKey         : getSystemSetting( "CBFS_PUBLIC_SECRET_KEY", "" ),
+                            defaultBucketName : getSystemSetting( "CBFS_PUBLIC_BUCKET",     "" ),
+                            awsRegion         : getSystemSetting( "CBFS_PUBLIC_REGION",     "us-west-002" ),
+                            awsDomain         : reReplaceNoCase(
+                                                    getSystemSetting( "CBFS_PUBLIC_ENDPOINT", "s3.us-west-002.backblazeb2.com" ),
+                                                    "^https?://",
+                                                    ""
+                                                ),
+                            defaultACL        : "public-read",
+                            visibility        : "public",
+                            urlStyle          : "path",
+                            ssl               : true,
+                            path              : ""
                         }
                     },
                     "s3" : {

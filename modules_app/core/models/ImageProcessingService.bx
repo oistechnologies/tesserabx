@@ -25,8 +25,13 @@
  */
 class singleton=true {
 
-    property name="cbfs"    inject="DiskService@cbfs";
-    property name="wirebox" inject="wirebox";
+    property name="cbfs"          inject="DiskService@cbfs";
+    property name="wirebox"       inject="wirebox";
+    // Agent avatars land on the public CBFS disk so browsers can
+    // fetch them directly without an app round-trip. The disk name
+    // is env-driven via the cbfsPublicProvider setting (public-local
+    // in dev, public-s3 or public-b2 in prod).
+    property name="publicDiskName" inject="coldbox:setting:cbfsPublicProvider";
 
     // Pixel sizes generated for each profile image. Order doesn't
     // matter; the caller may serve any subset.
@@ -102,7 +107,9 @@ class singleton=true {
         required string contentType
     ){
         var ext   = lCase( listLast( arguments.sourcePath, "." ) );
-        var disk  = cbfs.defaultDisk();
+        // Avatars target the PUBLIC disk so AvatarHelper can build
+        // direct browser URLs (no /agent/avatars/... round-trip).
+        var disk  = cbfs.get( variables.publicDiskName );
         var base  = variables.PREFIX & "/" & arguments.agentId & "/profile";
         var paths = { original : base & "/original." & ext };
 
@@ -115,11 +122,14 @@ class singleton=true {
         // BoxLang's fileRead(path, "binary") rejects "binary" as a
         // charset; use the explicit binary read.
         var originalBytes = fileReadBinary( arguments.sourcePath );
+        // mode="644" so the browser-facing static handler can read
+        // the file. The 600 mode on the secure disk would block
+        // runwar's static handler from serving public assets.
         disk.create(
             path      : paths.original,
             contents  : originalBytes,
             overwrite : true,
-            mode      : "600"
+            mode      : "644"
         );
 
         // Decode once; reuse the BufferedImage across every size.
@@ -140,7 +150,7 @@ class singleton=true {
                 path      : paths[ pkey ],
                 contents  : bytes,
                 overwrite : true,
-                mode      : "600"
+                mode      : "644"
             );
         }
         return paths;
@@ -159,7 +169,7 @@ class singleton=true {
      * shouldn't fail.
      */
     public void function deleteProfileImages( required string agentId ){
-        var disk = cbfs.defaultDisk();
+        var disk = cbfs.get( variables.publicDiskName );
         var base = variables.PREFIX & "/" & arguments.agentId & "/profile";
 
         // Try every known extension for the original; thumbnails are

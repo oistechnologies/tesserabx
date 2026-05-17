@@ -51,6 +51,11 @@ logs/
 # an admin view folder named "storage" we do want to track).
 /storage/
 
+# CBFS public-disk local storage (dev). Track the dir itself
+# (via the committed .gitkeep) but ignore everything underneath.
+/public-files/*
+!/public-files/.gitkeep
+
 # Database backups
 /backups/
 

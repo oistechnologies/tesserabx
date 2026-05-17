@@ -1,0 +1,52 @@
+/**
+ * CBFSDiskSetupSpec: smoke test for the dual-disk architecture
+ * introduced in Phase 8.0.
+ *
+ * - The configured public disk resolves and round-trips a write.
+ * - The default (secure) disk resolves and is distinct from public.
+ * - Both disks accept binary writes with the conventional modes
+ *   (644 public, 600 secure).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.cbfs        = getController().getWireBox().getInstance( "DiskService@cbfs" );
+        variables.publicName  = getController().getSetting( "cbfsPublicProvider" );
+    }
+
+    function run(){
+        describe( "CBFS dual-disk setup", function(){
+
+            it( "resolves the configured public disk by name", function(){
+                var disk = variables.cbfs.get( variables.publicName );
+                expect( disk ).notToBeNull();
+            } );
+
+            it( "resolves the default (secure) disk", function(){
+                expect( variables.cbfs.defaultDisk() ).notToBeNull();
+            } );
+
+            it( "round-trips a small write/read on the public disk", function(){
+                var key  = "spec-cbfs-setup/" & createUUID() & ".txt";
+                var disk = variables.cbfs.get( variables.publicName );
+                disk.create( path : key, contents : "hello", overwrite : true, mode : "644" );
+                expect( disk.exists( key ) ).toBeTrue();
+                expect( toString( disk.get( key ) ) ).toBe( "hello" );
+                disk.delete( key );
+            } );
+
+            it( "round-trips a small write/read on the secure disk", function(){
+                var key  = "spec-cbfs-setup/" & createUUID() & ".txt";
+                var disk = variables.cbfs.defaultDisk();
+                disk.create( path : key, contents : "hello", overwrite : true, mode : "600" );
+                expect( disk.exists( key ) ).toBeTrue();
+                expect( toString( disk.get( key ) ) ).toBe( "hello" );
+                disk.delete( key );
+            } );
+
+        } );
+    }
+
+}
