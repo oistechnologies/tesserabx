@@ -32,6 +32,27 @@
                         <span>#encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
                     </div>
                     <div style="white-space:pre-wrap">#encodeForHTML( local.m.getBody() )#</div>
+
+                    <bx:set local.msgAtts = ( prc.attachmentsByMessageId ?: {} )[ local.m.getId() ] ?: [] >
+                    <bx:if arrayLen( local.msgAtts )>
+                        <div class="d-flex flex-wrap gap-2 mt-2 pt-2 border-top">
+                            <bx:loop array="#local.msgAtts#" item="local.att">
+                                <bx:set local.attUrl   = "/tickets/" & encodeForHTMLAttribute( local.t.getId() ) & "/attachments/" & encodeForHTMLAttribute( local.att.getId() ) >
+                                <bx:set local.thumbUrl = local.attUrl & "/thumbnail" >
+                                <bx:if local.att.isImage() && local.att.getThumbnailStatus() == "ready">
+                                    <a href="#local.attUrl#" target="_blank" rel="noopener" title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
+                                        <img src="#local.thumbUrl#" alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
+                                             style="max-height:80px; border-radius:4px; border:1px solid var(--bs-border-color);">
+                                    </a>
+                                <bx:else>
+                                    <a href="#local.attUrl#" class="btn btn-sm btn-outline-secondary" title="Download #encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
+                                        <i class="bi bi-paperclip"></i> #encodeForHTML( local.att.getOriginalFilename() )#
+                                        <span class="small text-body-secondary">(#encodeForHTML( local.att.displaySize() )#)</span>
+                                    </a>
+                                </bx:if>
+                            </bx:loop>
+                        </div>
+                    </bx:if>
                 </div>
             </div>
         </bx:loop>
@@ -39,8 +60,14 @@
         <div class="card mt-3">
             <div class="card-header">Reply</div>
             <div class="card-body">
-                <form method="post" action="/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply">
+                <form method="post" action="/tickets/#encodeForHTMLAttribute( local.t.getId() )#/reply" enctype="multipart/form-data">
                     <textarea class="form-control mb-2" name="body" rows="4" placeholder="Type your reply..." required></textarea>
+                    <div class="mb-2">
+                        <label class="form-label small text-body-secondary mb-1">
+                            <i class="bi bi-paperclip"></i> Attachments (optional)
+                        </label>
+                        <input type="file" name="attachments" class="form-control form-control-sm" multiple>
+                    </div>
                     <div class="d-flex justify-content-end">
                         <button class="btn btn-primary" type="submit">Send reply</button>
                     </div>
@@ -51,7 +78,7 @@
     </div>
 
     <div class="col-12 col-lg-4">
-        <div class="card">
+        <div class="card mb-3">
             <div class="card-header">Details</div>
             <div class="card-body">
                 <dl class="row small mb-0">
@@ -64,6 +91,46 @@
                         <dd class="col-sm-7">#encodeForHTML( dateTimeFormat( local.t.getResolvedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
                     </bx:if>
                 </dl>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Attachments</span>
+                <span class="badge text-bg-secondary">#arrayLen( prc.attachments ?: [] )#</span>
+            </div>
+            <div class="card-body">
+                <bx:if !arrayLen( prc.attachments ?: [] )>
+                    <p class="text-body-secondary small mb-0">No attachments yet.</p>
+                <bx:else>
+                    <ul class="list-unstyled mb-0">
+                        <bx:loop array="#prc.attachments#" item="local.att">
+                            <bx:set local.attUrl   = "/tickets/" & encodeForHTMLAttribute( local.t.getId() ) & "/attachments/" & encodeForHTMLAttribute( local.att.getId() ) >
+                            <bx:set local.thumbUrl = local.attUrl & "/thumbnail" >
+                            <li class="mb-2 d-flex gap-2 align-items-start">
+                                <bx:if local.att.isImage() && local.att.getThumbnailStatus() == "ready">
+                                    <a href="#local.attUrl#" target="_blank" rel="noopener" style="flex:0 0 56px;">
+                                        <img src="#local.thumbUrl#" alt=""
+                                             style="width:56px; height:56px; object-fit:cover; border-radius:4px; border:1px solid var(--bs-border-color);">
+                                    </a>
+                                <bx:else>
+                                    <span class="text-body-secondary" style="flex:0 0 56px; font-size:2rem; text-align:center;">
+                                        <i class="bi bi-file-earmark"></i>
+                                    </span>
+                                </bx:if>
+                                <div class="small flex-grow-1 text-truncate">
+                                    <a href="#local.attUrl#" class="text-decoration-none">
+                                        #encodeForHTML( local.att.getOriginalFilename() )#
+                                    </a>
+                                    <div class="text-body-secondary">
+                                        #encodeForHTML( local.att.displaySize() )#
+                                        &middot; #encodeForHTML( dateTimeFormat( local.att.getCreatedAt(), "yyyy-mm-dd" ) )#
+                                    </div>
+                                </div>
+                            </li>
+                        </bx:loop>
+                    </ul>
+                </bx:if>
             </div>
         </div>
     </div>

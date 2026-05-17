@@ -35,6 +35,11 @@ class extends="coldbox.system.web.routing.Router" {
         route( "/logout" ).to( "portal:Session.delete" );
 
         // Client-side tickets workspace. Most-specific patterns first.
+        // Attachment routes nest under their parent ticket so the URL
+        // itself encodes the access path; the handler still verifies
+        // attachment.ticketId matches before streaming.
+        route( "/tickets/:ticketId/attachments/:attachmentId/thumbnail" ).withVerbs( "GET" ).to( "portal:Attachments.thumbnail" );
+        route( "/tickets/:ticketId/attachments/:attachmentId" ).withVerbs( "GET" ).to( "portal:Attachments.show" );
         route( "/tickets/:id/reply" ).withVerbs( "POST" ).to( "portal:Tickets.reply" );
         route( "/tickets/new" ).withHandler( "portal:Tickets" ).toAction( {
             "GET"  : "new",

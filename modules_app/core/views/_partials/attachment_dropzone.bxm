@@ -1,0 +1,139 @@
+<bx:output>
+<!-- Progressive enhancement for every <input type="file" multiple>.
+     With JS off, the input behaves as a native file picker and the
+     surrounding form posts normally. With JS on, the input is hidden
+     and replaced with a drag/drop target that mirrors the FileList
+     into a chip preview and lets the user remove individual files
+     before submit. No XHR — the form's normal POST still drives the
+     upload, so server-side validation behaviour is unchanged. -->
+<style>
+    .tbx-dropzone{
+        border:2px dashed var(--bs-border-color);
+        border-radius:.5rem;
+        padding:.75rem 1rem;
+        text-align:center;
+        cursor:pointer;
+        background:var(--bs-tertiary-bg);
+        transition:background-color .15s, border-color .15s;
+        font-size:.875rem;
+    }
+    .tbx-dropzone:hover,
+    .tbx-dropzone.is-dragover{
+        background:var(--bs-secondary-bg);
+        border-color:var(--bs-primary);
+    }
+    .tbx-dropzone-prompt i{font-size:1.25rem; vertical-align:middle; margin-right:.25rem;}
+    .tbx-dropzone-chips{display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.5rem;}
+    .tbx-dropzone-chip{
+        display:inline-flex; align-items:center; gap:.35rem;
+        background:var(--bs-body-bg);
+        border:1px solid var(--bs-border-color);
+        border-radius:1rem;
+        padding:.1rem .5rem .1rem .65rem;
+        font-size:.8rem;
+        max-width:100%;
+    }
+    .tbx-dropzone-chip-name{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:14rem;}
+    .tbx-dropzone-chip button{
+        background:none; border:0; padding:0; line-height:1; color:var(--bs-secondary-color);
+        cursor:pointer; font-size:1rem;
+    }
+    .tbx-dropzone-chip button:hover{color:var(--bs-danger);}
+</style>
+<script>
+(function(){
+    if ( !window.DataTransfer ) return; // ancient browser, leave input alone
+
+    function fmtSize( bytes ){
+        if ( bytes < 1024 ) return bytes + ' B';
+        if ( bytes < 1048576 ) return ( bytes / 1024 ).toFixed( 1 ) + ' KB';
+        return ( bytes / 1048576 ).toFixed( 1 ) + ' MB';
+    }
+
+    function enhance( input ){
+        if ( input.dataset.tbxDropzone === '1' ) return;
+        input.dataset.tbxDropzone = '1';
+
+        var wrap = document.createElement( 'div' );
+        wrap.className = 'tbx-dropzone';
+        wrap.innerHTML = '<div class="tbx-dropzone-prompt"><i class="bi bi-cloud-upload"></i>'
+            + 'Drop files here or click to choose</div>'
+            + '<div class="tbx-dropzone-chips"></div>';
+
+        input.parentNode.insertBefore( wrap, input );
+        wrap.appendChild( input );
+        input.style.display = 'none';
+
+        var chips = wrap.querySelector( '.tbx-dropzone-chips' );
+
+        function render(){
+            chips.innerHTML = '';
+            Array.from( input.files || [] ).forEach( function( f, idx ){
+                var chip = document.createElement( 'span' );
+                chip.className = 'tbx-dropzone-chip';
+                var name = document.createElement( 'span' );
+                name.className = 'tbx-dropzone-chip-name';
+                name.textContent = f.name;
+                var size = document.createElement( 'span' );
+                size.className = 'text-body-secondary';
+                size.textContent = fmtSize( f.size );
+                var rm = document.createElement( 'button' );
+                rm.type = 'button';
+                rm.title = 'Remove';
+                rm.innerHTML = '&times;';
+                rm.addEventListener( 'click', function( e ){
+                    e.stopPropagation();
+                    var dt = new DataTransfer();
+                    Array.from( input.files ).forEach( function( ff, i ){
+                        if ( i !== idx ) dt.items.add( ff );
+                    } );
+                    input.files = dt.files;
+                    render();
+                } );
+                chip.appendChild( name );
+                chip.appendChild( size );
+                chip.appendChild( rm );
+                chips.appendChild( chip );
+            } );
+        }
+
+        wrap.addEventListener( 'click', function( e ){
+            if ( e.target.tagName === 'BUTTON' ) return;
+            input.click();
+        } );
+        input.addEventListener( 'change', render );
+
+        [ 'dragenter', 'dragover' ].forEach( function( ev ){
+            wrap.addEventListener( ev, function( e ){
+                e.preventDefault();
+                wrap.classList.add( 'is-dragover' );
+            } );
+        } );
+        [ 'dragleave', 'drop' ].forEach( function( ev ){
+            wrap.addEventListener( ev, function( e ){
+                e.preventDefault();
+                wrap.classList.remove( 'is-dragover' );
+            } );
+        } );
+        wrap.addEventListener( 'drop', function( e ){
+            if ( !e.dataTransfer || !e.dataTransfer.files ) return;
+            var dt = new DataTransfer();
+            Array.from( input.files || [] ).forEach( function( f ){ dt.items.add( f ); } );
+            Array.from( e.dataTransfer.files ).forEach( function( f ){ dt.items.add( f ); } );
+            input.files = dt.files;
+            render();
+        } );
+    }
+
+    function scan(){
+        document.querySelectorAll( 'input[type="file"][name="attachments"][multiple]' ).forEach( enhance );
+    }
+
+    if ( document.readyState === 'loading' ) {
+        document.addEventListener( 'DOMContentLoaded', scan );
+    } else {
+        scan();
+    }
+})();
+</script>
+</bx:output>

@@ -1,0 +1,102 @@
+/**
+ * portal:Attachments — contact-facing attachment download surface.
+ *
+ * Mirrors the agent handler with one difference: the URL itself
+ * nests the attachment under its parent ticket (/tickets/:ticketId/
+ * attachments/:attachmentId) so the handler can verify the URL's
+ * ticketId matches the attachment's own ticketId before streaming.
+ * That redundant check is intentional defense-in-depth on the
+ * contact surface; the service chokepoint already enforces tenant
+ * scope, but a mismatched URL still 403s so a copy/paste accident
+ * across organizations is invisible to the recipient.
+ */
+class {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="cbfs"           inject="DiskService@cbfs";
+    property name="auth"           inject="AuthenticationService@cbauth";
+
+    function show( event, rc, prc ){
+        param rc.ticketId     = "";
+        param rc.attachmentId = "";
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var viewer = { type : "contact", id : auth.getUser().getId() };
+        try {
+            var att   = ticketsService.getAttachmentForViewer( rc.attachmentId, viewer );
+            if ( att.getTicketId() != rc.ticketId ) return notFound( event );
+            var bytes = ticketsService.readAttachmentBytes( rc.attachmentId, viewer );
+        } catch ( TicketsService.AttachmentNotFound e ) {
+            return notFound( event );
+        } catch ( TicketsService.AttachmentAccessDenied e ) {
+            return forbidden( event );
+        }
+        event.setHTTPHeader( name = "Cache-Control", value = "private, no-store" );
+        event.setHTTPHeader(
+            name  = "Content-Disposition",
+            value = "attachment; filename=""" & sanitizeFilename( att.getOriginalFilename() ) & """"
+        );
+        event.renderData(
+            type        = "plain",
+            data        = asBinary( bytes ),
+            contentType = att.getContentType(),
+            isBinary    = true
+        );
+    }
+
+    function thumbnail( event, rc, prc ){
+        param rc.ticketId     = "";
+        param rc.attachmentId = "";
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var viewer = { type : "contact", id : auth.getUser().getId() };
+        try {
+            var att = ticketsService.getAttachmentForViewer( rc.attachmentId, viewer );
+        } catch ( TicketsService.AttachmentNotFound e ) {
+            return notFound( event );
+        } catch ( TicketsService.AttachmentAccessDenied e ) {
+            return forbidden( event );
+        }
+        if ( att.getTicketId() != rc.ticketId ) return notFound( event );
+        if ( att.getThumbnailStatus() != "ready" ) return notFound( event );
+        var disk = cbfs.defaultDisk();
+        var path = att.getCbfsPath() & ".thumb.jpg";
+        if ( !disk.exists( path ) ) return notFound( event );
+        event.setHTTPHeader( name = "Cache-Control", value = "private, max-age=3600" );
+        event.renderData(
+            type        = "plain",
+            data        = asBinary( disk.get( path ) ),
+            contentType = "image/jpeg",
+            isBinary    = true
+        );
+    }
+
+    // ---------- internals ----------
+
+    private void function notFound( event ){
+        event.setHTTPHeader( statusCode = 404, statusText = "Not Found" );
+        event.renderData( type = "plain", data = "", statusCode = 404 );
+    }
+
+    private void function forbidden( event ){
+        event.setHTTPHeader( statusCode = 403, statusText = "Forbidden" );
+        event.renderData( type = "plain", data = "", statusCode = 403 );
+    }
+
+    private any function asBinary( required any value ){
+        if ( isBinary( arguments.value ) ) return arguments.value;
+        if ( isInstanceOf( arguments.value, "[B" ) ) return arguments.value;
+        return charsetDecode( toString( arguments.value ), "ISO-8859-1" );
+    }
+
+    private string function sanitizeFilename( required string filename ){
+        var safe = reReplace( arguments.filename, "[^A-Za-z0-9._-]", "_", "all" );
+        if ( !len( safe ) ) safe = "download";
+        return safe;
+    }
+
+}

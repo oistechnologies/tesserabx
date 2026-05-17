@@ -1,5 +1,5 @@
 <bx:output>
-<form method="post" action="/tickets/new" class="card">
+<form method="post" action="/tickets/new" enctype="multipart/form-data" class="card">
     <div class="card-body">
         <div class="row g-3">
             <div class="col-12">
@@ -25,6 +25,13 @@
             <div class="col-12">
                 <label class="form-label" for="body">What do you need help with? <span class="text-danger">*</span></label>
                 <textarea class="form-control" id="body" name="body" rows="6" required>#encodeForHTML( prc.formData.body ?: "" )#</textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="new-ticket-attachments">
+                    <i class="bi bi-paperclip"></i> Attachments (optional)
+                </label>
+                <input type="file" class="form-control" id="new-ticket-attachments" name="attachments" multiple>
+                <div class="form-text small">You can attach screenshots or related files.</div>
             </div>
         </div>
         <div class="d-flex justify-content-end gap-2 mt-4">

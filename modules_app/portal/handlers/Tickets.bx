@@ -52,6 +52,20 @@ class {
         prc.ticket    = t;
         prc.pageTitle = "Ticket ##" & t.getTicketNumber();
         prc.messages  = ticketsService.listMessagesForTicket( t.getId() );
+
+        // Contact viewer — service filters internal-note + soft-deleted
+        // attachments + enforces tenant scope on every row.
+        var viewer = { type : "contact", id : me.getId() };
+        prc.attachments = ticketsService.listAttachmentsForTicket( t.getId(), viewer );
+        prc.attachmentsByMessageId = {};
+        for ( var att in prc.attachments ) {
+            var mid = att.getMessageId() ?: "";
+            if ( !len( mid ) ) continue;
+            if ( !structKeyExists( prc.attachmentsByMessageId, mid ) ) {
+                prc.attachmentsByMessageId[ mid ] = [];
+            }
+            prc.attachmentsByMessageId[ mid ].append( att );
+        }
         event.setView( "tickets/show" );
     }
 
@@ -73,13 +87,22 @@ class {
             relocate( uri = "/tickets/" & t.getId() );
             return;
         }
-        ticketsService.addMessage( {
+        var msg = ticketsService.addMessage( {
             ticketId        : t.getId(),
             body            : rc.body,
             authorContactId : me.getId(),
             isInternal      : false
         } );
-        messagebox.info( "Reply sent." );
+        var att = processUploadedAttachments( t.getId(), me.getId(), msg.getId() );
+        if ( att.ok > 0 && !arrayLen( att.failed ) ) {
+            messagebox.info( "Reply sent. Attached " & att.ok & " file(s)." );
+        } else if ( att.ok > 0 ) {
+            messagebox.warn( "Reply sent. Attached " & att.ok & " file(s); rejected: " & arrayToList( att.failed, "; " ) );
+        } else if ( arrayLen( att.failed ) ) {
+            messagebox.warn( "Reply sent. Attachments rejected: " & arrayToList( att.failed, "; " ) );
+        } else {
+            messagebox.info( "Reply sent." );
+        }
         relocate( uri = "/tickets/" & t.getId() );
     }
 
@@ -130,17 +153,71 @@ class {
             actorType          : "contact",
             actorId            : me.getId()
         } );
-        ticketsService.addMessage( {
+        var msg = ticketsService.addMessage( {
             ticketId        : ticket.getId(),
             body            : rc.body,
             authorContactId : me.getId(),
             isInternal      : false
         } );
-        messagebox.info( "Ticket submitted." );
+        var att = processUploadedAttachments( ticket.getId(), me.getId(), msg.getId() );
+        if ( att.ok > 0 && !arrayLen( att.failed ) ) {
+            messagebox.info( "Ticket submitted with " & att.ok & " attachment(s)." );
+        } else if ( arrayLen( att.failed ) ) {
+            messagebox.warn( "Ticket submitted. Some attachments were rejected: " & arrayToList( att.failed, "; " ) );
+        } else {
+            messagebox.info( "Ticket submitted." );
+        }
         relocate( uri = "/tickets/" & ticket.getId() );
     }
 
     // ---------- internals ----------
+
+    /**
+     * Loops the multi-file form field "attachments" through
+     * TicketsService.addAttachment, scoped to one ticket + the
+     * uploading contact. Returns { ok, failed[] } so the caller can
+     * fold the outcome into its existing flash. Returns zeros (not
+     * an error) when no files were posted.
+     */
+    private struct function processUploadedAttachments(
+        required string ticketId,
+        required string contactId,
+        string messageId = ""
+    ){
+        var result = { "ok" : 0, "failed" : [] };
+        if ( !structKeyExists( form, "attachments" ) || !len( form.attachments ?: "" ) ) {
+            return result;
+        }
+        var destDir = getTempDirectory() & "/portal-att-" & createUUID() & "/";
+        directoryCreate( destDir );
+        try {
+            var results = fileUploadAll( destination = destDir, nameConflict = "makeUnique" );
+            for ( var r in results ) {
+                var srcPath = destDir & r.serverFile;
+                var ctype   = r.contentType & "/" & r.contentSubType;
+                try {
+                    var data = {
+                        ticketId          : arguments.ticketId,
+                        originalFilename  : r.clientFile,
+                        contentType       : ctype,
+                        sizeBytes         : r.fileSize,
+                        sourcePath        : srcPath,
+                        uploaderContactId : arguments.contactId
+                    };
+                    if ( len( arguments.messageId ) ) data.messageId = arguments.messageId;
+                    ticketsService.addAttachment( data );
+                    result.ok++;
+                } catch ( any e ) {
+                    result.failed.append( r.clientFile & " (" & e.message & ")" );
+                }
+                try { fileDelete( srcPath ); } catch ( any e ) {}
+            }
+        } catch ( any e ) {
+            result.failed.append( "(upload error) " & e.message );
+        }
+        try { directoryDelete( destDir, true ); } catch ( any e ) {}
+        return result;
+    }
 
     /**
      * Org Admins see every ticket in the org; regular contacts see
