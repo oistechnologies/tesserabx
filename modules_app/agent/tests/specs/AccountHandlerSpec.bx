@@ -1,0 +1,64 @@
+/**
+ * AccountHandlerSpec: integration coverage for /agent/account/confirm-email.
+ *
+ * Dispatches against the handler directly (renderResults=true so
+ * relocations and statusCodes propagate to event state, per the
+ * AvatarsHandlerSpec pattern).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "AgentService@agent" );
+    }
+
+    function run(){
+        describe( "Account.confirmEmail", function(){
+
+            it( "swaps the email when given a valid token", function(){
+                var id    = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var newE  = uniqueEmail();
+                var token = variables.svc.requestEmailChange( agentId : id, newEmail : newE );
+
+                var rc = getRequestContext();
+                rc.setValue( "token", token );
+                execute( event : "agent:Account.confirmEmail", renderResults : true );
+
+                expect( variables.svc.getAgentById( id ).getEmail() ).toBe( lCase( newE ) );
+                cleanup( id );
+            } );
+
+            it( "rejects a replayed (consumed) token", function(){
+                var id    = variables.svc.createAgent( data : { email : uniqueEmail(), password : "p" } );
+                var newE  = uniqueEmail();
+                var token = variables.svc.requestEmailChange( agentId : id, newEmail : newE );
+                variables.svc.confirmEmailChange( token );
+
+                expect( variables.svc.confirmEmailChange( token ) ).toBeFalse();
+                cleanup( id );
+            } );
+
+            it( "rejects an unknown token", function(){
+                var rc = getRequestContext();
+                rc.setValue( "token", "not-a-real-token" );
+                execute( event : "agent:Account.confirmEmail", renderResults : true );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function uniqueEmail(){
+        return "spec-acct-" & replace( createUUID(), "-", "", "all" ) & "@example.com";
+    }
+
+    private void function cleanup( required string agentId ){
+        queryExecute( "DELETE FROM agent_pending_email_changes WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles                 WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM team_members                WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents                       WHERE id       = :id", { id : arguments.agentId } );
+    }
+
+}

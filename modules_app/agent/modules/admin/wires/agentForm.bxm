@@ -151,8 +151,13 @@
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label">Time zone</label>
-                                <input type="text" class="form-control" wire:model="timezone" placeholder="UTC">
-                                <div class="form-text">IANA name, for example <code>America/Chicago</code>.</div>
+                                <select class="form-select" wire:model="timezone">
+                                    <bx:loop array="#timezones()#" item="local.tz">
+                                        <option value="#encodeForHTMLAttribute( local.tz.id )#" #( local.tz.id == timezone ? 'selected' : '' )#>
+                                            #encodeForHTML( local.tz.label )#
+                                        </option>
+                                    </bx:loop>
+                                </select>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Locale</label>

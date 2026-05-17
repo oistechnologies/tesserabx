@@ -74,7 +74,34 @@ class {
             uploadMaxBytes          : getSystemSetting( "UPLOAD_MAX_BYTES", "26214400" ),
             uploadAllowedExtensions : getSystemSetting( "UPLOAD_ALLOWED_EXTENSIONS", "jpg,jpeg,png,gif,pdf,txt,csv,xls,xlsx,doc,docx,zip" ),
             backupRetentionDays     : getSystemSetting( "BACKUP_RETENTION_DAYS", "14" ),
-            cbfsDefaultProvider     : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" )
+            cbfsDefaultProvider     : getSystemSetting( "CBFS_DEFAULT_PROVIDER", "local" ),
+
+            // Curated North American IANA time zones used by every
+            // user-facing time-zone picker (admin agent form, agent
+            // self-service profile, etc.). Add new zones here as the
+            // user base expands; modules read this via getSetting.
+            // Order is roughly west-to-east within the US, then the
+            // rest of North America by country.
+            timezones : [
+                { id : "Pacific/Honolulu",      label : "Hawaii (HST)" },
+                { id : "America/Anchorage",     label : "Alaska (AKST/AKDT)" },
+                { id : "America/Los_Angeles",   label : "Pacific (PST/PDT) - US" },
+                { id : "America/Phoenix",       label : "Arizona (MST, no DST)" },
+                { id : "America/Denver",        label : "Mountain (MST/MDT) - US" },
+                { id : "America/Chicago",       label : "Central (CST/CDT) - US" },
+                { id : "America/New_York",      label : "Eastern (EST/EDT) - US" },
+                { id : "America/Vancouver",     label : "Pacific (PT) - Canada" },
+                { id : "America/Edmonton",      label : "Mountain (MT) - Canada" },
+                { id : "America/Winnipeg",      label : "Central (CT) - Canada" },
+                { id : "America/Toronto",       label : "Eastern (ET) - Canada" },
+                { id : "America/Halifax",       label : "Atlantic (AT) - Canada" },
+                { id : "America/St_Johns",      label : "Newfoundland (NT) - Canada" },
+                { id : "America/Tijuana",       label : "Pacific - Mexico (Baja)" },
+                { id : "America/Hermosillo",    label : "Mountain - Mexico (Sonora)" },
+                { id : "America/Mexico_City",   label : "Central - Mexico" },
+                { id : "America/Cancun",        label : "Eastern - Mexico (Quintana Roo)" },
+                { id : "UTC",                   label : "UTC" }
+            ]
         };
 
         // Module activation: bx-* are BoxLang server modules, not

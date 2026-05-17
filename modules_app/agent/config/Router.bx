@@ -43,6 +43,12 @@ class {
         // two-segment pattern wins.
         route( "avatars/:id/:size" ).withVerbs( "GET" ).to( "Avatars.show" );
 
+        // My Account surface: self-service for any logged-in agent.
+        // confirm-email consumes the verification token; most-specific
+        // pattern first.
+        route( "account/confirm-email" ).to( "Account.confirmEmail" );
+        route( "account" ).to( "Account.index" );
+
         // Contacts: agent-created provisioning. Most-specific patterns
         // first so /contacts/new and /contacts/:id/edit win over
         // /contacts/:id.

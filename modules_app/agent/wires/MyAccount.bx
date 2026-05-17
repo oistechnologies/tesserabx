@@ -1,0 +1,304 @@
+/**
+ * MyAccount: self-service surface for any logged-in agent.
+ *
+ * Four tabs:
+ *   - Profile  : non-sensitive fields (name, phone, timezone, bio, sig)
+ *   - Password : current + new + confirm, bcrypt swap
+ *   - MFA      : enroll if not enrolled, regenerate recovery codes; no
+ *                disable button per CLAUDE.md (MFA is mandatory for
+ *                provider agents)
+ *   - Email    : request a change; verification token sent to the new
+ *                address; confirm landing goes to Account.confirmEmail
+ *
+ * Avatar upload is rendered in the navbar dropdown OR in a follow-on
+ * iteration; for now this wire focuses on the four tabs above. The
+ * cbwire FileUpload + BoxLang duplicate() incompatibility documented
+ * in Phase 3 means any avatar work here uses a plain form POST.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="agentService"  inject="AgentService@agent";
+    property name="totp"          inject="TotpService@agent";
+    property name="mailService"   inject="mailService@cbmailservices";
+    property name="auth"          inject="AuthenticationService@cbauth";
+    // Curated time-zone list lives in coldbox settings so every
+    // module shares the same picker without duplicating data.
+    property name="timezoneList"  inject="coldbox:setting:timezones";
+
+    data = {
+        "activeTab"        : "profile",
+
+        // Profile (self-editable whitelist; AgentService enforces).
+        "firstName"        : "",
+        "lastName"         : "",
+        "phoneWork"        : "",
+        "phoneMobile"      : "",
+        "timezone"         : "UTC",
+        "locale"           : "en-US",
+        "bio"              : "",
+        "emailSignature"   : "",
+        "slackHandle"      : "",
+        "teamsHandle"      : "",
+
+        // Password change.
+        "currentPassword"  : "",
+        "newPassword"      : "",
+        "newPasswordConfirm" : "",
+
+        // MFA enrollment scratch.
+        "mfaEnrollSecret"  : "",
+        "mfaEnrollCode"    : "",
+        "mfaRecoveryShown" : [],
+
+        // Email change request.
+        "newEmail"         : "",
+        "pendingNewEmail"  : "",
+
+        // Read-only display values.
+        "currentEmail"     : "",
+        "mfaEnabled"       : false,
+
+        // Transient UI feedback (one-shot; cleared by next action).
+        "errors"           : [],
+        "notice"           : "",
+        "noticeKind"       : "info"
+    };
+
+    // Identity values are loaded once from the signed-in agent and
+    // never round-trip through the client.
+    locked = [ "currentEmail", "mfaEnabled" ];
+
+    function onMount(){
+        loadFromAgent();
+    }
+
+    // ---------------- Tab switching ----------------
+
+    function setTab( tab ){
+        data.activeTab = arguments.tab;
+        data.errors    = [];
+        data.notice    = "";
+    }
+
+    // ---------------- Profile ----------------
+
+    function saveProfile(){
+        try {
+            agentService.updateOwnProfile(
+                agentId : currentAgentId(),
+                data    : {
+                    firstName       : data.firstName,
+                    lastName        : data.lastName,
+                    phone_work      : data.phoneWork,
+                    phone_mobile    : data.phoneMobile,
+                    timezone        : data.timezone,
+                    locale          : data.locale,
+                    bio             : data.bio,
+                    email_signature : data.emailSignature,
+                    slack_handle    : data.slackHandle,
+                    teams_handle    : data.teamsHandle
+                }
+            );
+            notice( "Profile saved.", "success" );
+        } catch ( any e ) {
+            data.errors = [ "Save failed: " & e.message ];
+        }
+    }
+
+    // ---------------- Password ----------------
+
+    function changePassword(){
+        data.errors = [];
+        if ( !len( data.currentPassword ) ) data.errors.append( "Current password is required." );
+        if ( !len( data.newPassword )     ) data.errors.append( "New password is required." );
+        if ( len( data.newPassword ) && len( data.newPassword ) < 8 ) {
+            data.errors.append( "New password must be at least 8 characters." );
+        }
+        if ( data.newPassword != data.newPasswordConfirm ) {
+            data.errors.append( "New password and confirmation do not match." );
+        }
+        if ( arrayLen( data.errors ) ) return;
+
+        try {
+            agentService.changePassword(
+                agentId         : currentAgentId(),
+                currentPassword : data.currentPassword,
+                newPassword     : data.newPassword
+            );
+            data.currentPassword    = "";
+            data.newPassword        = "";
+            data.newPasswordConfirm = "";
+            notice( "Password updated.", "success" );
+        } catch ( AgentService.WrongPassword e ) {
+            data.errors = [ "Current password does not match." ];
+        } catch ( any e ) {
+            data.errors = [ "Password change failed: " & e.message ];
+        }
+    }
+
+    // ---------------- MFA ----------------
+
+    function beginMfaEnroll(){
+        if ( data.mfaEnabled ) return;
+        data.mfaEnrollSecret = totp.generateSecret();
+        data.mfaEnrollCode   = "";
+        data.errors          = [];
+        data.notice          = "";
+    }
+
+    function confirmMfaEnroll(){
+        if ( !len( data.mfaEnrollSecret ) ) {
+            data.errors = [ "Start enrollment first." ];
+            return;
+        }
+        if ( !totp.verifyCode( data.mfaEnrollSecret, data.mfaEnrollCode ) ) {
+            data.errors = [ "That code did not match. Try the latest 6-digit code from your authenticator." ];
+            return;
+        }
+        var codes  = totp.generateRecoveryCodes();
+        var hashed = totp.hashRecoveryCodes( codes );
+        queryExecute(
+            "UPDATE agents
+             SET    mfa_secret         = :s,
+                    mfa_enabled        = TRUE,
+                    mfa_enrolled_at    = NOW(),
+                    mfa_recovery_codes = cast( :rc as json ),
+                    updated_at         = NOW()
+             WHERE  id = :id",
+            {
+                id : currentAgentId(),
+                s  : data.mfaEnrollSecret,
+                rc : jsonSerialize( hashed )
+            }
+        );
+        data.mfaEnabled       = true;
+        data.mfaEnrollSecret  = "";
+        data.mfaEnrollCode    = "";
+        data.mfaRecoveryShown = codes;
+        notice( "MFA enrolled. Save your recovery codes; they will not be shown again.", "success" );
+    }
+
+    function regenerateRecoveryCodes(){
+        if ( !data.mfaEnabled ) {
+            data.errors = [ "Enroll in MFA first." ];
+            return;
+        }
+        var codes  = totp.generateRecoveryCodes();
+        var hashed = totp.hashRecoveryCodes( codes );
+        queryExecute(
+            "UPDATE agents SET mfa_recovery_codes = cast( :rc as json ), updated_at = NOW() WHERE id = :id",
+            { id : currentAgentId(), rc : jsonSerialize( hashed ) }
+        );
+        data.mfaRecoveryShown = codes;
+        notice( "Fresh recovery codes generated. Save them now; they will not be shown again.", "success" );
+    }
+
+    function dismissRecoveryCodes(){
+        data.mfaRecoveryShown = [];
+    }
+
+    // ---------------- Email change ----------------
+
+    function requestEmailChange(){
+        data.errors = [];
+        if ( !len( trim( data.newEmail ) ) ) {
+            data.errors = [ "New email is required." ];
+            return;
+        }
+        if ( !isValid( "email", data.newEmail ) ) {
+            data.errors = [ "Please enter a valid email address." ];
+            return;
+        }
+        if ( lCase( trim( data.newEmail ) ) == lCase( data.currentEmail ) ) {
+            data.errors = [ "That is already your current email." ];
+            return;
+        }
+        try {
+            var token = agentService.requestEmailChange(
+                agentId  : currentAgentId(),
+                newEmail : data.newEmail
+            );
+            sendVerificationEmail( data.newEmail, token );
+            data.pendingNewEmail = lCase( trim( data.newEmail ) );
+            data.newEmail        = "";
+            notice( "Verification email sent. Click the link in your inbox to finish the change.", "info" );
+        } catch ( AgentService.EmailTaken e ) {
+            data.errors = [ "That email is already in use." ];
+        } catch ( any e ) {
+            data.errors = [ "Could not request email change: " & e.message ];
+        }
+    }
+
+    // ---------------- Helpers ----------------
+
+    function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        return isNull( u ) ? "" : u.getId();
+    }
+
+    function timezones(){
+        return variables.timezoneList;
+    }
+
+    private void function loadFromAgent(){
+        var id = currentAgentId();
+        if ( !len( id ) ) return;
+        var agent = agentService.getAgentById( id );
+        if ( isNull( agent ) ) return;
+        data.currentEmail    = agent.getEmail() ?: "";
+        data.firstName       = agent.getFirstName()       ?: "";
+        data.lastName        = agent.getLastName()        ?: "";
+        data.phoneWork       = agent.getPhoneWork()       ?: "";
+        data.phoneMobile     = agent.getPhoneMobile()     ?: "";
+        data.timezone        = agent.getTimezone()        ?: "UTC";
+        data.locale          = agent.getLocale()          ?: "en-US";
+        data.bio             = agent.getBio()             ?: "";
+        data.emailSignature  = agent.getEmailSignature()  ?: "";
+        data.slackHandle     = agent.getSlackHandle()     ?: "";
+        data.teamsHandle     = agent.getTeamsHandle()     ?: "";
+        data.mfaEnabled      = !!agent.getMfaEnabled();
+    }
+
+    private void function notice( msg, kind = "info" ){
+        data.notice     = arguments.msg;
+        data.noticeKind = arguments.kind;
+    }
+
+    private void function sendVerificationEmail( newEmail, rawToken ){
+        try {
+            var base = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var url  = base & "/agent/account/confirm-email?token=" & arguments.rawToken;
+            var body = "Hello,
+" & chr( 10 )
+                & "" & chr( 10 )
+                & "We received a request to change your TesseraBX agent email to this address." & chr( 10 )
+                & "" & chr( 10 )
+                & "Click the link below within 60 minutes to finish the change:" & chr( 10 )
+                & "" & chr( 10 )
+                & url & chr( 10 )
+                & "" & chr( 10 )
+                & "If you did not request this change you can safely ignore this message." & chr( 10 );
+            var mail = mailService.newMail(
+                to      = arguments.newEmail,
+                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                subject = "Confirm your new TesseraBX agent email",
+                type    = "text/plain",
+                body    = body
+            );
+            mailService.send( mail );
+        } catch ( any e ) {
+            writeLog(
+                text : "MyAccount email-change send failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    function totpOtpauthUrl(){
+        if ( !len( data.mfaEnrollSecret ) ) return "";
+        return totp.buildOtpauthUrl( data.mfaEnrollSecret, data.currentEmail );
+    }
+
+}

@@ -145,12 +145,38 @@
                         })();
                         </script>
                     </bx:if>
-                    <li class="nav-item">
-                        <span class="nav-link text-body-secondary">Agent</span>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/agent/logout" class="nav-link">Sign out</a>
-                    </li>
+                    <bx:if len( local.bellAgentId )>
+                        <bx:script>
+                            local.meAgentMini = {
+                                id        : local.u.getId(),
+                                firstName : local.u.getFirstName() ?: "",
+                                lastName  : local.u.getLastName()  ?: "",
+                                email     : local.u.getEmail()     ?: "",
+                                hasAvatar : len( local.u.getProfileImageOriginalPath() ?: "" ) > 0,
+                                uploadedAt: local.u.getProfileImageUploadedAt()
+                            };
+                            local.meDisplayName = trim( local.meAgentMini.firstName & " " & local.meAgentMini.lastName );
+                            if ( !len( local.meDisplayName ) ) local.meDisplayName = local.meAgentMini.email;
+                        </bx:script>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link p-1" href="##" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Account menu">
+                                #view( view = "_partials/avatar", module = "core", args = { agent : local.meAgentMini, size : 32 } )#
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li class="dropdown-item-text">
+                                    <div class="fw-semibold">#encodeForHTML( local.meDisplayName )#</div>
+                                    <div class="small text-body-secondary">#encodeForHTML( local.meAgentMini.email )#</div>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="/agent/account"><i class="bi bi-person-gear"></i> My Account</a></li>
+                                <li><a class="dropdown-item" href="/agent/logout"><i class="bi bi-box-arrow-right"></i> Sign out</a></li>
+                            </ul>
+                        </li>
+                    <bx:else>
+                        <li class="nav-item">
+                            <a href="/agent/logout" class="nav-link">Sign out</a>
+                        </li>
+                    </bx:if>
                 </ul>
             </div>
         </nav>

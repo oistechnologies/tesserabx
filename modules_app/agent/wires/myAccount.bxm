@@ -1,0 +1,217 @@
+<bx:output>
+<bx:script>
+    local.tab = activeTab;
+</bx:script>
+
+<div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">My Account</h2>
+        <small class="text-body-secondary">#encodeForHTML( currentEmail )#</small>
+    </div>
+
+    <bx:if arrayLen( errors )>
+        <div class="alert alert-danger">
+            <ul class="mb-0">
+                <bx:loop array="#errors#" item="local.err"><li>#encodeForHTML( local.err )#</li></bx:loop>
+            </ul>
+        </div>
+    </bx:if>
+
+    <bx:if len( notice )>
+        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )#">#encodeForHTML( notice )#</div>
+    </bx:if>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link #( local.tab == 'profile'  ? 'active' : '' )#" wire:click.prevent="setTab('profile')"  href="##">Profile</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link #( local.tab == 'password' ? 'active' : '' )#" wire:click.prevent="setTab('password')" href="##">Password</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link #( local.tab == 'mfa'      ? 'active' : '' )#" wire:click.prevent="setTab('mfa')"      href="##">Two-factor</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link #( local.tab == 'email'    ? 'active' : '' )#" wire:click.prevent="setTab('email')"    href="##">Email</a>
+        </li>
+    </ul>
+
+    <div class="card">
+        <div class="card-body">
+
+        <bx:if local.tab == "profile">
+            <p class="text-body-secondary small">
+                Title, department, hire date, and role assignments are managed by an administrator and are not editable here.
+            </p>
+            <form wire:submit.prevent="saveProfile">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">First name</label>
+                        <input type="text" class="form-control" wire:model="firstName">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Last name</label>
+                        <input type="text" class="form-control" wire:model="lastName">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Work phone</label>
+                        <input type="tel" class="form-control" wire:model="phoneWork">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Mobile phone</label>
+                        <input type="tel" class="form-control" wire:model="phoneMobile">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Time zone</label>
+                        <select class="form-select" wire:model="timezone">
+                            <bx:loop array="#timezones()#" item="local.tz">
+                                <option value="#encodeForHTMLAttribute( local.tz.id )#" #( local.tz.id == timezone ? 'selected' : '' )#>
+                                    #encodeForHTML( local.tz.label )#
+                                </option>
+                            </bx:loop>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Locale</label>
+                        <input type="text" class="form-control" wire:model="locale" placeholder="en-US">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Slack handle</label>
+                        <input type="text" class="form-control" wire:model="slackHandle">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Teams handle</label>
+                        <input type="text" class="form-control" wire:model="teamsHandle">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Bio</label>
+                        <textarea class="form-control" rows="3" wire:model="bio"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Email signature</label>
+                        <textarea class="form-control" rows="4" wire:model="emailSignature"></textarea>
+                        <div class="form-text small">Appended to outbound ticket replies.</div>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Save profile</button>
+                    </div>
+                </div>
+            </form>
+        </bx:if>
+
+        <bx:if local.tab == "password">
+            <form wire:submit.prevent="changePassword" autocomplete="off" class="row g-3" style="max-width:480px;">
+                <div class="col-12">
+                    <label class="form-label">Current password</label>
+                    <input type="password" class="form-control" wire:model="currentPassword" autocomplete="current-password">
+                </div>
+                <div class="col-12">
+                    <label class="form-label">New password</label>
+                    <input type="password" class="form-control" wire:model="newPassword" autocomplete="new-password">
+                    <div class="form-text small">At least 8 characters.</div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Confirm new password</label>
+                    <input type="password" class="form-control" wire:model="newPasswordConfirm" autocomplete="new-password">
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">Change password</button>
+                </div>
+            </form>
+        </bx:if>
+
+        <bx:if local.tab == "mfa">
+            <bx:if arrayLen( mfaRecoveryShown )>
+                <div class="alert alert-warning">
+                    <strong>Save these recovery codes now.</strong> They will not be shown again.
+                    Use them to sign in if you lose access to your authenticator app.
+                </div>
+                <div class="border rounded p-3 mb-3 bg-light font-monospace">
+                    <bx:loop array="#mfaRecoveryShown#" item="local.rc">
+                        <div class="text-black">#encodeForHTML( local.rc )#</div>
+                    </bx:loop>
+                </div>
+                <button type="button" class="btn btn-outline-secondary" wire:click="dismissRecoveryCodes">
+                    I have saved them
+                </button>
+            <bx:else>
+                <bx:if mfaEnabled>
+                    <p>
+                        <span class="badge text-bg-success">Enrolled</span>
+                        Two-factor authentication is active on this account.
+                    </p>
+                    <p class="text-body-secondary small">
+                        Lost your authenticator app? Ask an administrator to reset MFA on your account.
+                        You can also regenerate recovery codes here if you have used some of them.
+                    </p>
+                    <button type="button"
+                            class="btn btn-outline-primary"
+                            wire:click="regenerateRecoveryCodes"
+                            wire:confirm="Generate a fresh set of recovery codes? Existing codes will stop working.">
+                        Regenerate recovery codes
+                    </button>
+                <bx:else>
+                    <p>
+                        <span class="badge text-bg-warning">Not enrolled</span>
+                        Two-factor authentication is required for agent accounts.
+                    </p>
+                    <bx:if !len( mfaEnrollSecret )>
+                        <button type="button" class="btn btn-primary" wire:click="beginMfaEnroll">
+                            Begin enrollment
+                        </button>
+                    <bx:else>
+                        <div class="text-center my-3">
+                            <img alt="MFA QR code"
+                                 class="border rounded p-2 bg-light"
+                                 width="220" height="220"
+                                 src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=#encodeForHTMLAttribute( totpOtpauthUrl() )#">
+                        </div>
+                        <details class="mb-3">
+                            <summary class="small">Can't scan? Enter this secret manually.</summary>
+                            <code class="d-block bg-light text-black border rounded p-2 mt-2 font-monospace">#encodeForHTML( mfaEnrollSecret )#</code>
+                        </details>
+                        <form wire:submit.prevent="confirmMfaEnroll" class="row g-2" style="max-width:360px;">
+                            <div class="col-12">
+                                <label class="form-label">Verification code</label>
+                                <input type="text"
+                                       class="form-control text-center font-monospace"
+                                       wire:model="mfaEnrollCode"
+                                       maxlength="6"
+                                       pattern="\d{6}"
+                                       inputmode="numeric"
+                                       autocomplete="one-time-code">
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary">Confirm and enable</button>
+                            </div>
+                        </form>
+                    </bx:if>
+                </bx:if>
+            </bx:if>
+        </bx:if>
+
+        <bx:if local.tab == "email">
+            <p>
+                Current email: <strong>#encodeForHTML( currentEmail )#</strong>
+            </p>
+            <bx:if len( pendingNewEmail )>
+                <div class="alert alert-info small">
+                    A verification email has been sent to <strong>#encodeForHTML( pendingNewEmail )#</strong>.
+                    Click the link inside to finish the change. The link expires in 60 minutes.
+                </div>
+            </bx:if>
+            <form wire:submit.prevent="requestEmailChange" class="row g-3" style="max-width:480px;">
+                <div class="col-12">
+                    <label class="form-label">New email</label>
+                    <input type="email" class="form-control" wire:model="newEmail" autocomplete="email">
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">Send verification email</button>
+                </div>
+            </form>
+        </bx:if>
+
+        </div>
+    </div>
+</div>
+</bx:output>

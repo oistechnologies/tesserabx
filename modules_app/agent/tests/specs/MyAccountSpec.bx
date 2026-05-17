@@ -1,0 +1,174 @@
+/**
+ * MyAccountSpec: covers the four tabs on the agent self-service
+ * wire. Same direct-ComponentLoader pattern as AgentsListSpec /
+ * AgentFormSpec because cbwire 5.0.4 ships BaseWireTest pointing at
+ * a TestComponentSpec class that is not bundled.
+ *
+ * Each spec creates its own seed agent, simulates a session by
+ * mocking cbauth's logged-in user, and exercises the wire's action
+ * methods directly.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc    = getController().getWireBox().getInstance( "AgentService@agent" );
+        variables.loader = getController().getWireBox().getInstance( "ComponentLoader@cbwire" );
+        variables.auth   = getController().getWireBox().getInstance( "AuthenticationService@cbauth" );
+    }
+
+    function run(){
+        describe( "MyAccount wire", function(){
+
+            it( "loads the signed-in agent's profile fields on mount", function(){
+                var id = seed( { firstName : "Loaded", lastName : "Probe", phoneWork : "555-1212" } );
+                login( id );
+                var c  = newWire();
+                expect( c.getData().currentEmail ).notToBeEmpty();
+                expect( c.getData().firstName    ).toBe( "Loaded" );
+                expect( c.getData().phoneWork    ).toBe( "555-1212" );
+                cleanup( id );
+            } );
+
+            it( "saveProfile only touches whitelisted fields", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.getData().firstName = "Updated";
+                c.getData().phoneWork = "777-9999";
+                c.saveProfile();
+                var fresh = variables.svc.getAgentById( id );
+                expect( fresh.getFirstName() ).toBe( "Updated" );
+                expect( fresh.getPhoneWork() ).toBe( "777-9999" );
+                expect( c.getData().notice ).toBe( "Profile saved." );
+                cleanup( id );
+            } );
+
+            it( "changePassword rejects wrong current password", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.getData().currentPassword    = "wrong-pass";
+                c.getData().newPassword        = "rotated-pass";
+                c.getData().newPasswordConfirm = "rotated-pass";
+                c.changePassword();
+                var matched = false;
+                for ( var e in c.getData().errors ) if ( e contains "does not match" ) matched = true;
+                expect( matched ).toBeTrue();
+                cleanup( id );
+            } );
+
+            it( "changePassword rejects mismatched confirmation", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.getData().currentPassword    = "p-test-1234";
+                c.getData().newPassword        = "rotated-pass";
+                c.getData().newPasswordConfirm = "DIFFERENT";
+                c.changePassword();
+                expect( arrayLen( c.getData().errors ) ).toBeGTE( 1 );
+                cleanup( id );
+            } );
+
+            it( "changePassword swaps the hash when inputs are valid", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.getData().currentPassword    = "p-test-1234";
+                c.getData().newPassword        = "rotated-pass-1234";
+                c.getData().newPasswordConfirm = "rotated-pass-1234";
+                c.changePassword();
+                expect( c.getData().notice ).toBe( "Password updated." );
+                expect( c.getData().currentPassword ).toBeEmpty();
+                cleanup( id );
+            } );
+
+            it( "beginMfaEnroll seeds an enrollment secret", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.beginMfaEnroll();
+                expect( len( c.getData().mfaEnrollSecret ) ).toBeGTE( 16 );
+            } );
+
+            it( "confirmMfaEnroll rejects an obviously wrong code", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.beginMfaEnroll();
+                c.getData().mfaEnrollCode = "000000";
+                c.confirmMfaEnroll();
+                expect( arrayLen( c.getData().errors ) ).toBeGTE( 1 );
+                cleanup( id );
+            } );
+
+            it( "requestEmailChange writes a pending row and sets pendingNewEmail", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                var newEmail = uniqueEmail();
+                c.getData().newEmail = newEmail;
+                c.requestEmailChange();
+                expect( c.getData().pendingNewEmail ).toBe( lCase( newEmail ) );
+                expect( c.getData().newEmail        ).toBeEmpty();
+                cleanup( id );
+            } );
+
+            it( "requestEmailChange rejects an invalid email", function(){
+                var id = seed();
+                login( id );
+                var c  = newWire();
+                c.getData().newEmail = "not-an-email";
+                c.requestEmailChange();
+                expect( arrayLen( c.getData().errors ) ).toBeGTE( 1 );
+                cleanup( id );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function newWire(){
+        var event = getController().getRequestService().getContext();
+        return variables.loader.load( "MyAccount@agent", false )
+            ._withEvent( event )
+            ._withParams( {}, false );
+    }
+
+    private string function seed( struct extras = {} ){
+        var data = {
+            email     : uniqueEmail(),
+            password  : "p-test-1234",
+            firstName : "Self",
+            lastName  : "Spec"
+        };
+        for ( var k in arguments.extras ) data[ k ] = arguments.extras[ k ];
+        return variables.svc.createAgent( data : data );
+    }
+
+    /**
+     * Convince cbauth that an agent is signed in. cbauth stores the
+     * agent id in session under the configured authStorage key; the
+     * wire's currentAgentId() reads from auth.getUser() which reads
+     * from that storage.
+     */
+    private void function login( required string agentId ){
+        var agent = variables.svc.getAgentById( arguments.agentId );
+        variables.auth.login( agent );
+    }
+
+    private string function uniqueEmail(){
+        return "spec-myacct-" & replace( createUUID(), "-", "", "all" ) & "@example.com";
+    }
+
+    private void function cleanup( required string agentId ){
+        variables.auth.logout();
+        queryExecute( "DELETE FROM agent_pending_email_changes WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agent_roles                 WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM team_members                WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents                       WHERE id       = :id", { id : arguments.agentId } );
+    }
+
+}

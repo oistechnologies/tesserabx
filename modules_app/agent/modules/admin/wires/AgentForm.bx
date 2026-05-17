@@ -19,6 +19,9 @@ class extends="cbwire.models.Component" {
     property name="agentService" inject="AgentService@agent";
     property name="rbacService"  inject="RbacService@agent";
     property name="auth"         inject="AuthenticationService@cbauth";
+    // Curated time-zone list lives in coldbox settings so every
+    // module shares the same picker without duplicating data.
+    property name="timezoneList" inject="coldbox:setting:timezones";
 
     data = {
         // Identifier (locked: never modified from the client). Empty
@@ -145,6 +148,10 @@ class extends="cbwire.models.Component" {
 
     function hasRole( key ){
         return arrayFindNoCase( data.grantedRoles, arguments.key ) > 0;
+    }
+
+    function timezones(){
+        return variables.timezoneList;
     }
 
     // ---------------- Save ----------------

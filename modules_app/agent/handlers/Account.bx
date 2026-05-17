@@ -1,0 +1,47 @@
+/**
+ * /agent/account — the My Account surface.
+ *
+ * index() renders the MyAccount wire (Profile / Password / MFA /
+ * Email tabs). The wire owns all interactive state and writes.
+ *
+ * confirmEmail() consumes the verification token sent to the
+ * agent's new email address. On success the agent's email is
+ * swapped; on failure (unknown / expired / consumed token) the
+ * user lands back on My Account with a clear flash.
+ */
+class {
+
+    property name="auth"         inject="AuthenticationService@cbauth";
+    property name="agentService" inject="AgentService@agent";
+    property name="messagebox"   inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        prc.pageTitle = "My Account";
+        event.setView( "account/index" );
+    }
+
+    function confirmEmail( event, rc, prc ){
+        param rc.token = "";
+        if ( !len( rc.token ) ) {
+            messagebox.error( "Verification token is missing." );
+            relocate( uri = "/agent/account" );
+            return;
+        }
+        var ok = agentService.confirmEmailChange( rc.token );
+        if ( ok ) {
+            messagebox.info( "Email updated. The new address is now on file." );
+        } else {
+            messagebox.error( "This verification link is invalid, expired, or already used." );
+        }
+        relocate( uri = "/agent/account" );
+    }
+
+}
