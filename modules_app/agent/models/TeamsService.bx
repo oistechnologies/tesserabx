@@ -127,7 +127,8 @@ class singleton=true {
     public array function listMembers( required string teamId ){
         var rows = queryExecute(
             "SELECT tm.id, tm.agent_id, tm.role_in_team, tm.joined_at,
-                    a.email, a.first_name, a.last_name, a.is_active
+                    a.email, a.first_name, a.last_name, a.is_active,
+                    a.profile_image_original_path, a.profile_image_uploaded_at
              FROM   team_members tm
              JOIN   agents a ON a.id = tm.agent_id
              WHERE  tm.team_id = :tid
@@ -137,14 +138,16 @@ class singleton=true {
         var out = [];
         for ( var i = 1; i <= rows.recordCount; i++ ) {
             out.append( {
-                id         : rows.id[ i ],
-                agentId    : rows.agent_id[ i ],
-                roleInTeam : rows.role_in_team[ i ] ?: "member",
-                joinedAt   : rows.joined_at[ i ],
-                email      : rows.email[ i ],
-                firstName  : rows.first_name[ i ] ?: "",
-                lastName   : rows.last_name[ i ]  ?: "",
-                isActive   : !!rows.is_active[ i ]
+                id                         : rows.id[ i ],
+                agentId                    : rows.agent_id[ i ],
+                roleInTeam                 : rows.role_in_team[ i ] ?: "member",
+                joinedAt                   : rows.joined_at[ i ],
+                email                      : rows.email[ i ],
+                firstName                  : rows.first_name[ i ] ?: "",
+                lastName                   : rows.last_name[ i ]  ?: "",
+                isActive                   : !!rows.is_active[ i ],
+                profileImageOriginalPath   : rows.profile_image_original_path[ i ] ?: "",
+                profileImageUploadedAt     : rows.profile_image_uploaded_at[ i ]
             } );
         }
         return out;

@@ -88,10 +88,24 @@
                                 <tr><td colspan="3" class="text-center text-body-secondary py-3">No members yet.</td></tr>
                             </bx:if>
                             <bx:loop array="#prc.members#" item="m">
+                                <bx:set local.memberMini = {
+                                    id        : m.agentId,
+                                    firstName : m.firstName,
+                                    lastName  : m.lastName,
+                                    email     : m.email,
+                                    hasAvatar : len( m.profileImageOriginalPath ?: "" ) > 0,
+                                    uploadedAt: m.profileImageUploadedAt
+                                } >
                                 <tr>
                                     <td>
-                                        <code>#encodeForHTML( m.email )#</code>
-                                        <bx:if !m.isActive><span class="badge text-bg-light text-black ms-1">deactivated</span></bx:if>
+                                        <div class="d-flex align-items-center gap-2">
+                                            #view( view = "_partials/avatar", module = "core", args = { agent : local.memberMini, size : 28 } )#
+                                            <div>
+                                                <div>#encodeForHTML( trim( m.firstName & " " & m.lastName ) )#</div>
+                                                <small class="text-body-secondary">#encodeForHTML( m.email )#</small>
+                                                <bx:if !m.isActive><span class="badge text-bg-light text-black ms-1">deactivated</span></bx:if>
+                                            </div>
+                                        </div>
                                     </td>
                                     <td>
                                         <bx:if m.roleInTeam eq "lead">

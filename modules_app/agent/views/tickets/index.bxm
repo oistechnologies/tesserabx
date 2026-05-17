@@ -118,12 +118,13 @@
                     <th>Status</th>
                     <th>Priority</th>
                     <th>SLA</th>
+                    <th>Assigned to</th>
                     <th>Updated</th>
                 </tr>
             </thead>
             <tbody>
                 <bx:if !arrayLen( prc.tickets )>
-                    <tr><td colspan="8" class="text-center text-body-secondary py-4">No tickets match.</td></tr>
+                    <tr><td colspan="9" class="text-center text-body-secondary py-4">No tickets match.</td></tr>
                 </bx:if>
                 <bx:loop array="#prc.tickets#" item="t">
                     <bx:set sla = prc.slaByTicketId[ t.getId() ] ?: { status : "none" } >
@@ -149,6 +150,19 @@
                                 <bx:case value="ok"><span class="badge text-bg-secondary">On track</span></bx:case>
                                 <bx:defaultcase><span class="text-body-secondary">-</span></bx:defaultcase>
                             </bx:switch>
+                        </td>
+                        <td>
+                            <bx:if len( t.getAssignedToAgentId() ?: "" ) and structKeyExists( prc.agentDirectory, t.getAssignedToAgentId() )>
+                                <bx:set local.assignee = prc.agentDirectory[ t.getAssignedToAgentId() ] >
+                                <bx:set local.assignee.hasAvatar = len( local.assignee.profileImageOriginalPath ?: "" ) gt 0 >
+                                <bx:set local.assignee.uploadedAt = local.assignee.profileImageUploadedAt >
+                                <div class="d-flex align-items-center gap-2">
+                                    #view( view = "_partials/avatar", module = "core", args = { agent : local.assignee, size : 24 } )#
+                                    <small>#encodeForHTML( trim( local.assignee.firstName & " " & local.assignee.lastName ) )#</small>
+                                </div>
+                            <bx:else>
+                                <span class="text-body-secondary">—</span>
+                            </bx:if>
                         </td>
                         <td><small>#encodeForHTML( dateTimeFormat( t.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#</small></td>
                     </tr>

@@ -13,6 +13,7 @@
 class {
 
     property name="ticketsService"        inject="TicketsService@tickets";
+    property name="agentService"          inject="AgentService@agent";
     property name="customFieldsService"   inject="CustomFieldsService@tickets";
     property name="bulkActionsService"    inject="BulkActionsService@tickets";
     property name="rbacService"           inject="RbacService@agent";
@@ -65,6 +66,13 @@ class {
         for ( var tk in prc.tickets ) {
             prc.slaByTicketId[ tk.getId() ] = slaService.slaSummaryForTicket( tk );
         }
+        // Avatar directory for the Assigned column.
+        var assigneeIds = [];
+        for ( var tk in prc.tickets ) {
+            var aid = tk.getAssignedToAgentId() ?: "";
+            if ( len( aid ) ) assigneeIds.append( aid );
+        }
+        prc.agentDirectory = agentService.directoryFor( assigneeIds );
         prc.filters = rc;
         event.setView( "tickets/index" );
     }
@@ -553,6 +561,28 @@ class {
         arguments.prc.pageTitle    = "Ticket ##" & arguments.ticket.getTicketNumber();
         arguments.prc.messages     = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
         arguments.prc.events       = ticketsService.listEventsForTicket( arguments.ticket.getId() );
+
+        // Avatar/name directory for every agent referenced on this
+        // page (assignee + each message author + each event actor)
+        // so the view layer can render names + thumbnails without a
+        // per-row DB hit.
+        var agentIds = [];
+        var assignedId = arguments.ticket.getAssignedToAgentId() ?: "";
+        if ( len( assignedId ) ) agentIds.append( assignedId );
+        for ( var m in arguments.prc.messages ) {
+            var aid = m.getAuthorAgentId() ?: "";
+            if ( len( aid ) ) agentIds.append( aid );
+        }
+        for ( var ev in arguments.prc.events ) {
+            if ( ( ev.getActorType() ?: "" ) == "agent" ) {
+                var actorId = ev.getActorId() ?: "";
+                if ( len( actorId ) ) agentIds.append( actorId );
+            }
+        }
+        arguments.prc.agentDirectory = agentService.directoryFor( agentIds );
+
+        // Assignment-card dropdown options.
+        arguments.prc.assignableAgents = rbacService.listAgentsWithRoles();
         arguments.prc.attachments  = ticketsService.listAttachmentsForTicket( arguments.ticket.getId() );
         arguments.prc.statuses     = ticketsService.listStatuses();
         arguments.prc.organization = isNull( arguments.ticket.getOrganizationId() ) || !len( arguments.ticket.getOrganizationId() ?: "" )

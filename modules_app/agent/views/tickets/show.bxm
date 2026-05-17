@@ -35,7 +35,18 @@
                     <dt class="col-sm-3">Assigned to</dt>
                     <dd class="col-sm-9">
                         <bx:if len( local.t.getAssignedToAgentId() ?: "" )>
-                            #encodeForHTML( local.t.getAssignedToAgentId() )#
+                            <bx:set local.assignedAgent = prc.agentDirectory[ local.t.getAssignedToAgentId() ] ?: {} >
+                            <bx:if structKeyExists( local.assignedAgent, "id" )>
+                                <span class="d-inline-flex align-items-center gap-2">
+                                    <bx:set local.assignedAgent.hasAvatar = len( local.assignedAgent.profileImageOriginalPath ?: "" ) gt 0 >
+                                    <bx:set local.assignedAgent.uploadedAt = local.assignedAgent.profileImageUploadedAt >
+                                    #view( view = "_partials/avatar", module = "core", args = { agent : local.assignedAgent, size : 24 } )#
+                                    <span>#encodeForHTML( trim( local.assignedAgent.firstName & " " & local.assignedAgent.lastName ) )#</span>
+                                    <small class="text-body-secondary">(#encodeForHTML( local.assignedAgent.email )#)</small>
+                                </span>
+                            <bx:else>
+                                <code class="small">#encodeForHTML( local.t.getAssignedToAgentId() )#</code>
+                            </bx:if>
                         <bx:else>
                             <em class="text-body-secondary">unassigned</em>
                         </bx:if>
@@ -77,7 +88,17 @@
                     <div class="d-flex justify-content-between small text-body-secondary mb-2">
                         <span>
                             <bx:if local.m.isFromAgent()>
-                                <strong>Agent</strong> #encodeForHTML( local.m.getAuthorAgentId() ?: "" )#
+                                <bx:set local.msgAgent = prc.agentDirectory[ local.m.getAuthorAgentId() ?: "" ] ?: {} >
+                                <bx:if structKeyExists( local.msgAgent, "id" )>
+                                    <bx:set local.msgAgent.hasAvatar = len( local.msgAgent.profileImageOriginalPath ?: "" ) gt 0 >
+                                    <bx:set local.msgAgent.uploadedAt = local.msgAgent.profileImageUploadedAt >
+                                    <span class="d-inline-flex align-items-center gap-2">
+                                        #view( view = "_partials/avatar", module = "core", args = { agent : local.msgAgent, size : 20 } )#
+                                        <strong>#encodeForHTML( trim( local.msgAgent.firstName & " " & local.msgAgent.lastName ) )#</strong>
+                                    </span>
+                                <bx:else>
+                                    <strong>Agent</strong> #encodeForHTML( local.m.getAuthorAgentId() ?: "" )#
+                                </bx:if>
                             <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
                                 <strong>Contact</strong> #encodeForHTML( local.m.getAuthorContactId() )#
                             <bx:else>
@@ -486,7 +507,19 @@
             <div id="assignment-card" class="collapse">
                 <div class="card-body">
                     <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/assign">
-                        <input type="text" class="form-control mb-2" name="agentId" placeholder="Agent UUID (leave blank to unassign)" value="#encodeForHTMLAttribute( local.t.getAssignedToAgentId() ?: "" )#">
+                        <bx:set local.currentAssigneeId = local.t.getAssignedToAgentId() ?: "" >
+                        <select class="form-select mb-2" name="agentId">
+                            <option value="">(unassigned)</option>
+                            <bx:loop array="#prc.assignableAgents#" item="local.aa">
+                                <bx:if local.aa.isActive>
+                                    <bx:set local.aaLabel = trim( local.aa.firstName & " " & local.aa.lastName ) >
+                                    <bx:if !len( local.aaLabel )><bx:set local.aaLabel = local.aa.email ></bx:if>
+                                    <option value="#encodeForHTMLAttribute( local.aa.id )#" #( local.aa.id == local.currentAssigneeId ? 'selected' : '' )#>
+                                        #encodeForHTML( local.aaLabel )# (#encodeForHTML( local.aa.email )#)
+                                    </option>
+                                </bx:if>
+                            </bx:loop>
+                        </select>
                         <div class="d-flex justify-content-end">
                             <button class="btn btn-outline-primary" type="submit">Save</button>
                         </div>

@@ -9,6 +9,7 @@ class {
 
     property name="auditService"    inject="AuditService@audit";
     property name="contactsService" inject="ContactsService@contacts";
+    property name="agentService"    inject="AgentService@agent";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
@@ -29,6 +30,18 @@ class {
         );
         prc.eventTypes     = auditService.listEventTypes();
         prc.organizations  = contactsService.listOrganizations();
+
+        // Preload an agent directory keyed by id for every agent
+        // actor in the result set, so the view can render avatars +
+        // names without a per-row DB hit.
+        var actorIds = [];
+        for ( var ev in prc.events ) {
+            if ( ( ev.getActorType() ?: "" ) == "agent" ) {
+                var actorId = ev.getActorId() ?: "";
+                if ( len( actorId ) ) actorIds.append( actorId );
+            }
+        }
+        prc.agentDirectory = agentService.directoryFor( actorIds );
         prc.filters        = {
             eventType      : rc.eventType,
             organizationId : rc.organizationId,

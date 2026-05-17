@@ -216,6 +216,56 @@ class singleton=true {
     }
 
     /**
+     * Bulk-load the avatar-rendering fields for a set of agent ids.
+     * Returns a struct keyed by id holding { id, firstName, lastName,
+     * email, profileImageOriginalPath, profileImageUploadedAt } for
+     * every agent that exists.
+     *
+     * Used by handlers that render multiple agent identities on a
+     * single page (ticket assignee + each message author, audit log
+     * actor column, team member list) so the view layer can resolve
+     * names + avatars by id without a per-row DB hit.
+     *
+     * Unknown ids are silently skipped (no entry in the returned
+     * struct); callers treat that as "render a placeholder".
+     */
+    public struct function directoryFor( required array agentIds ){
+        var out = {};
+        if ( !arrayLen( arguments.agentIds ) ) return out;
+        // Dedupe + drop empties so the IN list stays compact.
+        var clean = {};
+        for ( var id in arguments.agentIds ) {
+            if ( len( id ?: "" ) ) clean[ id ] = true;
+        }
+        if ( structIsEmpty( clean ) ) return out;
+        var ids = structKeyArray( clean );
+        var placeholders = [];
+        var binds = {};
+        for ( var i = 1; i <= arrayLen( ids ); i++ ) {
+            placeholders.append( ":a" & i );
+            binds[ "a" & i ] = ids[ i ];
+        }
+        var rows = queryExecute(
+            "SELECT id, email, first_name, last_name,
+                    profile_image_original_path, profile_image_uploaded_at
+             FROM   agents
+             WHERE  id IN ( " & placeholders.toList() & " )",
+            binds
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out[ rows.id[ i ] ] = {
+                id                         : rows.id[ i ],
+                email                      : rows.email[ i ],
+                firstName                  : rows.first_name[ i ] ?: "",
+                lastName                   : rows.last_name[ i ]  ?: "",
+                profileImageOriginalPath   : rows.profile_image_original_path[ i ] ?: "",
+                profileImageUploadedAt     : rows.profile_image_uploaded_at[ i ]
+            };
+        }
+        return out;
+    }
+
+    /**
      * Distinct non-null departments currently in use. Powers the
      * admin list's Department filter dropdown.
      */

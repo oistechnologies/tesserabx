@@ -68,8 +68,21 @@
                         </td>
                         <td>
                             <bx:if !isNull( evt.getActorType() )>
-                                #encodeForHTML( evt.getActorType() )#<br>
-                                <small class="text-body-secondary">#encodeForHTML( evt.getActorId() ?: "" )#</small>
+                                <bx:if ( evt.getActorType() ?: "" ) == "agent" && structKeyExists( prc.agentDirectory, evt.getActorId() ?: "" )>
+                                    <bx:set local.actor = prc.agentDirectory[ evt.getActorId() ] >
+                                    <bx:set local.actor.hasAvatar = len( local.actor.profileImageOriginalPath ?: "" ) gt 0 >
+                                    <bx:set local.actor.uploadedAt = local.actor.profileImageUploadedAt >
+                                    <div class="d-flex align-items-center gap-2">
+                                        #view( view = "_partials/avatar", module = "core", args = { agent : local.actor, size : 24 } )#
+                                        <div>
+                                            <div class="small">#encodeForHTML( trim( local.actor.firstName & " " & local.actor.lastName ) )#</div>
+                                            <small class="text-body-secondary">#encodeForHTML( local.actor.email )#</small>
+                                        </div>
+                                    </div>
+                                <bx:else>
+                                    #encodeForHTML( evt.getActorType() )#<br>
+                                    <small class="text-body-secondary">#encodeForHTML( evt.getActorId() ?: "" )#</small>
+                                </bx:if>
                             </bx:if>
                         </td>
                         <td>
