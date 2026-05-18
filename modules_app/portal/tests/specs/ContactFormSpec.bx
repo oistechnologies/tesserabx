@@ -30,7 +30,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( event.getRenderedContent() ).toInclude( "Contact support" );
             } );
 
-            it( "POST creates an accountless ticket when required fields are present", function(){
+            it( "POST parks a pending row (NOT a ticket) for anonymous submissions awaiting email verification", function(){
                 cgi.remote_addr = "203.0.113.99";
                 variables.rl.reset( "portal:contact", "203.0.113.99" );
 
@@ -41,14 +41,21 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 rc.setValue( "body", "Hi please help me with this thing." );
                 execute( event = "portal:Contact.create", renderResults = true );
 
-                var rows = queryExecute(
-                    "SELECT id FROM tickets WHERE originating_email = :e",
-                    { e : email },
-                    { returntype : "array" }
+                // Phase 9.2: anonymous submission writes a pending
+                // row keyed by a verification token; no ticket is
+                // created until the visitor clicks the email link.
+                var pending = queryExecute(
+                    "SELECT id FROM pending_tickets WHERE sender_email = :e",
+                    { e : email }
                 );
-                expect( arrayLen( rows ) ).toBe( 1 );
+                expect( pending.recordCount ).toBe( 1 );
+                var tickets = queryExecute(
+                    "SELECT id FROM tickets WHERE originating_email = :e",
+                    { e : email }
+                );
+                expect( tickets.recordCount ).toBe( 0 );
 
-                cleanupTicket( rows[ 1 ].id );
+                queryExecute( "DELETE FROM pending_tickets WHERE sender_email = :e", { e : email } );
             } );
 
             it( "POST rejects an empty email", function(){

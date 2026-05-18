@@ -12,13 +12,14 @@
  */
 class {
 
-    property name="ticketsService"      inject="TicketsService@tickets";
-    property name="contactsService"     inject="ContactsService@contacts";
-    property name="rateLimiter"         inject="RateLimiter@core";
-    property name="kbSuggestionService" inject="KbSuggestionService@ai";
-    property name="aiCapability"        inject="AiCapability@ai";
-    property name="auth"                inject="AuthenticationService@cbauth";
-    property name="messagebox"          inject="messagebox@cbmessagebox";
+    property name="ticketsService"         inject="TicketsService@tickets";
+    property name="contactsService"        inject="ContactsService@contacts";
+    property name="pendingTicketsService"  inject="PendingTicketsService@portal";
+    property name="rateLimiter"            inject="RateLimiter@core";
+    property name="kbSuggestionService"    inject="KbSuggestionService@ai";
+    property name="aiCapability"           inject="AiCapability@ai";
+    property name="auth"                   inject="AuthenticationService@cbauth";
+    property name="messagebox"             inject="messagebox@cbmessagebox";
 
     // Minimum trimmed query length before we hit the KB. Anything
     // shorter is almost always a stray click or a one-keystroke
@@ -166,28 +167,51 @@ class {
                 isInternal      : false
             } );
         } else {
-            // Anonymous submission: accountless ticket; the agent
-            // promotes the sender later if the address is worth
-            // converting into a Contact.
-            var fullName = trim( rc.name );
-            ticket = ticketsService.createAccountlessTicket( {
-                originatingEmail : lCase( trim( rc.email ) ),
-                subject          : subject,
-                source           : "contact-form",
-                actorType        : "system"
+            // Anonymous submission: park the payload as a pending
+            // row keyed by a verification token and mail the
+            // visitor a confirmation link. The accountless ticket
+            // is only created once they click through, which keeps
+            // typo'd email addresses out of the agent queue and
+            // gives the IP-spoofing case one more step to clear.
+            pendingTicketsService.createPending( {
+                senderEmail : lCase( trim( rc.email ) ),
+                senderName  : trim( rc.name ),
+                subject     : subject,
+                body        : rc.body,
+                source      : "contact-form"
             } );
-            if ( len( fullName ) ) {
-                firstMessage = "From: " & fullName & " <" & rc.email & ">" & char( 10 ) & char( 10 ) & rc.body;
-            }
-            ticketsService.addMessage( {
-                ticketId    : ticket.getId(),
-                body        : firstMessage,
-                authorEmail : lCase( trim( rc.email ) ),
-                isInternal  : false
-            } );
+            prc.pageTitle = "Check your email";
+            prc.senderEmail = lCase( trim( rc.email ) );
+            event.setView( "contact/check-email" );
+            return;
         }
 
         prc.pageTitle  = "Thanks for getting in touch";
+        prc.ticketNumber = ticket.getTicketNumber();
+        event.setView( "contact/thanks" );
+    }
+
+    /**
+     * Verification-link landing. Hit by the unauthenticated
+     * visitor clicking the link in their inbox. On success we
+     * materialize the pending row into an accountless ticket and
+     * render the same thanks page the immediate path used to
+     * show. On unknown / expired / replayed tokens we render a
+     * single neutral "link is no longer valid" page rather than
+     * leaking which condition tripped.
+     */
+    function confirmEmail( event, rc, prc ){
+        param rc.token = "";
+        var ticket = "";
+        if ( len( rc.token ) ) {
+            ticket = pendingTicketsService.confirmPending( rc.token );
+        }
+        if ( isNull( ticket ) || !isObject( ticket ) ) {
+            prc.pageTitle = "Link no longer valid";
+            event.setView( "contact/link-expired" );
+            return;
+        }
+        prc.pageTitle    = "Thanks for getting in touch";
         prc.ticketNumber = ticket.getTicketNumber();
         event.setView( "contact/thanks" );
     }

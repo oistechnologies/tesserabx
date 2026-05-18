@@ -1,0 +1,189 @@
+/**
+ * PendingTicketsService: guest-submission email verification.
+ *
+ * The public contact form's anonymous path lands the payload here
+ * instead of creating a Ticket. A verification email goes to the
+ * sender's address; clicking the link consumes the pending row
+ * and materializes a real accountless ticket through
+ * TicketsService. Unverified rows expire and are pruned by the
+ * retention scheduler.
+ *
+ * createPending() returns the raw token. The caller mails the
+ * link. Only the SHA-256 hash of the token lands in the database,
+ * so a DB read alone cannot impersonate a pending submission.
+ *
+ * Lives in `portal` because guest verification is portal-side
+ * intake. Authenticated submissions skip this path entirely:
+ * the contact's session is already verification enough.
+ */
+class singleton=true {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="mailService"    inject="mailService@cbmailservices";
+
+    // Per build plan + .env documentation: a verification link is
+    // good for a configurable number of hours.
+    variables.defaultTtlHours = 24;
+
+    /**
+     * Persist the payload, generate a verification token, send the
+     * email, return the raw token (mostly so specs can confirm
+     * without parsing Mailpit). The handler does not need the
+     * token; the email carries it.
+     */
+    public string function createPending( required struct data ){
+        var senderEmail = lCase( trim( arguments.data.senderEmail ?: "" ) );
+        if ( !len( senderEmail ) ) {
+            throw(
+                type    : "PendingTicketsService.MissingSender",
+                message : "senderEmail is required."
+            );
+        }
+        var subject = len( trim( arguments.data.subject ?: "" ) ) ? arguments.data.subject : "(no subject)";
+        var body    = arguments.data.body    ?: "";
+        var source  = arguments.data.source  ?: "contact-form";
+        var name    = arguments.data.senderName ?: "";
+
+        var rawToken  = generateToken();
+        var tokenHash = hash( rawToken, "SHA-256" );
+        var ttlHours  = int( getSystemSetting( "PENDING_TICKET_TTL_HOURS", variables.defaultTtlHours ) );
+
+        // Compute expires_at in Postgres so we sidestep BoxLang
+        // date-format / JDBC bind issues; the TTL bind is a string
+        // like "24 hours" cast to interval.
+        queryExecute(
+            "INSERT INTO pending_tickets
+                ( id, token_hash, sender_email, sender_name,
+                  subject, body, source,
+                  created_at, expires_at )
+             VALUES
+                ( :id, :token_hash, :sender_email, :sender_name,
+                  :subject, :body, :source,
+                  NOW(), NOW() + cast( :ttl as interval ) )",
+            {
+                id           : createUUID(),
+                token_hash   : tokenHash,
+                sender_email : senderEmail,
+                sender_name  : len( name ) ? name : javaCast( "null", "" ),
+                subject      : subject,
+                body         : body,
+                source       : source,
+                ttl          : ttlHours & " hours"
+            }
+        );
+
+        sendVerificationEmail( senderEmail, rawToken, subject, ttlHours );
+        return rawToken;
+    }
+
+    /**
+     * Consume a token, create the accountless ticket + first
+     * message, mark the pending row consumed, return the new
+     * ticket. Returns null on unknown / expired / already-used
+     * tokens so the handler can render a single "this link is no
+     * longer valid" page.
+     */
+    public any function confirmPending( required string token ){
+        if ( !len( arguments.token ) ) return javaCast( "null", "" );
+        var tokenHash = hash( arguments.token, "SHA-256" );
+
+        // Filter expiry + consumed in SQL so zero rows means
+        // "invalid for any reason"; one row means ready to swap.
+        var rows = queryExecute(
+            "SELECT id, sender_email, sender_name, subject, body, source
+             FROM   pending_tickets
+             WHERE  token_hash  = :h
+               AND  consumed_at IS NULL
+               AND  expires_at  > NOW()",
+            { h : tokenHash }
+        );
+        if ( !rows.recordCount ) return javaCast( "null", "" );
+
+        var pendingId   = rows.id[ 1 ];
+        var senderEmail = rows.sender_email[ 1 ];
+        var senderName  = rows.sender_name[ 1 ] ?: "";
+        var subject     = rows.subject[ 1 ];
+        var body        = rows.body[ 1 ];
+        var source      = rows.source[ 1 ];
+
+        var ticket = ticketsService.createAccountlessTicket( {
+            originatingEmail : senderEmail,
+            subject          : subject,
+            source           : source,
+            actorType        : "system"
+        } );
+
+        // Prepend "From: Name <email>" when the visitor gave a
+        // name, matching the unverified-form behaviour.
+        var firstMessage = len( senderName )
+            ? ( "From: " & senderName & " <" & senderEmail & ">" & char( 10 ) & char( 10 ) & body )
+            : body;
+
+        ticketsService.addMessage( {
+            ticketId    : ticket.getId(),
+            body        : firstMessage,
+            authorEmail : senderEmail,
+            isInternal  : false
+        } );
+
+        queryExecute(
+            "UPDATE pending_tickets SET consumed_at = NOW() WHERE id = :id",
+            { id : pendingId }
+        );
+        return ticket;
+    }
+
+    // ---------------- helpers ----------------
+
+    /**
+     * 64-char hex token built from two random UUIDs. Java's
+     * SecureRandom underpins both. We hex it because the value
+     * goes in a URL query string and we want it safe to copy /
+     * paste from an email client without quoting surprises.
+     */
+    private string function generateToken(){
+        return replace( createUUID(), "-", "", "all" )
+             & replace( createUUID(), "-", "", "all" );
+    }
+
+    private void function sendVerificationEmail(
+        required string toEmail,
+        required string rawToken,
+        required string subject,
+        required numeric ttlHours
+    ){
+        try {
+            var base = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var url  = base & "/contact/confirm?token=" & arguments.rawToken;
+            var brand = getSystemSetting( "PRODUCT_NAME", "TesseraBX" );
+            var body = "Hello," & char( 10 )
+                & char( 10 )
+                & "We received your request through the " & brand & " contact form" & char( 10 )
+                & "with the subject:" & char( 10 )
+                & char( 10 )
+                & "  " & arguments.subject & char( 10 )
+                & char( 10 )
+                & "Click the link below within " & arguments.ttlHours & " hours to confirm" & char( 10 )
+                & "your email address and create the ticket:" & char( 10 )
+                & char( 10 )
+                & url & char( 10 )
+                & char( 10 )
+                & "If you did not submit this request you can safely ignore this message." & char( 10 );
+            var mail = mailService.newMail(
+                to      = arguments.toEmail,
+                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                subject = "Confirm your support request",
+                type    = "text/plain",
+                body    = body
+            );
+            mailService.send( mail );
+        } catch ( any e ) {
+            writeLog(
+                text : "PendingTicketsService email send failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

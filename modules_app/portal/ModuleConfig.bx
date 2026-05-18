@@ -51,6 +51,9 @@ class {
         binder.map( "PortalSecurityRules@portal" )
               .to( "#moduleMapping#.models.PortalSecurityRules" )
               .asSingleton();
+        binder.map( "PendingTicketsService@portal" )
+              .to( "#moduleMapping#.models.PendingTicketsService" )
+              .asSingleton();
     }
 
     function onUnload(){}

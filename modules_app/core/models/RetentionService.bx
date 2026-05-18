@@ -26,7 +26,8 @@ class singleton=true {
             "retention.audit_events_days"       : { "label" : "Audit events kept (days)",         "default" : "365", "type" : "integer" },
             "retention.webhook_deliveries_days" : { "label" : "Webhook deliveries kept (days)",   "default" : "30",  "type" : "integer" },
             "retention.ai_interactions_days"    : { "label" : "AI interactions kept (days)",      "default" : "30",  "type" : "integer" },
-            "retention.bulk_jobs_days"          : { "label" : "Completed cbq jobs kept (days)",   "default" : "14",  "type" : "integer" }
+            "retention.bulk_jobs_days"          : { "label" : "Completed cbq jobs kept (days)",   "default" : "14",  "type" : "integer" },
+            "retention.pending_tickets_days"    : { "label" : "Expired pending guest tickets kept (days)", "default" : "7",   "type" : "integer" }
         };
     }
 
@@ -55,6 +56,9 @@ class singleton=true {
         report.sweeps[ "cbq_jobs" ]           = safeSweep( "cbq_jobs",
             settings.getInteger( "retention.bulk_jobs_days", 14 ),
             ( days ) => sweepCbqJobs( days ) );
+        report.sweeps[ "pending_tickets" ]    = safeSweep( "pending_tickets",
+            settings.getInteger( "retention.pending_tickets_days", 7 ),
+            ( days ) => sweepPendingTickets( days ) );
         report.completed_at = dateTimeFormat( now(), "yyyy-mm-dd HH:nn:ss" );
         return report;
     }
@@ -101,6 +105,24 @@ class singleton=true {
         return deleteAndCount(
             "DELETE FROM ai_interactions
              WHERE  created_at < NOW() - cast( :d AS interval )",
+            toString( int( arguments.days ) ) & " days"
+        );
+    }
+
+    /**
+     * Expired or consumed guest-submission pending rows. A row
+     * counts as "old" once both its expires_at has passed AND the
+     * retention window has elapsed since it was created, so we
+     * keep recently-consumed rows long enough to debug verify
+     * round trips. Unconsumed rows that are still within their
+     * TTL are never touched.
+     */
+    private numeric function sweepPendingTickets( required numeric days ){
+        if ( arguments.days <= 0 ) return 0;
+        return deleteAndCount(
+            "DELETE FROM pending_tickets
+             WHERE  expires_at < NOW()
+             AND    created_at < NOW() - cast( :d AS interval )",
             toString( int( arguments.days ) ) & " days"
         );
     }

@@ -1,0 +1,164 @@
+/**
+ * PendingTicketsServiceSpec: guest-submission email verification.
+ *
+ * Covers the full token round-trip and the failure modes the
+ * verify path needs to swallow (unknown token, expired token,
+ * replayed token). Mail send is not asserted here — the service
+ * logs and swallows mail errors, and Mailpit assertions belong
+ * with the channels module.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc     = getController().getWireBox().getInstance( "PendingTicketsService@portal" );
+        variables.tickets = getController().getWireBox().getInstance( "TicketsService@tickets" );
+    }
+
+    function run(){
+        describe( "PendingTicketsService", function(){
+
+            it( "createPending writes a row and does NOT create a ticket yet", function(){
+                var email = uniqueEmail();
+                var beforeRows = ticketCountForEmail( email );
+
+                var token = variables.svc.createPending( {
+                    senderEmail : email,
+                    senderName  : "Spec User",
+                    subject     : "Need help",
+                    body        : "Something is broken."
+                } );
+
+                expect( len( token ) ).toBeGT( 0 );
+                expect( pendingRowCountFor( email ) ).toBe( 1 );
+                expect( ticketCountForEmail( email ) ).toBe( beforeRows );
+
+                cleanupPending( email );
+            } );
+
+            it( "confirmPending materializes the pending row into an accountless ticket", function(){
+                var email = uniqueEmail();
+                var token = variables.svc.createPending( {
+                    senderEmail : email,
+                    senderName  : "Spec User",
+                    subject     : "Verify me",
+                    body        : "Important details."
+                } );
+
+                var ticket = variables.svc.confirmPending( token );
+
+                expect( isObject( ticket ) ).toBeTrue();
+                expect( ticket.isAccountless() ).toBeTrue();
+                expect( ticket.getOriginatingEmail() ).toBe( email );
+
+                // The accountless ticket creation triggers an
+                // outbound auto-ack message; scan the message list
+                // for our verified payload rather than indexing.
+                var messages = variables.tickets.listMessagesForTicket( ticket.getId(), true );
+                var verifiedBody = "";
+                for ( var m in messages ) {
+                    if ( findNoCase( "Important details", m.getBody() ) ) {
+                        verifiedBody = m.getBody();
+                        break;
+                    }
+                }
+                expect( len( verifiedBody ) ).toBeGT( 0 );
+                // Sender name is prepended into the verified
+                // message when the visitor supplied one.
+                expect( verifiedBody ).toInclude( "Spec User" );
+
+                cleanupTicket( ticket.getId() );
+                cleanupPending( email );
+            } );
+
+            it( "confirmPending rejects an unknown token", function(){
+                var ticket = variables.svc.confirmPending( "not-a-real-token-xxxxxxxxxx" );
+                expect( isNull( ticket ) ).toBeTrue();
+            } );
+
+            it( "confirmPending rejects a replayed (already consumed) token", function(){
+                var email = uniqueEmail();
+                var token = variables.svc.createPending( {
+                    senderEmail : email,
+                    subject     : "Replay test",
+                    body        : "First click only."
+                } );
+                var first  = variables.svc.confirmPending( token );
+                var second = variables.svc.confirmPending( token );
+
+                expect( isObject( first ) ).toBeTrue();
+                expect( isNull( second ) ).toBeTrue();
+
+                cleanupTicket( first.getId() );
+                cleanupPending( email );
+            } );
+
+            it( "confirmPending rejects an expired token", function(){
+                var email = uniqueEmail();
+                var token = variables.svc.createPending( {
+                    senderEmail : email,
+                    subject     : "Expiry test",
+                    body        : "Stale link."
+                } );
+                // Backdate so the row is past its expires_at without
+                // having to wait the configured TTL. This is the
+                // single point where the spec touches DB state
+                // directly; everywhere else goes through the service.
+                queryExecute(
+                    "UPDATE pending_tickets
+                     SET    expires_at = NOW() - INTERVAL '1 minute'
+                     WHERE  sender_email = :e",
+                    { e : email }
+                );
+
+                var ticket = variables.svc.confirmPending( token );
+                expect( isNull( ticket ) ).toBeTrue();
+
+                cleanupPending( email );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function uniqueEmail(){
+        // createUUID() returns uppercase; PendingTicketsService
+        // lowercases on save so the helpers below need a lowercase
+        // baseline to match the stored row.
+        return lCase( "guest-spec-" & replace( createUUID(), "-", "", "all" ) & "@example.com" );
+    }
+
+    private numeric function pendingRowCountFor( required string email ){
+        // Use SELECT id + recordCount instead of count(*) because
+        // BoxLang's queryExecute sometimes returns the aggregated
+        // column as a bigint that int() refuses to coerce.
+        var rows = queryExecute(
+            "SELECT id FROM pending_tickets WHERE sender_email = :e",
+            { e : arguments.email }
+        );
+        return rows.recordCount;
+    }
+
+    private numeric function ticketCountForEmail( required string email ){
+        var rows = queryExecute(
+            "SELECT id FROM tickets WHERE originating_email = :e",
+            { e : arguments.email }
+        );
+        return rows.recordCount;
+    }
+
+    private void function cleanupPending( required string email ){
+        queryExecute( "DELETE FROM pending_tickets WHERE sender_email = :e", { e : arguments.email } );
+    }
+
+    private void function cleanupTicket( required string id ){
+        if ( !len( arguments.id ) ) return;
+        queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events WHERE entity_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets WHERE id = :id", { id : arguments.id } );
+    }
+
+}

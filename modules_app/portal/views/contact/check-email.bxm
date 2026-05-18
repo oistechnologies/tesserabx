@@ -1,0 +1,24 @@
+<bx:output>
+<div class="row">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title h4">
+                    <i class="bi bi-envelope-check text-primary"></i>
+                    Check your email
+                </h2>
+                <p>
+                    We sent a verification link to
+                    <strong>#encodeForHTML( prc.senderEmail )#</strong>.
+                    Click the link in that message to confirm your address and create the ticket.
+                </p>
+                <p class="text-body-secondary">
+                    Didn't get it? Check your spam folder, or
+                    <a href="/contact">submit the form again</a>
+                    once you've confirmed the address is correct.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

@@ -72,6 +72,11 @@ class extends="coldbox.system.web.routing.Router" {
         // submit a ticket without an account; the form creates an
         // accountless ticket through TicketsService.
         route( "/contact/find-help" ).withVerbs( "POST" ).to( "portal:Contact.findHelp" );
+        // Verification landing for guest submissions. GET so an
+        // email-client click works; the handler is idempotent (a
+        // replayed click renders the link-expired page rather
+        // than creating a second ticket).
+        route( "/contact/confirm" ).withVerbs( "GET" ).to( "portal:Contact.confirmEmail" );
         route( "/contact" ).withHandler( "portal:Contact" ).toAction( {
             "GET"  : "index",
             "POST" : "create"

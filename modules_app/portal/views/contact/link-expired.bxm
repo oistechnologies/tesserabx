@@ -1,0 +1,22 @@
+<bx:output>
+<div class="row">
+    <div class="col-12 col-lg-8">
+        <div class="card border-warning">
+            <div class="card-body">
+                <h2 class="card-title h4">
+                    <i class="bi bi-clock-history text-warning"></i>
+                    This link is no longer valid
+                </h2>
+                <p>
+                    Verification links expire after a short time and can only be used once.
+                    The most common reasons this page appears: the link is already a few hours old,
+                    or someone (perhaps you) already clicked it.
+                </p>
+                <p class="mb-0">
+                    <a class="btn btn-primary" href="/contact">Submit a new request</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>
