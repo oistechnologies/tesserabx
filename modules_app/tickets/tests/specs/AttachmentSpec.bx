@@ -198,11 +198,14 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     att.getId(),
                     { type : "agent", id : f.agentId }
                 );
+                // entity_id is the ticket id (the attachment id rides
+                // in the metadata blob). Scope by ticket so the count
+                // is unambiguous even if the schema someday changes.
                 var rows = queryExecute(
                     "SELECT id FROM audit_events
                       WHERE event_type = 'ticket.attachment_downloaded'
-                        AND entity_id  = :aid",
-                    { aid : att.getId() },
+                        AND entity_id  = :tid",
+                    { tid : ticket.getId() },
                     { returntype : "array" }
                 );
                 expect( arrayLen( rows ) ).toBeGTE( 1 );
