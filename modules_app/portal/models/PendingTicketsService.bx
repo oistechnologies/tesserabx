@@ -18,8 +18,9 @@
  */
 class singleton=true {
 
-    property name="ticketsService" inject="TicketsService@tickets";
-    property name="mailService"    inject="mailService@cbmailservices";
+    property name="ticketsService"   inject="TicketsService@tickets";
+    property name="mailService"      inject="MailService@cbmailservices";
+    property name="settingsService"  inject="SettingsService@admin";
 
     // Per build plan + .env documentation: a verification link is
     // good for a configurable number of hours.
@@ -153,29 +154,46 @@ class singleton=true {
         required numeric ttlHours
     ){
         try {
-            var base = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
-            var url  = base & "/contact/confirm?token=" & arguments.rawToken;
-            var brand = getSystemSetting( "PRODUCT_NAME", "TesseraBX" );
-            var body = "Hello," & char( 10 )
-                & char( 10 )
-                & "We received your request through the " & brand & " contact form" & char( 10 )
-                & "with the subject:" & char( 10 )
-                & char( 10 )
-                & "  " & arguments.subject & char( 10 )
-                & char( 10 )
-                & "Click the link below within " & arguments.ttlHours & " hours to confirm" & char( 10 )
-                & "your email address and create the ticket:" & char( 10 )
-                & char( 10 )
-                & url & char( 10 )
-                & char( 10 )
-                & "If you did not submit this request you can safely ignore this message." & char( 10 );
+            // Build base + url + body all in single-statement
+            // assignments. BoxLang's scope walker drops `var foo =
+            // ""` blank-string initializers when followed by `foo
+            // &=` appends — the subsequent references throw a
+            // misleading "Can't cast Struct to a string" because
+            // the undeclared symbol resolves to the (empty)
+            // variables scope struct. See memory
+            // boxlang-var-null-init. Workaround: never start a var
+            // empty; assign the final value in one statement.
+            // `url` is a CFML reserved scope (the URL query-string
+            // struct); declaring `var url = ...` here gets the
+            // concat result but every subsequent reference to `url`
+            // resolves to the scope, not the local — which is a
+            // Struct, hence "Can't cast Struct to a string" on the
+            // body concat. Use a distinct name.
+            var rawBase     = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var base        = isSimpleValue( rawBase ) ? rawBase : "http://localhost:8080";
+            var confirmLink = base & "/contact/confirm?token=" & arguments.rawToken;
+            var nl          = char( 10 );
+            var body = "Hello," & nl & nl
+                & "We received your request through our support contact form" & nl
+                & "with the subject:" & nl & nl
+                & "  " & arguments.subject & nl & nl
+                & "Click the link below within " & arguments.ttlHours & " hours to confirm" & nl
+                & "your email address and create the ticket:" & nl & nl
+                & confirmLink & nl & nl
+                & "If you did not submit this request you can safely ignore this message." & nl;
+            // Match OutboundEmailService.sendThreaded: type="text"
+            // (not "text/plain", which crashes cbmailservices on
+             // BoxLang with "Can't cast Struct to a string") and
+             // apply the admin-managed mail-server override so the
+             // dev stack actually routes to Mailpit.
             var mail = mailService.newMail(
                 to      = arguments.toEmail,
                 from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
                 subject = "Confirm your support request",
-                type    = "text/plain",
+                type    = "text",
                 body    = body
             );
+            settingsService.applyMailOverride( mail );
             mailService.send( mail );
         } catch ( any e ) {
             writeLog(
