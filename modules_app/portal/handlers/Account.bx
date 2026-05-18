@@ -1,0 +1,71 @@
+/**
+ * portal:Account handler — the signed-in Contact's self-service
+ * surface. Phase 9.1 ships only the two-factor authentication
+ * controls; future hardening can layer email change / password
+ * change / profile fields on top.
+ *
+ * Authentication is enforced upstream by PortalSecurityRules
+ * (the secureList covers /account/*).
+ */
+class {
+
+    property name="auth"       inject="AuthenticationService@cbauth";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        prc.currentContact = currentContact();
+    }
+
+    function index( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        prc.pageTitle  = "My account";
+        prc.mfaEnabled = !!me.getMfaEnabled();
+        event.setView( "account/index" );
+    }
+
+    /**
+     * Disable two-factor authentication on the signed-in contact.
+     * Clears the secret + flag + enrollment-time + recovery-code
+     * blob so a future re-enable starts from scratch with a fresh
+     * QR code. The contact stays signed in.
+     */
+    function disableMfa( event, rc, prc ){
+        var me = prc.currentContact;
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        if ( !me.getMfaEnabled() ) {
+            messagebox.info( "Two-factor authentication is not currently enabled." );
+            relocate( uri = "/account" );
+            return;
+        }
+        queryExecute(
+            "UPDATE contacts
+             SET    mfa_enabled        = FALSE,
+                    mfa_secret         = NULL,
+                    mfa_enrolled_at    = NULL,
+                    mfa_recovery_codes = NULL,
+                    updated_at         = NOW()
+             WHERE  id = :id",
+            { id : me.getId() }
+        );
+        messagebox.info( "Two-factor authentication disabled." );
+        relocate( uri = "/account" );
+    }
+
+    // ---------- internals ----------
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        if ( isNull( u ) ) return javaCast( "null", "" );
+        return u;
+    }
+
+}

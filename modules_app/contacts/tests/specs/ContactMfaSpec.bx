@@ -1,0 +1,128 @@
+/**
+ * ContactMfaSpec: covers the Phase 9.1 wiring that turns the
+ * agent-side MFA path into a client-side option.
+ *
+ * TotpServiceSpec already covers the RFC 6238 algorithm and the
+ * recovery-code consume; this spec is the Contact-side glue:
+ *
+ *   - The Contact entity exposes the four new MFA accessors that
+ *     the portal handlers depend on.
+ *   - Toggling mfa_enabled persists and round-trips through
+ *     ContactAuthService.retrieveUserById.
+ *   - Disabling the way Account.disableMfa does clears the four
+ *     columns together so a future re-enable starts from a fresh
+ *     QR code.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.contacts    = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.contactAuth = getController().getWireBox().getInstance( "ContactAuthService@contacts" );
+    }
+
+    function run(){
+        describe( "Contact MFA wiring", function(){
+
+            it( "Contact entity exposes the four MFA accessors", function(){
+                var f = makeFixture();
+                var c = variables.contactAuth.retrieveUserById( f.contactId );
+                expect( !!c.getMfaEnabled() ).toBeFalse();
+                expect( c.getMfaSecret() ?: "" ).toBe( "" );
+                // Quick surfaces SQL NULL on nullable timestamps as
+                // either null or an empty string; collapse both to a
+                // single check the way the handlers' `?: ""` calls do.
+                expect( len( toString( c.getMfaEnrolledAt() ?: "" ) ) ).toBe( 0 );
+                expect( c.getMfaRecoveryCodes() ?: "" ).toBe( "" );
+                cleanupFixture( f );
+            } );
+
+            it( "enabling MFA round-trips through retrieveUserById", function(){
+                var f = makeFixture();
+                queryExecute(
+                    "UPDATE contacts
+                     SET    mfa_secret         = :s,
+                            mfa_enabled        = TRUE,
+                            mfa_enrolled_at    = NOW(),
+                            mfa_recovery_codes = cast( :rc as json ),
+                            updated_at         = NOW()
+                     WHERE  id = :id",
+                    {
+                        id : f.contactId,
+                        s  : "JBSWY3DPEHPK3PXP",
+                        rc : jsonSerialize( [ "hash1", "hash2" ] )
+                    }
+                );
+                var c = variables.contactAuth.retrieveUserById( f.contactId );
+                // BoxLang coerces postgres boolean to "true"/"false"
+                // strings sometimes; `!!` collapses both forms to a
+                // proper boolean exactly the way the portal session
+                // handler does at `if ( !!contact.getMfaEnabled() )`.
+                expect( !!c.getMfaEnabled() ).toBeTrue();
+                expect( c.getMfaSecret() ).toBe( "JBSWY3DPEHPK3PXP" );
+                expect( len( c.getMfaEnrolledAt() ?: "" ) ).toBeGT( 0 );
+                cleanupFixture( f );
+            } );
+
+            it( "disable clears secret, flag, enrollment timestamp, and recovery codes together", function(){
+                var f = makeFixture();
+                // Seed an enabled state.
+                queryExecute(
+                    "UPDATE contacts
+                     SET    mfa_secret         = 'JBSWY3DPEHPK3PXP',
+                            mfa_enabled        = TRUE,
+                            mfa_enrolled_at    = NOW(),
+                            mfa_recovery_codes = cast( :rc as json ),
+                            updated_at         = NOW()
+                     WHERE  id = :id",
+                    { id : f.contactId, rc : jsonSerialize( [ "hash" ] ) }
+                );
+
+                // Mirror Account.disableMfa exactly so a column rename
+                // here trips the spec.
+                queryExecute(
+                    "UPDATE contacts
+                     SET    mfa_enabled        = FALSE,
+                            mfa_secret         = NULL,
+                            mfa_enrolled_at    = NULL,
+                            mfa_recovery_codes = NULL,
+                            updated_at         = NOW()
+                     WHERE  id = :id",
+                    { id : f.contactId }
+                );
+
+                var c = variables.contactAuth.retrieveUserById( f.contactId );
+                expect( c.getMfaEnabled() ?: false ).toBeFalse();
+                expect( c.getMfaSecret() ?: "" ).toBe( "" );
+                expect( c.getMfaRecoveryCodes() ?: "" ).toBe( "" );
+                expect( len( c.getMfaEnrolledAt() ?: "" ) ).toBe( 0 );
+                cleanupFixture( f );
+            } );
+
+        } );
+    }
+
+    // ---------- helpers ----------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Contact MFA Org " & createUUID(),
+            slug : "mfa-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "mfa-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        return { orgId : org.getId(), contactId : contact.getId() };
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contactId } );
+        queryExecute( "DELETE FROM contacts      WHERE id = :id",         { id : arguments.fixture.contactId } );
+        queryExecute( "DELETE FROM audit_events  WHERE organization_id = :id", { id : arguments.fixture.orgId } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id",         { id : arguments.fixture.orgId } );
+    }
+
+}

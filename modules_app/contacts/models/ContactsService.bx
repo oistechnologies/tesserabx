@@ -305,8 +305,15 @@ class singleton=true {
             .where( "contact_id", source.getId() )
             .delete();
 
+        // Targeted UPDATE; Quick's save() rebinds every column on
+        // the entity (including the new mfa_recovery_codes JSON
+        // column) as varchar, which Postgres rejects with "is of
+        // type json but expression is of type character varying".
+        queryExecute(
+            "UPDATE contacts SET is_active = FALSE, updated_at = NOW() WHERE id = :id",
+            { id : source.getId() }
+        );
         source.setIsActive( false );
-        source.save();
 
         recordAudit(
             eventType      : "contact.merged",

@@ -17,14 +17,27 @@ class {
         param rc.email    = "";
         param rc.password = "";
 
-        if ( contactAuth.isValidCredentials( rc.email, rc.password ) ) {
-            auth.login( contactAuth.retrieveUserByUsername( rc.email ) );
-            relocate( uri = "/" );
+        if ( !contactAuth.isValidCredentials( rc.email, rc.password ) ) {
+            messagebox.error( "Invalid email or password." );
+            relocate( uri = "/login" );
             return;
         }
 
-        messagebox.error( "Invalid email or password." );
-        relocate( uri = "/login" );
+        var contact = contactAuth.retrieveUserByUsername( rc.email );
+        if ( !!contact.getMfaEnabled() ) {
+            // Password ok, MFA challenge required. The pending id
+            // lives in session until the second-step verify clears
+            // it; we DO NOT call auth.login until the code matches.
+            session.tesserabx_pending_mfa_contact_id = contact.getId();
+            relocate( uri = "/login/verify" );
+            return;
+        }
+
+        // Password ok, no MFA enrolled. Client MFA is opt-in so we
+        // just complete the login; the My Account page surfaces the
+        // enable toggle.
+        auth.login( contact );
+        relocate( uri = "/" );
     }
 
     function delete( event, rc, prc ){

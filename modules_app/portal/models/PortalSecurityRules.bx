@@ -9,7 +9,13 @@ class singleton=true {
     public array function getSecurityRules(){
         return [
             {
-                whitelist   : "^(login|logout|register|kb|health|widget|api)(/|$)|^$",
+                // /login/verify and /mfa/setup are whitelisted: the
+                // first runs between password-ok and full login (the
+                // user has no auth session yet); the second is
+                // gated by an in-handler isLoggedIn check rather
+                // than the firewall so the flash message on direct
+                // hits is friendlier than a bare redirect.
+                whitelist   : "^(login|logout|register|kb|health|widget|api|mfa)(/|$)|^$",
                 secureList  : "^(account|tickets|profile)(/|$)",
                 match       : "url",
                 roles       : "",

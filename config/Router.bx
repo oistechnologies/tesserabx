@@ -28,11 +28,31 @@ class extends="coldbox.system.web.routing.Router" {
         // entryPoint). All portal-visible URLs are declared here at the
         // top level instead.
         route( "/" ).to( "portal:Home.index" );
+        // Two-step login: /login lands the password form; if the
+        // contact has MFA enabled, Session.create stashes a pending
+        // id in session and bounces to /login/verify.
+        route( "/login/verify" ).withHandler( "portal:Mfa" ).toAction( {
+            "GET"  : "verifyForm",
+            "POST" : "verifySubmit"
+        } );
         route( "/login" ).withHandler( "portal:Session" ).toAction( {
             "GET"  : "new",
             "POST" : "create"
         } );
         route( "/logout" ).to( "portal:Session.delete" );
+
+        // MFA enrollment + recovery-codes display. Enrollment lives
+        // behind /account so the contact has to be already logged
+        // in (with password) to start it.
+        route( "/mfa/setup" ).withHandler( "portal:Mfa" ).toAction( {
+            "GET"  : "setupForm",
+            "POST" : "setupSubmit"
+        } );
+        route( "/mfa/recovery-codes" ).to( "portal:Mfa.recoveryCodes" );
+
+        // My Account: self-service for signed-in contacts.
+        route( "/account/mfa/disable" ).withVerbs( "POST" ).to( "portal:Account.disableMfa" );
+        route( "/account" ).to( "portal:Account.index" );
 
         // Client-side tickets workspace. Most-specific patterns first.
         // Attachment routes nest under their parent ticket so the URL

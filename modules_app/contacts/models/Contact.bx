@@ -30,6 +30,14 @@ class
     property name="createdAt"       column="created_at"    sqltype="timestamp";
     property name="updatedAt"       column="updated_at"    sqltype="timestamp";
 
+    // TOTP MFA columns. Mirror of the agent-side MFA. Optional for
+    // client users (build plan); the portal session handler branches
+    // on `mfa_enabled` exactly the way the agent path does.
+    property name="mfaSecret"        column="mfa_secret";
+    property name="mfaEnabled"       column="mfa_enabled";
+    property name="mfaEnrolledAt"    column="mfa_enrolled_at"  sqltype="timestamp";
+    property name="mfaRecoveryCodes" column="mfa_recovery_codes";
+
     function applyGlobalScopes( builder ){
         variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
         return this;

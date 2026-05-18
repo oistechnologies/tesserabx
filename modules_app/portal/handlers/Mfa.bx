@@ -1,0 +1,220 @@
+/**
+ * portal:Mfa handler — TOTP enrollment, login challenge, and the
+ * one-time recovery-codes display for client (Contact) accounts.
+ *
+ * Mirrors agent:Mfa. The MFA path is opt-in on the portal: the
+ * session handler only kicks a Contact into the verify form when
+ * `contact.getMfaEnabled()` is true. Enrollment lives behind
+ * /account so the Contact has to be already logged in (with
+ * password) to start it.
+ *
+ * Routes:
+ *   GET  /login/verify          — challenge after password login
+ *   POST /login/verify          — submit the 6-digit code
+ *   GET  /mfa/setup             — show QR + secret on first visit,
+ *                                 enter code to confirm
+ *   POST /mfa/setup             — confirm the code, persist
+ *   GET  /mfa/recovery-codes    — one-shot display of plaintext
+ *                                 codes after enrollment
+ *
+ * Session storage:
+ *   - tesserabx_pending_mfa_contact_id : set when a password
+ *     succeeds but MFA is still required; cleared on challenge
+ *     success or session timeout.
+ *   - flash.totp_recovery_codes : the plaintext codes shown
+ *     exactly once after enrollment confirms (key shared with the
+ *     agent path; only one MFA flow runs in any one session).
+ *
+ * TotpService@agent is account-family-agnostic — the RFC 6238
+ * implementation only cares about the secret + code, not which
+ * table the secret came from.
+ */
+class {
+
+    property name="auth"        inject="AuthenticationService@cbauth";
+    property name="contactAuth" inject="ContactAuthService@contacts";
+    property name="totp"        inject="TotpService@agent";
+    property name="rateLimiter" inject="RateLimiter@core";
+    property name="messagebox"  inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+    }
+
+    // ---------- Two-step login: the second step ----------
+
+    function verifyForm( event, rc, prc ){
+        var contactId = pendingContactId();
+        if ( !len( contactId ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        prc.pageTitle = "Two-factor verification";
+        event.setView( "mfa/verify" );
+    }
+
+    function verifySubmit( event, rc, prc ){
+        param rc.code = "";
+        var contactId = pendingContactId();
+        if ( !len( contactId ) ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        // Throttle per-contact attempts. Same shape as the agent
+        // path: 8 in 5 minutes covers typos and recovery-code use
+        // without letting an attacker burn through codes.
+        var limit = rateLimiter.check(
+            bucket        : "portal:mfa:verify",
+            key           : contactId,
+            limit         : 8,
+            windowSeconds : 300
+        );
+        if ( !limit.allowed ) {
+            messagebox.error( "Too many failed attempts. Wait a few minutes and try again." );
+            relocate( uri = "/login/verify" );
+            return;
+        }
+        var contact = contactAuth.retrieveUserById( contactId );
+        if ( isNull( contact ) ) {
+            clearPending();
+            relocate( uri = "/login" );
+            return;
+        }
+        if ( totp.verifyCode( contact.getMfaSecret() ?: "", rc.code ) ) {
+            rateLimiter.reset( "portal:mfa:verify", contactId );
+            return finishLogin( contact );
+        }
+        // Recovery-code fallback.
+        var rawCodes  = parseRecoveryCodes( contact.getMfaRecoveryCodes() ?: "" );
+        var consumed  = totp.consumeRecoveryCode( rawCodes, rc.code );
+        if ( consumed.matched ) {
+            updateContactRecoveryCodes( contact, consumed.updatedHashes );
+            rateLimiter.reset( "portal:mfa:verify", contactId );
+            return finishLogin( contact );
+        }
+        messagebox.error( "Invalid code. Try again, or use one of your recovery codes." );
+        relocate( uri = "/login/verify" );
+    }
+
+    // ---------- Enrollment ----------
+
+    function setupForm( event, rc, prc ){
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var contact = auth.getUser();
+        if ( contact.getMfaEnabled() ) {
+            messagebox.info( "Two-factor authentication is already enabled on this account." );
+            relocate( uri = "/account" );
+            return;
+        }
+        // Generate + persist a draft secret on first visit so the
+        // QR the contact already scanned stays valid if they leave
+        // the page and come back.
+        var secret = contact.getMfaSecret() ?: "";
+        if ( !len( secret ) ) {
+            secret = totp.generateSecret();
+            // Targeted UPDATE; Quick's save() rebinds timestamps as
+            // varchar and Postgres rejects that.
+            queryExecute(
+                "UPDATE contacts SET mfa_secret = :s, updated_at = NOW() WHERE id = :id",
+                { id : contact.getId(), s : secret }
+            );
+            contact.setMfaSecret( secret );
+        }
+        prc.pageTitle = "Set up two-factor authentication";
+        prc.secret    = secret;
+        prc.otpauth   = totp.buildOtpauthUrl( secret, contact.getEmail() );
+        event.setView( "mfa/setup" );
+    }
+
+    function setupSubmit( event, rc, prc ){
+        param rc.code = "";
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var contact = auth.getUser();
+        var secret = contact.getMfaSecret() ?: "";
+        if ( !len( secret ) || !totp.verifyCode( secret, rc.code ) ) {
+            messagebox.error( "That code did not match. Try again." );
+            relocate( uri = "/mfa/setup" );
+            return;
+        }
+
+        // Generate and persist recovery codes; show the plaintext
+        // exactly once via flash, then redirect to the recovery
+        // codes view.
+        var codes  = totp.generateRecoveryCodes();
+        var hashed = totp.hashRecoveryCodes( codes );
+        queryExecute(
+            "UPDATE contacts
+             SET    mfa_enabled        = TRUE,
+                    mfa_enrolled_at    = NOW(),
+                    mfa_recovery_codes = cast( :rc as json ),
+                    updated_at         = NOW()
+             WHERE  id = :id",
+            { id : contact.getId(), rc : jsonSerialize( hashed ) }
+        );
+
+        flash.put( "totp_recovery_codes", codes );
+        relocate( uri = "/mfa/recovery-codes" );
+    }
+
+    function recoveryCodes( event, rc, prc ){
+        if ( !auth.isLoggedIn() ) {
+            relocate( uri = "/login" );
+            return;
+        }
+        var codes = flash.get( "totp_recovery_codes", [] );
+        if ( !isArray( codes ) || !codes.len() ) {
+            messagebox.info( "Recovery codes have already been displayed once. Disable and re-enable two-factor authentication if you need a new set." );
+            relocate( uri = "/account" );
+            return;
+        }
+        prc.pageTitle = "Save your recovery codes";
+        prc.codes     = codes;
+        event.setView( "mfa/recovery-codes" );
+    }
+
+    // ---------- internals ----------
+
+    private string function pendingContactId(){
+        var s = sessionGet();
+        return s.tesserabx_pending_mfa_contact_id ?: "";
+    }
+
+    private void function clearPending(){
+        var s = sessionGet();
+        s.tesserabx_pending_mfa_contact_id = "";
+    }
+
+    private struct function sessionGet(){
+        return session;
+    }
+
+    private array function parseRecoveryCodes( required string raw ){
+        if ( !len( arguments.raw ) ) return [];
+        try {
+            var arr = jsonDeserialize( arguments.raw );
+            return isArray( arr ) ? arr : [];
+        } catch ( any e ) {
+            return [];
+        }
+    }
+
+    private void function updateContactRecoveryCodes( required any contact, required array hashed ){
+        queryExecute(
+            "UPDATE contacts SET mfa_recovery_codes = cast( :rc as json ), updated_at = NOW() WHERE id = :id",
+            { id : arguments.contact.getId(), rc : jsonSerialize( arguments.hashed ) }
+        );
+    }
+
+    private any function finishLogin( required any contact ){
+        auth.login( arguments.contact );
+        clearPending();
+        relocate( uri = "/tickets" );
+    }
+
+}

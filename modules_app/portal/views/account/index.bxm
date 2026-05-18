@@ -1,0 +1,55 @@
+<bx:output>
+<bx:set local.me = prc.currentContact >
+
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+
+        <div class="card mb-3">
+            <div class="card-header">Profile</div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Email</dt>
+                    <dd class="col-sm-9">#encodeForHTML( local.me.getEmail() )#</dd>
+                    <bx:if len( local.me.getFirstName() ?: "" ) || len( local.me.getLastName() ?: "" )>
+                        <dt class="col-sm-3">Name</dt>
+                        <dd class="col-sm-9">#encodeForHTML( trim( ( local.me.getFirstName() ?: "" ) & " " & ( local.me.getLastName() ?: "" ) ) )#</dd>
+                    </bx:if>
+                </dl>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Two-factor authentication</span>
+                <bx:if prc.mfaEnabled>
+                    <span class="badge text-bg-success">Enabled</span>
+                <bx:else>
+                    <span class="badge text-bg-secondary">Not enabled</span>
+                </bx:if>
+            </div>
+            <div class="card-body">
+                <bx:if prc.mfaEnabled>
+                    <p class="text-body-secondary small mb-3">
+                        Two-factor authentication is on for this account. You'll be asked for a 6-digit code
+                        from your authenticator app every time you sign in.
+                    </p>
+                    <form method="post" action="/account/mfa/disable" onsubmit="return confirm('Turn off two-factor authentication? Your account will only require your password to sign in.');">
+                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                            <i class="bi bi-shield-slash"></i> Turn off two-factor
+                        </button>
+                    </form>
+                <bx:else>
+                    <p class="text-body-secondary small mb-3">
+                        Add a one-time code from an authenticator app to your sign-in so a stolen password
+                        alone isn't enough. We'll show you a QR code and walk you through enrollment.
+                    </p>
+                    <a href="/mfa/setup" class="btn btn-primary btn-sm">
+                        <i class="bi bi-shield-lock"></i> Enable two-factor authentication
+                    </a>
+                </bx:if>
+            </div>
+        </div>
+
+    </div>
+</div>
+</bx:output>
