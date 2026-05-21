@@ -810,7 +810,30 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - Follow-ups identified.
 ```
 
-(empty)
+### 2026-05-20 - Phase 0: Plan persistence and progress tracking
+- Saved this plan as `docs/EXTENSIBILITY-PLAN.md` (em dashes stripped on the way in, external memory link rewritten in prose).
+- Cross-linked from `docs/BUILD-PLAN.md` and `docs/FUTURE-WORK.md`, added a pointer paragraph to `CLAUDE.md`.
+- No deviations.
+- No additional files touched beyond the four listed in the plan.
+
+### 2026-05-20 - Phase 1: Add-on foundation
+- Migration `2026_05_20_000010_create_addon_tables.cfc` creates `addons` and `addon_organization_enablement`.
+- `appVersion` setting added to `config/Coldbox.bx` as single source of truth (read via `getSetting("appVersion")`).
+- `AddonRegistryService@core` ships in `modules_app/core/models/`: manifest validation, version-range checker (with open-upper-bound semantics), enablement resolution, admin mutations.
+- `AddonDiscoveryInterceptor@core` ships in `modules_app/core/interceptors/`, hooks `afterAspectsLoad`, syncs all loaded modules' manifests on app boot.
+- `tasks/ScaffoldAddon.cfc` plus `tasks/templates/*.tpl` generates a skeleton add-on under `modules/<slug>/`.
+- `docs/EXTENSIONS.md` Phase 1 stub published.
+- `modules_app/core/tests/specs/AddonRegistryServiceSpec.bx` covers version comparison (6 specs), compatibility ranges (6 specs), enablement resolution (6 specs), and admin mutations (2 specs). 20/20 pass.
+- End-to-end proof: ran `box task run tasks/ScaffoldAddon run hello-world "Hello World"` inside the app container, restarted, confirmed the row appeared in `addons` (`enabled=t, enablement_mode='all', compatible=t`) and that toggling it disabled it for any caller. The hello-world artifact is left in the container's `/app/modules/` volume for inspection during verification.
+- Deviations from plan:
+  - Task file is `.cfc` not `.bx` (CommandBox 6.x hardcodes `.cfc` for runners; see gotcha log).
+  - Templates are in `tasks/templates/` rather than inlined in the task source (Lucee `#` interpolation in CFC strings forced externalization; see gotcha log).
+  - `enabled_by_agent_id` uses SQL `NULLIF(:actor, '')` rather than a `javaCast("null","")` bind (BoxLang scope walker drops null var inits; see gotcha log).
+- Files touched that the plan did not list:
+  - `tasks/templates/ModuleConfig.bx.tpl`, `tasks/templates/box.json.tpl`, `tasks/templates/README.md.tpl`, `tasks/templates/InstallSpec.bx.tpl` (template externalization).
+- Follow-ups identified:
+  - The 4 other gotchas captured below all generalize. They will likely bite Phase 2 (which adds service interfaces and a settings registry across every module) and should be documented in `docs/EXTENSIONS.md` before that phase ships.
+  - The full TestBox suite reports 4 failures + 9 errors, all unrelated to Phase 1 (CBFS / s3sdk dev-environment issues already noted in the project memory `feedback_cbfs_test_env_split.md`).
 
 ---
 
@@ -818,7 +841,37 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 
 _Append BoxLang / ColdBox / cbSecurity / cbq / cbfs surprises encountered during build, with the workaround applied. Future phases (and future contributors) read this before working in the same area._
 
-(empty)
+### Phase 1 - Unscoped assignments in `ModuleConfig.bx configure()` go to function-local
+
+In BoxLang, an unscoped assignment inside a `function` body lands in the function's local scope, not the class's `variables` scope. ColdBox's ModuleService reads module config via `getPropertyMixin( "<key>", "variables", [] )`, so anything not prefixed with `variables.` is invisible to the framework.
+
+The casualty: `interceptors = [...]` and `settings = { tesserabx : ... }` in the original core `ModuleConfig.bx` and in the first scaffolder template silently produced empty values, which meant the AddonDiscoveryInterceptor was never registered and (later) loaded add-ons reported "no settings.tesserabx" even though their manifests were defined.
+
+**Always prefix every assignment inside `configure()` with `variables.`**: `variables.settings`, `variables.routes`, `variables.layoutSettings`, `variables.layouts`, `variables.interceptorSettings`, `variables.interceptors`. The AI module already follows this convention; other core modules do not, and will need to be migrated when later phases touch them.
+
+### Phase 1 - CommandBox tasks must be `.cfc`, not `.bx`
+
+CommandBox 6.3 hardcodes the `.cfc` extension for task runners ("Task CFC doesn't exist." otherwise). The CommandBox runtime is Lucee, not BoxLang. The generated add-on output is `.bx` (it runs inside the TesseraBX BoxLang runtime), but the task source itself is `.cfc` with `component extends="commandbox.system.BaseTask"`.
+
+The original plan called for `tasks/scaffoldAddon.bx`; the actual file is `tasks/ScaffoldAddon.cfc`. Future tasks follow the same `.cfc` convention.
+
+### Phase 1 - Lucee `#` interpolation hits CFC string literals containing markdown headings
+
+Lucee parses `#...#` as expression interpolation inside both single-quoted and double-quoted CFC strings. README templates with markdown `# Heading` / `## Section` lines throw `Invalid Syntax Closing [#] not found` at compile time.
+
+Workaround: keep generated-content templates as external files under `tasks/templates/*.tpl` and load them with `fileRead()` then `replaceNoCase()`. Doubling every literal `#` to `##` is the alternative but is fragile for content with many markdown headings.
+
+### Phase 1 - BoxLang JSON function is `jsonSerialize`, not CFML `serializeJSON`
+
+BoxLang ships `jsonSerialize()` and `jsonDeserialize()`. The CFML names `serializeJSON()` and `deserializeJSON()` do not exist in the BoxLang built-in function set and throw `Function [serializeJSON] not found`. The existing TesseraBX services already use the BoxLang names; new code must follow.
+
+### Phase 1 - To reach the ColdBox controller from a service, inject `coldbox` directly
+
+`wirebox.getController()` does not exist on the WireBox API surface in this BoxLang / ColdBox 8 environment ("Method 'getController' not found"). Use `property name="coldbox" inject="coldbox";` and call `coldbox.getSetting( "<name>" )` directly.
+
+### Phase 1 - `?fwreinit=1` does not recompile BoxLang `.bx` source
+
+ColdBox's reinit reloads framework config and rewires modules, but it does not invalidate the BoxLang compiler's class cache. Edits to `.bx` files take effect only after `docker compose restart app` (or whatever causes a fresh JVM bootstrap). The TestBox specs that hit a recently edited service will report stale errors until then. This bit Phase 1 twice during build; future phases should plan for a restart whenever a service or interceptor signature changes.
 
 ---
 

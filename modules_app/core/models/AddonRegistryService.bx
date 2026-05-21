@@ -1,0 +1,339 @@
+/**
+ * AddonRegistryService: the discovery, validation, and enablement
+ * service for TesseraBX add-ons.
+ *
+ * An add-on is a standard ColdBox module (installed under modules/ or
+ * shipped as a first-party module under modules_app/) that carries a
+ * settings.tesserabx manifest block in its ModuleConfig.bx. At app
+ * boot the AddonDiscoveryInterceptor calls syncFromLoadedModules()
+ * which walks every loaded module, reads the manifest, validates the
+ * version range against the core appVersion, and upserts a row in
+ * the addons table.
+ *
+ * After discovery, callers throughout the app ask isEnabled(addonId,
+ * organizationId) before honoring an add-on's contribution at a
+ * specific tenant. The resolution rule is:
+ *
+ *   addons.enabled = false                   ⇒ false
+ *   compatibility check failed               ⇒ false
+ *   enablement_mode = 'all'                  ⇒ true
+ *   enablement_mode = 'specific'             ⇒ value of the matching
+ *                                              addon_organization_enablement
+ *                                              row, or false if no row
+ *
+ * Version-range semantics for the manifest:
+ *
+ *   minCoreVersion : required. Add-on is rejected if appVersion < min.
+ *   maxCoreVersion : optional. When blank, missing, or omitted, the
+ *                    add-on is accepted on any appVersion >= min
+ *                    (open upper bound). When present, appVersion
+ *                    must be <= max inclusive.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="coldbox" inject="coldbox";
+
+    // Mode constants — keep in sync with the addons.enablement_mode
+    // column check in any future admin UI dropdowns.
+    variables.MODE_ALL      = "all";
+    variables.MODE_SPECIFIC = "specific";
+
+    // Fields a manifest block must carry to be registered.
+    variables.REQUIRED_MANIFEST_FIELDS = [ "addonId", "displayName", "version", "minCoreVersion" ];
+
+    /**
+     * Walk every loaded ColdBox module and upsert an addons row for
+     * any module that declares a settings.tesserabx manifest block.
+     * Called from AddonDiscoveryInterceptor on afterAspectsLoad.
+     *
+     * Returns { discovered, registered, rejected } counts plus a
+     * details array describing each rejection.
+     */
+    public struct function syncFromLoadedModules(){
+        var coreVersion = coldbox.getSetting( "appVersion" );
+        var moduleConfig = coldbox.getSetting( "modules" );
+
+        var result = {
+            coreVersion : coreVersion,
+            discovered  : 0,
+            registered  : 0,
+            rejected    : 0,
+            details     : []
+        };
+
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var modSettings = mod.settings ?: {};
+            if ( !structKeyExists( modSettings, "tesserabx" ) ) continue;
+
+            result.discovered++;
+            var manifest = modSettings.tesserabx;
+
+            var validation = validateManifest( manifest, moduleName );
+            if ( !validation.valid ) {
+                result.rejected++;
+                result.details.append( { module : moduleName, status : "rejected", reason : validation.reason } );
+                writeLog(
+                    text : "AddonRegistry rejected module [#moduleName#]: #validation.reason#",
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+                continue;
+            }
+
+            var compatibility = checkCompatibility( manifest, coreVersion );
+            upsert( manifest, compatibility );
+
+            if ( compatibility.compatible ) {
+                result.registered++;
+                result.details.append( { module : moduleName, addonId : manifest.addonId, status : "registered" } );
+            } else {
+                result.rejected++;
+                result.details.append( {
+                    module  : moduleName,
+                    addonId : manifest.addonId,
+                    status  : "incompatible",
+                    reason  : compatibility.message
+                } );
+                writeLog(
+                    text : "AddonRegistry recorded incompatible add-on [#manifest.addonId#]: #compatibility.message#",
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Returns true when an add-on is enabled for the given
+     * organization. Pass an empty organizationId to ask "is this
+     * add-on enabled at all" (global+compatible+mode=all).
+     */
+    public boolean function isEnabled( required string addonId, string organizationId = "" ){
+        var row = findById( arguments.addonId );
+        if ( isNull( row ) ) return false;
+        if ( !row.compatible ) return false;
+        if ( !row.enabled ) return false;
+        if ( row.enablementMode == variables.MODE_ALL ) return true;
+
+        // specific mode: per-org row drives the answer; missing row = off
+        if ( !len( arguments.organizationId ) ) return false;
+        var orgRow = queryExecute(
+            "SELECT enabled
+             FROM   addon_organization_enablement
+             WHERE  addon_id = :a
+             AND    organization_id = :o",
+            { a : arguments.addonId, o : arguments.organizationId }
+        );
+        if ( !orgRow.recordCount ) return false;
+        return !!orgRow.enabled[ 1 ];
+    }
+
+    /**
+     * Returns the addons row as a struct, or null when no add-on
+     * with that id is registered.
+     */
+    public any function findById( required string addonId ){
+        var rows = queryExecute(
+            "SELECT addon_id, display_name, version, min_core_version, max_core_version,
+                    contributes_to, requires_ai, installed_at, last_seen_at,
+                    enabled, enablement_mode, compatible, compatibility_message, metadata
+             FROM   addons
+             WHERE  addon_id = :a",
+            { a : arguments.addonId }
+        );
+        if ( !rows.recordCount ) return javaCast( "null", "" );
+        return rowToStruct( rows, 1 );
+    }
+
+    /**
+     * Returns every registered add-on as an array of structs.
+     * Used by the admin Add-ons page (built in Phase 4).
+     */
+    public array function listAll(){
+        var rows = queryExecute(
+            "SELECT addon_id, display_name, version, min_core_version, max_core_version,
+                    contributes_to, requires_ai, installed_at, last_seen_at,
+                    enabled, enablement_mode, compatible, compatibility_message, metadata
+             FROM   addons
+             ORDER BY display_name"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( rowToStruct( rows, i ) );
+        }
+        return out;
+    }
+
+    public void function setGlobalEnabled( required string addonId, required boolean enabled ){
+        queryExecute(
+            "UPDATE addons
+             SET    enabled = cast( :e as boolean )
+             WHERE  addon_id = :a",
+            { a : arguments.addonId, e : ( arguments.enabled ? "true" : "false" ) }
+        );
+    }
+
+    public void function setEnablementMode( required string addonId, required string mode ){
+        if ( arguments.mode != variables.MODE_ALL && arguments.mode != variables.MODE_SPECIFIC ) {
+            throw( type = "AddonRegistry.InvalidMode", message = "Enablement mode must be 'all' or 'specific'" );
+        }
+        queryExecute(
+            "UPDATE addons SET enablement_mode = :m WHERE addon_id = :a",
+            { a : arguments.addonId, m : arguments.mode }
+        );
+    }
+
+    public void function setOrgEnablement(
+        required string addonId,
+        required string organizationId,
+        required boolean enabled,
+        string actorAgentId = ""
+    ){
+        // Bind actorAgentId as a plain string; SQL NULLIF converts an
+        // empty value to NULL so we never assign a non-existent agent
+        // id to the FK. The "var x = javaCast('null', ...)" pattern is
+        // unsafe in BoxLang (scope walker drops it).
+        queryExecute(
+            "INSERT INTO addon_organization_enablement
+                ( addon_id, organization_id, enabled, enabled_at, enabled_by_agent_id )
+             VALUES
+                ( :a, :o, cast( :e as boolean ), NOW(), NULLIF( :actor, '' ) )
+             ON CONFLICT ( addon_id, organization_id ) DO UPDATE
+             SET    enabled = cast( :e as boolean ),
+                    enabled_at = NOW(),
+                    enabled_by_agent_id = NULLIF( :actor, '' )",
+            {
+                a     : arguments.addonId,
+                o     : arguments.organizationId,
+                e     : ( arguments.enabled ? "true" : "false" ),
+                actor : arguments.actorAgentId
+            }
+        );
+    }
+
+    /**
+     * Compare two semantic-style versions ("1.2.3" vs "1.10.0").
+     * Returns -1, 0, or 1 the same way numeric compare does.
+     * Pre-release suffixes after a dash are ignored for now.
+     */
+    public numeric function compareVersions( required string a, required string b ){
+        var partsA = listToArray( listFirst( arguments.a, "-" ), "." );
+        var partsB = listToArray( listFirst( arguments.b, "-" ), "." );
+        var len = max( partsA.len(), partsB.len() );
+        for ( var i = 1; i <= len; i++ ) {
+            var av = ( i <= partsA.len() ? val( partsA[ i ] ) : 0 );
+            var bv = ( i <= partsB.len() ? val( partsB[ i ] ) : 0 );
+            if ( av < bv ) return -1;
+            if ( av > bv ) return 1;
+        }
+        return 0;
+    }
+
+    /**
+     * Evaluate a manifest's version range against the running core
+     * version. Returns { compatible, message }.
+     *
+     * Blank or missing maxCoreVersion is treated as an open upper
+     * bound: any core version >= minCoreVersion is accepted.
+     */
+    public struct function checkCompatibility( required struct manifest, required string coreVersion ){
+        var min = arguments.manifest.minCoreVersion;
+        var max = arguments.manifest.maxCoreVersion ?: "";
+
+        if ( compareVersions( arguments.coreVersion, min ) < 0 ) {
+            return {
+                compatible : false,
+                message    : "Core version #arguments.coreVersion# is older than minCoreVersion #min#"
+            };
+        }
+        if ( len( max ) && compareVersions( arguments.coreVersion, max ) > 0 ) {
+            return {
+                compatible : false,
+                message    : "Core version #arguments.coreVersion# is newer than maxCoreVersion #max#"
+            };
+        }
+        return { compatible : true, message : "" };
+    }
+
+    private struct function validateManifest( required any manifest, required string moduleName ){
+        if ( !isStruct( arguments.manifest ) ) {
+            return { valid : false, reason : "settings.tesserabx is not a struct" };
+        }
+        for ( var field in variables.REQUIRED_MANIFEST_FIELDS ) {
+            if ( !structKeyExists( arguments.manifest, field ) || !len( trim( arguments.manifest[ field ] ?: "" ) ) ) {
+                return { valid : false, reason : "missing required manifest field [#field#]" };
+            }
+        }
+        return { valid : true, reason : "" };
+    }
+
+    private void function upsert( required struct manifest, required struct compatibility ){
+        var contributesTo = "";
+        if ( structKeyExists( arguments.manifest, "contributesTo" ) && isArray( arguments.manifest.contributesTo ) ) {
+            contributesTo = arrayToList( arguments.manifest.contributesTo );
+        }
+        var requiresAi = !!( arguments.manifest.requiresAi ?: false );
+        var maxCore = arguments.manifest.maxCoreVersion ?: "";
+        var compatMessage = arguments.compatibility.message;
+
+        queryExecute(
+            "INSERT INTO addons
+                ( addon_id, display_name, version, min_core_version, max_core_version,
+                  contributes_to, requires_ai, installed_at, last_seen_at,
+                  enabled, enablement_mode, compatible, compatibility_message, metadata )
+             VALUES
+                ( :a, :d, :v, :mn, :mx,
+                  :ct, cast( :rai as boolean ), NOW(), NOW(),
+                  TRUE, 'all', cast( :cmp as boolean ), :cmsg, :meta )
+             ON CONFLICT ( addon_id ) DO UPDATE
+             SET    display_name          = :d,
+                    version               = :v,
+                    min_core_version      = :mn,
+                    max_core_version      = :mx,
+                    contributes_to        = :ct,
+                    requires_ai           = cast( :rai as boolean ),
+                    last_seen_at          = NOW(),
+                    compatible            = cast( :cmp as boolean ),
+                    compatibility_message = :cmsg,
+                    metadata              = :meta",
+            {
+                a    : arguments.manifest.addonId,
+                d    : arguments.manifest.displayName,
+                v    : arguments.manifest.version,
+                mn   : arguments.manifest.minCoreVersion,
+                mx   : maxCore,
+                ct   : contributesTo,
+                rai  : ( requiresAi ? "true" : "false" ),
+                cmp  : ( arguments.compatibility.compatible ? "true" : "false" ),
+                cmsg : compatMessage,
+                meta : jsonSerialize( arguments.manifest )
+            }
+        );
+    }
+
+    private struct function rowToStruct( required query rows, required numeric i ){
+        return {
+            addonId              : arguments.rows.addon_id[ arguments.i ],
+            displayName          : arguments.rows.display_name[ arguments.i ],
+            version              : arguments.rows.version[ arguments.i ],
+            minCoreVersion       : arguments.rows.min_core_version[ arguments.i ],
+            maxCoreVersion       : arguments.rows.max_core_version[ arguments.i ] ?: "",
+            contributesTo        : len( arguments.rows.contributes_to[ arguments.i ] ?: "" )
+                                       ? listToArray( arguments.rows.contributes_to[ arguments.i ] )
+                                       : [],
+            requiresAi           : !!arguments.rows.requires_ai[ arguments.i ],
+            installedAt          : arguments.rows.installed_at[ arguments.i ],
+            lastSeenAt           : arguments.rows.last_seen_at[ arguments.i ],
+            enabled              : !!arguments.rows.enabled[ arguments.i ],
+            enablementMode       : arguments.rows.enablement_mode[ arguments.i ],
+            compatible           : !!arguments.rows.compatible[ arguments.i ],
+            compatibilityMessage : arguments.rows.compatibility_message[ arguments.i ] ?: "",
+            metadata             : arguments.rows.metadata[ arguments.i ] ?: ""
+        };
+    }
+
+}

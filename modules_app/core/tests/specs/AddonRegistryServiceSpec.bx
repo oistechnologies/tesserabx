@@ -1,0 +1,220 @@
+/**
+ * AddonRegistryServiceSpec: version comparison, compatibility ranges,
+ * and enablement resolution against real Postgres rows.
+ *
+ * Uses a unique addon_id per spec (and per fixture organization where
+ * relevant) so concurrent specs cannot collide. Each spec cleans up
+ * its own rows in afterAll so the suite is idempotent.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "AddonRegistryService@core" );
+        variables.testAddonIds = [];
+        variables.testOrgIds   = [];
+    }
+
+    function afterAll(){
+        // Cascade FK will clear addon_organization_enablement rows.
+        for ( var id in variables.testAddonIds ) {
+            queryExecute( "DELETE FROM addons WHERE addon_id = :a", { a : id } );
+        }
+        for ( var id in variables.testOrgIds ) {
+            queryExecute( "DELETE FROM organizations WHERE id = :o", { o : id } );
+        }
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "AddonRegistryService.compareVersions", function(){
+
+            it( "returns 0 for equal versions", function(){
+                expect( variables.svc.compareVersions( "1.0.0", "1.0.0" ) ).toBe( 0 );
+            } );
+
+            it( "returns -1 when first is older", function(){
+                expect( variables.svc.compareVersions( "1.0.0", "1.0.1" ) ).toBe( -1 );
+                expect( variables.svc.compareVersions( "1.0.0", "2.0.0" ) ).toBe( -1 );
+            } );
+
+            it( "returns 1 when first is newer", function(){
+                expect( variables.svc.compareVersions( "1.2.0", "1.1.99" ) ).toBe( 1 );
+                expect( variables.svc.compareVersions( "2.0.0", "1.99.99" ) ).toBe( 1 );
+            } );
+
+            it( "treats 1.10.0 as newer than 1.2.0 (not string-lex)", function(){
+                expect( variables.svc.compareVersions( "1.10.0", "1.2.0" ) ).toBe( 1 );
+            } );
+
+            it( "ignores pre-release suffix after a dash", function(){
+                expect( variables.svc.compareVersions( "1.0.0-rc1", "1.0.0" ) ).toBe( 0 );
+            } );
+
+            it( "treats missing trailing segments as zero", function(){
+                expect( variables.svc.compareVersions( "1.0", "1.0.0" ) ).toBe( 0 );
+                expect( variables.svc.compareVersions( "1.0", "1.0.1" ) ).toBe( -1 );
+            } );
+
+        } );
+
+        describe( "AddonRegistryService.checkCompatibility", function(){
+
+            it( "is compatible when core version is equal to minCoreVersion", function(){
+                var r = variables.svc.checkCompatibility(
+                    { minCoreVersion : "1.0.0", maxCoreVersion : "" }, "1.0.0"
+                );
+                expect( r.compatible ).toBeTrue();
+            } );
+
+            it( "is incompatible when core is older than minCoreVersion", function(){
+                var r = variables.svc.checkCompatibility(
+                    { minCoreVersion : "2.0.0", maxCoreVersion : "" }, "1.0.0"
+                );
+                expect( r.compatible ).toBeFalse();
+                expect( r.message ).toInclude( "older than minCoreVersion" );
+            } );
+
+            it( "treats blank maxCoreVersion as open upper bound", function(){
+                var r = variables.svc.checkCompatibility(
+                    { minCoreVersion : "1.0.0", maxCoreVersion : "" }, "99.0.0"
+                );
+                expect( r.compatible ).toBeTrue();
+            } );
+
+            it( "treats missing maxCoreVersion key as open upper bound", function(){
+                var r = variables.svc.checkCompatibility(
+                    { minCoreVersion : "1.0.0" }, "99.0.0"
+                );
+                expect( r.compatible ).toBeTrue();
+            } );
+
+            it( "is incompatible when core is newer than a present maxCoreVersion", function(){
+                var r = variables.svc.checkCompatibility(
+                    { minCoreVersion : "1.0.0", maxCoreVersion : "1.5.0" }, "2.0.0"
+                );
+                expect( r.compatible ).toBeFalse();
+                expect( r.message ).toInclude( "newer than maxCoreVersion" );
+            } );
+
+            it( "is compatible at the inclusive maxCoreVersion boundary", function(){
+                var r = variables.svc.checkCompatibility(
+                    { minCoreVersion : "1.0.0", maxCoreVersion : "1.5.0" }, "1.5.0"
+                );
+                expect( r.compatible ).toBeTrue();
+            } );
+
+        } );
+
+        describe( "AddonRegistryService.isEnabled resolution", function(){
+
+            it( "returns false when no row exists", function(){
+                expect( variables.svc.isEnabled( "does-not-exist-" & createUUID() ) ).toBeFalse();
+            } );
+
+            it( "returns false when addon row is marked incompatible", function(){
+                var id = registerFixtureAddon( enabled = true, mode = "all", compatible = false );
+                expect( variables.svc.isEnabled( id ) ).toBeFalse();
+            } );
+
+            it( "returns false when addon row is globally disabled", function(){
+                var id = registerFixtureAddon( enabled = false, mode = "all" );
+                expect( variables.svc.isEnabled( id ) ).toBeFalse();
+            } );
+
+            it( "returns true in mode=all for any org and for no org", function(){
+                var id = registerFixtureAddon( enabled = true, mode = "all" );
+                expect( variables.svc.isEnabled( id ) ).toBeTrue();
+                expect( variables.svc.isEnabled( id, "some-org-id" ) ).toBeTrue();
+            } );
+
+            it( "in mode=specific returns true only for orgs with an enabled override row", function(){
+                var id    = registerFixtureAddon( enabled = true, mode = "specific" );
+                var orgIn = createFixtureOrg();
+                var orgOut = createFixtureOrg();
+
+                variables.svc.setOrgEnablement( id, orgIn, true );
+
+                expect( variables.svc.isEnabled( id, orgIn ) ).toBeTrue();
+                expect( variables.svc.isEnabled( id, orgOut ) ).toBeFalse();
+                expect( variables.svc.isEnabled( id, "" ) ).toBeFalse();
+            } );
+
+            it( "in mode=specific honors a disabled override row over the global true", function(){
+                var id  = registerFixtureAddon( enabled = true, mode = "specific" );
+                var org = createFixtureOrg();
+                variables.svc.setOrgEnablement( id, org, false );
+                expect( variables.svc.isEnabled( id, org ) ).toBeFalse();
+            } );
+
+        } );
+
+        describe( "AddonRegistryService admin mutations", function(){
+
+            it( "setGlobalEnabled toggles the row", function(){
+                var id = registerFixtureAddon( enabled = true, mode = "all" );
+                variables.svc.setGlobalEnabled( id, false );
+                expect( variables.svc.isEnabled( id ) ).toBeFalse();
+                variables.svc.setGlobalEnabled( id, true );
+                expect( variables.svc.isEnabled( id ) ).toBeTrue();
+            } );
+
+            it( "setEnablementMode rejects unknown modes", function(){
+                var id = registerFixtureAddon( enabled = true, mode = "all" );
+                expect( function(){
+                    variables.svc.setEnablementMode( id, "everything" );
+                } ).toThrow( type = "AddonRegistry.InvalidMode" );
+            } );
+
+        } );
+    }
+
+    /**
+     * Insert a synthetic addons row and return its id. The id is
+     * recorded so afterAll can clean it up.
+     */
+    private string function registerFixtureAddon(
+        required boolean enabled,
+        required string mode,
+        boolean compatible = true
+    ){
+        var id = "spec-" & lcase( replace( createUUID(), "-", "", "all" ) );
+        queryExecute(
+            "INSERT INTO addons
+                ( addon_id, display_name, version, min_core_version, max_core_version,
+                  contributes_to, requires_ai, enabled, enablement_mode, compatible, metadata )
+             VALUES
+                ( :a, :d, '0.0.1', '0.0.1', '',
+                  '', cast( :rai as boolean ), cast( :en as boolean ), :m,
+                  cast( :cmp as boolean ), '{}' )",
+            {
+                a   : id,
+                d   : "Spec fixture " & id,
+                rai : "false",
+                en  : ( arguments.enabled ? "true" : "false" ),
+                m   : arguments.mode,
+                cmp : ( arguments.compatible ? "true" : "false" )
+            }
+        );
+        variables.testAddonIds.append( id );
+        return id;
+    }
+
+    /**
+     * Create a minimal organization row and return its id for use
+     * as a per-org enablement target.
+     */
+    private string function createFixtureOrg(){
+        var id = createUUID();
+        var slug = "spec-" & lcase( replace( id, "-", "", "all" ) );
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, created_at, updated_at )
+             VALUES ( :id, :n, :s, NOW(), NOW() )",
+            { id : id, n : "Spec Org " & id, s : slug }
+        );
+        variables.testOrgIds.append( id );
+        return id;
+    }
+
+}

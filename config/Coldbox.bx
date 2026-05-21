@@ -59,6 +59,11 @@ class {
 
         // Custom application settings, accessed via getSetting()
         variables.settings = {
+            // Single source of truth for the core TesseraBX version.
+            // Compared against an add-on's minCoreVersion / maxCoreVersion
+            // in AddonRegistryService.checkCompatibility(). Bump this
+            // and the box.json "version" in lock step on every release.
+            appVersion              : "0.0.1",
             aiEnabled               : getSystemSetting( "AI_ENABLED", "false" ),
             aiProvider              : getSystemSetting( "AI_PROVIDER", "openrouter" ),
             aiModel                 : getSystemSetting( "AI_MODEL", "" ),

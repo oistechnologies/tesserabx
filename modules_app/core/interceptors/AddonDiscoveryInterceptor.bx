@@ -1,0 +1,40 @@
+/**
+ * AddonDiscoveryInterceptor: runs once at app boot, after every
+ * ColdBox module has been loaded, and asks the AddonRegistryService
+ * to sync the addons table against the manifests it finds in the
+ * loaded module list.
+ *
+ * Hooks on afterAspectsLoad, which fires after the module aggregator
+ * has registered every module in modules_app/ and modules/. By that
+ * point each module's settings.tesserabx block (if any) is visible
+ * via controller.getSetting( "modules" ).
+ *
+ * Wrapped in try/catch so a misbehaving add-on manifest cannot
+ * prevent the app from starting; the worst case is the add-on is
+ * not registered and a warning lands in the tesserabx log.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function afterAspectsLoad( event, interceptData, rc, prc ){
+        try {
+            var svc = wirebox.getInstance( "AddonRegistryService@core" );
+            var result = svc.syncFromLoadedModules();
+            writeLog(
+                text : "AddonRegistry sync complete: discovered=#result.discovered# registered=#result.registered# rejected=#result.rejected# coreVersion=#result.coreVersion#",
+                log  : "tesserabx",
+                type : "information"
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "AddonDiscoveryInterceptor failed: #e.message# :: #e.detail#",
+                log  : "tesserabx",
+                type : "error"
+            );
+        }
+    }
+
+}

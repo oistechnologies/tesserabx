@@ -25,24 +25,35 @@ class {
     this.dependencies       = [];
 
     function configure(){
-        settings = {};
+        // NB: every assignment is explicitly scoped to `variables.`
+        // because ColdBox reads these via `getPropertyMixin("...","variables",[])`
+        // and unscoped assignments inside a BoxLang `function` body
+        // land in function-local scope, not the class variables scope.
+        // The interceptors array was the casualty that triggered this fix.
+        variables.settings = {};
 
-        routes = [
+        variables.routes = [
             { pattern : "/health",        handler : "Health", action : "index"  },
             { pattern : "/health/worker", handler : "Health", action : "worker" },
             { pattern : "/:handler/:action?" }
         ];
 
         // Both surface layouts live in this module's layouts/ folder.
-        layoutSettings = { defaultLayout : "Portal" };
+        variables.layoutSettings = { defaultLayout : "Portal" };
 
-        layouts = [
+        variables.layouts = [
             { file : "Portal", views : "", folders : "" },
             { file : "Agent",  views : "", folders : "" }
         ];
 
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors = [
+            {
+                class      : "#moduleMapping#.interceptors.AddonDiscoveryInterceptor",
+                name       : "AddonDiscoveryInterceptor",
+                properties : {}
+            }
+        ];
     }
 
     function onLoad(){
@@ -64,6 +75,9 @@ class {
               .asSingleton();
         binder.map( "AvatarHelper@core" )
               .to( "#moduleMapping#.models.AvatarHelper" )
+              .asSingleton();
+        binder.map( "AddonRegistryService@core" )
+              .to( "#moduleMapping#.models.AddonRegistryService" )
               .asSingleton();
         // Patched cbq DBProvider that quotes "reservedBy" in its
         // orderByRaw fragments. Required for Postgres + cbq.
