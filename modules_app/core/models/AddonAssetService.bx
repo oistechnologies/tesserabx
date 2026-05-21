@@ -1,0 +1,112 @@
+/**
+ * AddonAssetService: emits the `<link>` and `<script>` tags add-ons
+ * need so their CSS and JavaScript load alongside core's bundle.
+ *
+ * Add-ons declare their assets in `ModuleConfig.bx`:
+ *
+ *   settings.tesserabx.assets = [
+ *       { kind: "css", surface: "agent",  href: "/modules/example-jira/resources/css/jira.css", sortWeight: 500 },
+ *       { kind: "js",  surface: "agent",  src:  "/modules/example-jira/resources/js/jira.js",   sortWeight: 500, defer: true },
+ *       { kind: "css", surface: "portal", href: "...", sortWeight: 500 }
+ *   ];
+ *
+ * Both layouts call:
+ *   #renderAssetTags( "portal" )#  or  #renderAssetTags( "agent" )#
+ *
+ * which returns the concatenated HTML.
+ *
+ * Add-ons are responsible for serving their own asset paths. The
+ * simplest pattern: drop the file under the add-on's `resources/`
+ * folder and let core's static-file routing serve it via
+ * `/modules/<slug>/resources/<file>`. Phase 4 ships the contract;
+ * the static-routing piece is whatever the deployment's reverse
+ * proxy already does today (ColdBox passes through unknown
+ * extensions for the dev runwar).
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};   // surface -> [ asset, ... ]
+    variables.cacheLoaded = false;
+
+    /**
+     * Concatenated `<link rel="stylesheet">` tags for the surface.
+     * Emit this inside the layout's `<head>`.
+     */
+    public string function renderCssTags( required string surface ){
+        ensureLoaded();
+        if ( !structKeyExists( variables.cache, arguments.surface ) ) return "";
+        var tags = [];
+        for ( var a in variables.cache[ arguments.surface ] ) {
+            if ( a.kind == "css" ) {
+                tags.append( '<link rel="stylesheet" href="' & encodeForHTMLAttribute( a.href ) & '">' );
+            }
+        }
+        return tags.toList( chr( 10 ) );
+    }
+
+    /**
+     * Concatenated `<script>` tags for the surface. Emit just before
+     * `</body>` so they load after core's scripts.
+     */
+    public string function renderJsTags( required string surface ){
+        ensureLoaded();
+        if ( !structKeyExists( variables.cache, arguments.surface ) ) return "";
+        var tags = [];
+        for ( var a in variables.cache[ arguments.surface ] ) {
+            if ( a.kind == "js" ) {
+                var deferAttr = a.defer ? ' defer' : '';
+                tags.append( '<script src="' & encodeForHTMLAttribute( a.src ) & '"' & deferAttr & '></script>' );
+            }
+        }
+        return tags.toList( chr( 10 ) );
+    }
+
+    /**
+     * The full asset list for a surface as structured data. Useful
+     * for tests and admin diagnostics.
+     */
+    public array function listForSurface( required string surface ){
+        ensureLoaded();
+        return variables.cache[ arguments.surface ] ?: [];
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.assets ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var a in declared ) {
+                if ( !isStruct( a ) ) continue;
+                var surface = a.surface ?: "agent";
+                if ( !structKeyExists( variables.cache, surface ) ) variables.cache[ surface ] = [];
+                variables.cache[ surface ].append( {
+                    kind       : lcase( a.kind ?: "css" ),
+                    href       : a.href       ?: "",
+                    src        : a.src        ?: "",
+                    defer      : !!( a.defer  ?: false ),
+                    sortWeight : isNumeric( a.sortWeight ?: "" ) ? a.sortWeight : 500,
+                    source     : moduleName
+                } );
+            }
+        }
+        // Sort each surface's array by weight.
+        for ( var surface in variables.cache ) {
+            variables.cache[ surface ].sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        }
+        variables.cacheLoaded = true;
+    }
+
+}

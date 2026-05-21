@@ -1,0 +1,113 @@
+/**
+ * PermissionRegistry: declared permissions a role can hold.
+ *
+ * Phase 4 introduces permissions as a first-class concept layered on
+ * top of the existing role-keyed RBAC. Core and add-ons declare
+ * permissions in their `ModuleConfig.bx` manifest:
+ *
+ *   settings.tesserabx.permissions = [
+ *       { id: "billing.view",   label: "View billing data" },
+ *       { id: "billing.manage", label: "Manage billing settings" }
+ *   ];
+ *
+ * Roles aggregate permissions (see RoleRegistry); UI / API entry
+ * points consult the role -> permissions mapping rather than role
+ * keys directly. The cbSecurity rule shape (`roles: "..."`) is
+ * preserved for backwards compatibility; permission-based gating
+ * layers on top.
+ *
+ * --- Public extension contract ---
+ *
+ *   var perms = wirebox.getInstance( "PermissionRegistry@agent" );
+ *   var all   = perms.listAll();          // every declared permission
+ *   var one   = perms.findById( "..." );  // null if not declared
+ *
+ * Registrations are read at boot from every loaded module's manifest
+ * (see syncFromAddons). Add-ons declare without contacting this
+ * service directly; the registry pulls.
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    // Cached map: id -> descriptor struct
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( ( a, b ) => compare( a.id, b.id ) );
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    /**
+     * Bypass the cache and re-read every module's manifest. Useful
+     * after an admin enables / disables an add-on at runtime.
+     */
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.permissions ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var p in declared ) {
+                if ( !isStruct( p ) || !structKeyExists( p, "id" ) || !len( p.id ?: "" ) ) continue;
+                variables.cache[ p.id ] = {
+                    id          : p.id,
+                    label       : p.label       ?: p.id,
+                    description : p.description ?: "",
+                    source      : moduleName
+                };
+            }
+        }
+        // Core-shipped permissions that do not yet have a manifest
+        // home land here as a temporary seed. Phase 4.7+ will move
+        // these into the appropriate module's manifest declaration.
+        seedCorePermissions();
+        variables.cacheLoaded = true;
+    }
+
+    private void function seedCorePermissions(){
+        var seeds = [
+            { id : "admin.access",       label : "Access the /agent/admin surface",     description : "Required to land on any /agent/admin page." },
+            { id : "admin.users.manage", label : "Manage agent accounts and roles",     description : "Includes creating, editing, deactivating agents." },
+            { id : "admin.teams.manage", label : "Manage teams",                        description : "Create, rename, dissolve teams; manage memberships." },
+            { id : "admin.workflow.manage", label : "Edit ticket workflow",             description : "Change statuses and transitions." },
+            { id : "admin.settings.manage", label : "Edit application settings",        description : "App-wide settings, branding, integrations." },
+            { id : "admin.audit.view",   label : "View the audit log",                  description : "Read-only access to the central compliance log." },
+            { id : "admin.addons.manage", label : "Enable, disable, configure add-ons", description : "Drives the Add-ons admin page." },
+            { id : "tickets.view",       label : "View tickets",                        description : "Required for the agent ticket queue." },
+            { id : "tickets.assign",     label : "Assign tickets",                      description : "Reassign tickets to other agents." },
+            { id : "tickets.bulk",       label : "Bulk-edit tickets",                   description : "Apply actions to many tickets at once." }
+        ];
+        for ( var p in seeds ) {
+            if ( !structKeyExists( variables.cache, p.id ) ) {
+                variables.cache[ p.id ] = {
+                    id          : p.id,
+                    label       : p.label,
+                    description : p.description,
+                    source      : "core"
+                };
+            }
+        }
+    }
+
+}

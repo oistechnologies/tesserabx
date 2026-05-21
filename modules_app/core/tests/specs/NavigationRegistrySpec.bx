@@ -1,0 +1,174 @@
+/**
+ * NavigationRegistrySpec: seed entries + viewer-driven visibility +
+ * override resolution. Each spec uses a unique entry id so concurrent
+ * specs cannot collide.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.nav = getController().getWireBox().getInstance( "NavigationRegistry@core" );
+        variables.testIds = [];
+    }
+
+    function afterAll(){
+        for ( var id in variables.testIds ) {
+            queryExecute(
+                "DELETE FROM registry_overrides WHERE registry = 'navigation' AND entry_id = :e",
+                { e : id }
+            );
+        }
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "NavigationRegistry seed", function(){
+            it( "lists portal main menu entries for an anonymous viewer", function(){
+                var anon = anonymousViewer();
+                var items = variables.nav.listForZone( "portal", "main", anon );
+                var labels = items.map( ( i ) => i.label );
+                expect( labels ).toInclude( "Home" );
+                expect( labels ).toInclude( "Knowledge Base" );
+                // Auth-gated entries are filtered for anonymous.
+                expect( labels ).notToInclude( "My tickets" );
+                expect( labels ).notToInclude( "Submit a ticket" );
+            } );
+
+            it( "shows auth-gated portal entries to a signed-in contact", function(){
+                var viewer = contactViewer();
+                var items = variables.nav.listForZone( "portal", "main", viewer );
+                var labels = items.map( ( i ) => i.label );
+                expect( labels ).toInclude( "My tickets" );
+                expect( labels ).toInclude( "Submit a ticket" );
+            } );
+
+            it( "shows the agent main menu only to signed-in agents", function(){
+                var labelsForAnon = variables.nav.listForZone( "agent", "main", anonymousViewer() ).map( ( i ) => i.label );
+                expect( labelsForAnon ).notToInclude( "Dashboard" );
+
+                var labelsForAdmin = variables.nav.listForZone( "agent", "main", agentAdminViewer() ).map( ( i ) => i.label );
+                expect( labelsForAdmin ).toInclude( "Dashboard" );
+                expect( labelsForAdmin ).toInclude( "Tickets" );
+                expect( labelsForAdmin ).toInclude( "Admin" );
+            } );
+
+            it( "hides Admin from agents who lack admin.access", function(){
+                var labels = variables.nav.listForZone( "agent", "main", agentViewerNoAdmin() ).map( ( i ) => i.label );
+                expect( labels ).notToInclude( "Admin" );
+            } );
+
+            it( "hides Tickets from agents who lack tickets.view", function(){
+                var labels = variables.nav.listForZone( "agent", "main", agentViewerNoTickets() ).map( ( i ) => i.label );
+                expect( labels ).notToInclude( "Tickets" );
+            } );
+
+            it( "sorts the result by sortWeight ascending", function(){
+                var items = variables.nav.listForZone( "agent", "main", agentAdminViewer() );
+                for ( var i = 2; i <= arrayLen( items ); i++ ) {
+                    expect( items[ i - 1 ].sortWeight ).toBeLTE( items[ i ].sortWeight );
+                }
+            } );
+        } );
+
+        describe( "NavigationRegistry overrides", function(){
+            it( "honors a disabled global override", function(){
+                addOverride( entryId : "agent.main.reports", organizationId : "", disabled : true );
+                var labels = variables.nav.listForZone( "agent", "main", agentAdminViewer() ).map( ( i ) => i.label );
+                expect( labels ).notToInclude( "Reports" );
+            } );
+
+            it( "applies a label_override and a sort_weight_override", function(){
+                addOverride(
+                    entryId             : "agent.main.contacts",
+                    organizationId      : "",
+                    labelOverride       : "Customers",
+                    sortWeightOverride  : 5
+                );
+                var items = variables.nav.listForZone( "agent", "main", agentAdminViewer() );
+                var labels = items.map( ( i ) => i.label );
+                expect( labels ).toInclude( "Customers" );
+                // sort_weight 5 should now be first (before Dashboard at 10).
+                expect( items[ 1 ].label ).toBe( "Customers" );
+            } );
+        } );
+
+        describe( "NavigationRegistry add-on registration", function(){
+            it( "register() adds an in-memory entry", function(){
+                var id = "spec-nav-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.nav.register( {
+                    id           : id,
+                    surface      : "agent",
+                    menu         : "main",
+                    label        : "Spec Item",
+                    route        : "/spec",
+                    sortWeight   : 999,
+                    requiresAuth : true
+                } );
+                var labels = variables.nav.listForZone( "agent", "main", agentAdminViewer() ).map( ( i ) => i.label );
+                expect( labels ).toInclude( "Spec Item" );
+            } );
+        } );
+    }
+
+    private struct function anonymousViewer(){
+        return { signedIn : false, userType : "anonymous", userId : "", roles : [], permissions : [], organizationId : "" };
+    }
+    private struct function contactViewer(){
+        return { signedIn : true, userType : "contact", userId : "c-1", roles : [ "contact" ], permissions : [], organizationId : "" };
+    }
+    private struct function agentAdminViewer(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "a-1",
+            roles          : [ "agent-admin" ],
+            permissions    : [ "admin.access", "admin.users.manage", "tickets.view", "tickets.assign" ],
+            organizationId : ""
+        };
+    }
+    private struct function agentViewerNoAdmin(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "a-2",
+            roles          : [ "agent-supervisor" ],
+            permissions    : [ "tickets.view", "tickets.assign" ],
+            organizationId : ""
+        };
+    }
+    private struct function agentViewerNoTickets(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "a-3",
+            roles          : [],
+            permissions    : [],
+            organizationId : ""
+        };
+    }
+
+    private void function addOverride(
+        required string entryId,
+        string organizationId = "",
+        boolean disabled = false,
+        any sortWeightOverride = "",
+        string labelOverride = ""
+    ){
+        variables.testIds.append( arguments.entryId );
+        queryExecute(
+            "INSERT INTO registry_overrides
+                ( registry, entry_id, organization_id, disabled, sort_weight_override, label_override, updated_at )
+             VALUES
+                ( 'navigation', :e, NULLIF( :o, '' ), cast( :d as boolean ), CAST( NULLIF( :sw, '' ) AS integer ), NULLIF( :lo, '' ), NOW() )",
+            {
+                e  : arguments.entryId,
+                o  : arguments.organizationId,
+                d  : arguments.disabled ? "true" : "false",
+                sw : len( arguments.sortWeightOverride ?: "" ) ? toString( arguments.sortWeightOverride ) : "",
+                lo : arguments.labelOverride
+            }
+        );
+    }
+
+}

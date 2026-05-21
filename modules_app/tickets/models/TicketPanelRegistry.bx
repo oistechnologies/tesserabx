@@ -1,0 +1,174 @@
+/**
+ * TicketPanelRegistry: registry for ticket-detail-page panels (the
+ * right-column cards and tabs on the agent ticket show view).
+ *
+ * Phase 4 ships the registry contract and add-on contribution path.
+ * The existing core panels rendered inline in
+ * `modules_app/agent/views/tickets/show.bxm` are NOT migrated to the
+ * registry in Phase 4 (deferred). Add-on panels register through this
+ * service and render after the core inline panels via the view helper
+ * `#tbxTicketPanels( "right" )#`.
+ *
+ * Entries declare:
+ *   {
+ *       id                 : "exampleJira.linkedIssue",
+ *       position           : "right" | "tab",       // right-column card or tab pane
+ *       label              : "Linked Jira issue",
+ *       partial            : "panels/jira-linked-issue",  // module-relative
+ *       module             : "example-jira",        // module slug for view( module=... )
+ *       sortWeight         : 500,                   // ascending; defaults 500
+ *       requiredPermission : "exampleJira.view",
+ *       capabilityFlag     : "",                    // setting key
+ *       defaultCollapsed   : true                   // matches memory: every card collapsed by default
+ *   }
+ *
+ * Add-ons declare in manifest:
+ *
+ *   settings.tesserabx.ticketPanels = [
+ *       { id: "exampleJira.linkedIssue", position: "right", label: "Linked Jira issue", partial: "panels/jira-linked-issue", module: "example-jira", sortWeight: 500, requiredPermission: "exampleJira.view" }
+ *   ];
+ *
+ * --- Resolution ---
+ *
+ * `listForViewer( position, viewer )` returns the filtered, sorted,
+ * override-applied entries the viewer is allowed to see. Overrides
+ * live in `registry_overrides` (registry='ticket_panels').
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        var normalized = normalize( arguments.entry, arguments.entry.source ?: "core" );
+        variables.cache[ normalized.id ] = normalized;
+    }
+
+    public array function listForViewer( required string position, required struct viewer ){
+        ensureLoaded();
+        var overrides = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
+        var out = [];
+        for ( var id in variables.cache ) {
+            var e = variables.cache[ id ];
+            if ( e.position != arguments.position ) continue;
+            var resolved = applyOverride( e, overrides );
+            if ( isNull( resolved ) ) continue;
+            if ( !isVisible( resolved, arguments.viewer ) ) continue;
+            out.append( resolved );
+        }
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // No core seeds: Phase 4 deliberately leaves the existing
+        // right-column cards rendered inline in show.bxm. Add-on
+        // panels render after the inline core ones.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.ticketPanels ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var p in declared ) {
+                if ( !isStruct( p ) || !structKeyExists( p, "id" ) || !len( p.id ?: "" ) ) continue;
+                variables.cache[ p.id ] = normalize( p, moduleName );
+            }
+        }
+        variables.cacheLoaded = true;
+    }
+
+    private struct function normalize( required struct raw, required string source ){
+        return {
+            id                 : arguments.raw.id,
+            position           : arguments.raw.position ?: "right",
+            label              : arguments.raw.label    ?: arguments.raw.id,
+            partial            : arguments.raw.partial  ?: "",
+            module             : arguments.raw.module   ?: arguments.source,
+            sortWeight         : isNumeric( arguments.raw.sortWeight ?: "" ) ? arguments.raw.sortWeight : 500,
+            requiredPermission : arguments.raw.requiredPermission ?: "",
+            capabilityFlag     : arguments.raw.capabilityFlag     ?: "",
+            defaultCollapsed   : ( structKeyExists( arguments.raw, "defaultCollapsed" ) ? !!arguments.raw.defaultCollapsed : true ),
+            source             : arguments.source
+        };
+    }
+
+    private boolean function isVisible( required struct entry, required struct viewer ){
+        if ( len( arguments.entry.capabilityFlag ) && !isCapabilityOn( arguments.entry.capabilityFlag ) ) return false;
+        if ( len( arguments.entry.requiredPermission ) ) {
+            if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
+        }
+        return true;
+    }
+
+    private boolean function isCapabilityOn( required string flag ){
+        try {
+            var raw = coldbox.getSetting( arguments.flag );
+            if ( isBoolean( raw ) ) return raw;
+            return !!( raw ?: false );
+        } catch ( any e ) {
+            return false;
+        }
+    }
+
+    private struct function loadOverridesForOrg( required string organizationId ){
+        var out = {};
+        var rows = queryExecute(
+            "SELECT entry_id, organization_id, disabled, sort_weight_override, label_override
+             FROM   registry_overrides
+             WHERE  registry = 'ticket_panels'
+             AND    ( organization_id IS NULL OR organization_id = :o )",
+            { o : len( arguments.organizationId ) ? arguments.organizationId : "" }
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( !len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        return out;
+    }
+
+    private struct function rowToOverride( required query rows, required numeric i ){
+        return {
+            disabled            : !!arguments.rows.disabled[ arguments.i ],
+            sortWeightOverride  : isNumeric( arguments.rows.sort_weight_override[ arguments.i ] ?: "" ) ? arguments.rows.sort_weight_override[ arguments.i ] : javaCast( "null", "" ),
+            labelOverride       : arguments.rows.label_override[ arguments.i ] ?: ""
+        };
+    }
+
+    private any function applyOverride( required struct entry, required struct overrides ){
+        if ( !structKeyExists( arguments.overrides, arguments.entry.id ) ) return arguments.entry;
+        var o = arguments.overrides[ arguments.entry.id ];
+        if ( o.disabled ) return javaCast( "null", "" );
+        var resolved = duplicate( arguments.entry );
+        if ( !isNull( o.sortWeightOverride ) ) resolved.sortWeight = o.sortWeightOverride;
+        if ( len( o.labelOverride ?: "" ) )    resolved.label      = o.labelOverride;
+        return resolved;
+    }
+
+}

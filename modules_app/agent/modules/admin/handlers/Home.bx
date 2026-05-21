@@ -7,8 +7,14 @@
  */
 class {
 
+    property name="adminPagesRegistry" inject="AdminPagesRegistry@admin";
+
     function index( event, rc, prc ){
-        prc.pageTitle = "Admin";
+        prc.pageTitle  = "Admin";
+        // Cards drive from the registry so add-ons and core both list
+        // here. Viewer permissions are resolved via the application
+        // helper which reads the agent's roles.
+        prc.adminCards = adminPagesRegistry.listForViewer( tbxViewer() );
         event.setLayout( name = "Agent", module = "core" );
     }
 

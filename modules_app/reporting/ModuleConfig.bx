@@ -41,6 +41,9 @@ class {
         binder.map( "ScheduledExportService@reporting" )
               .to( "#moduleMapping#.models.ScheduledExportService" )
               .asSingleton();
+        binder.map( "DashboardWidgetRegistry@reporting" )
+              .to( "#moduleMapping#.models.DashboardWidgetRegistry" )
+              .asSingleton();
     }
 
     function onUnload(){}

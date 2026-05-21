@@ -1,0 +1,161 @@
+/**
+ * RoleRegistry: declared roles + the permissions they imply.
+ *
+ * The role catalog was previously hard-coded in
+ * `RbacService.roleCatalog()`. Phase 4 promotes it to a registry so
+ * add-ons can declare their own roles in `ModuleConfig.bx`:
+ *
+ *   settings.tesserabx.roles = [
+ *       {
+ *           id          : "billing-viewer",
+ *           label       : "Billing Viewer",
+ *           description : "Read-only access to billing data.",
+ *           permissions : [ "billing.view" ]
+ *       }
+ *   ];
+ *
+ * `RbacService.roleCatalog()` now delegates to `listAll()` here, so
+ * every caller (admin Users page, validation, etc.) automatically
+ * sees add-on roles alongside core's two.
+ *
+ * Permissions referenced by a role need not be declared in the
+ * PermissionRegistry to be assignable. Undeclared permissions still
+ * function (cbsecurity rules and `hasPermission` checks evaluate the
+ * raw string); the registry exists so the admin UI can present a
+ * picker of "known" permissions.
+ *
+ * --- Public extension contract ---
+ *
+ *   var roles = wirebox.getInstance( "RoleRegistry@agent" );
+ *   var all   = roles.listAll();                  // every declared role
+ *   var r     = roles.findById( "billing-viewer" );
+ *   var perms = roles.permissionsFor( "billing-viewer" );
+ *
+ * Roles can be marked surface=`agent` (provider side) or `contact`
+ * (client side). RoleRegistry returns both; callers filter by surface.
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( ( a, b ) => compare( a.id, b.id ) );
+        return out;
+    }
+
+    public array function listForSurface( required string surface ){
+        var all = listAll();
+        var out = [];
+        for ( var r in all ) {
+            if ( ( r.surface ?: "agent" ) == arguments.surface ) out.append( r );
+        }
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public array function permissionsFor( required string id ){
+        var r = findById( arguments.id );
+        if ( isNull( r ) ) return [];
+        return r.permissions ?: [];
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+
+        // Core roles seeded first. Phase 4.7+ may move these into the
+        // owning module's manifest declaration.
+        seedCoreRoles();
+
+        // Manifest-declared roles from every loaded module. Add-on
+        // declarations win conflicts with core because they load
+        // after the seed.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.roles ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var r in declared ) {
+                if ( !isStruct( r ) || !structKeyExists( r, "id" ) || !len( r.id ?: "" ) ) continue;
+                variables.cache[ r.id ] = normalizeRole( r, moduleName );
+            }
+        }
+
+        variables.cacheLoaded = true;
+    }
+
+    private struct function normalizeRole( required struct raw, required string source ){
+        return {
+            id          : arguments.raw.id,
+            // `key` mirrors `id` so the legacy roleCatalog() shape
+            // (which used `key`) stays a drop-in replacement.
+            key         : arguments.raw.id,
+            label       : arguments.raw.label       ?: arguments.raw.id,
+            description : arguments.raw.description ?: "",
+            permissions : isArray( arguments.raw.permissions ?: [] ) ? arguments.raw.permissions : [],
+            surface     : arguments.raw.surface     ?: "agent",
+            source      : arguments.source
+        };
+    }
+
+    private void function seedCoreRoles(){
+        var seeds = [
+            {
+                id          : "agent-admin",
+                label       : "Administrator",
+                description : "Full access to /agent/admin, including RBAC, blacklist, knowledge-base authoring, and scheduled exports.",
+                surface     : "agent",
+                permissions : [
+                    "admin.access", "admin.users.manage", "admin.teams.manage",
+                    "admin.workflow.manage", "admin.settings.manage", "admin.audit.view",
+                    "admin.addons.manage",
+                    "tickets.view", "tickets.assign", "tickets.bulk"
+                ]
+            },
+            {
+                id          : "agent-supervisor",
+                label       : "Supervisor",
+                description : "Reserved for future use: oversight across teams without full admin authority.",
+                surface     : "agent",
+                permissions : [ "tickets.view", "tickets.assign" ]
+            },
+            {
+                id          : "contact",
+                label       : "Contact",
+                description : "Client-side user. Sees only their own organization's tickets.",
+                surface     : "contact",
+                permissions : []
+            },
+            {
+                id          : "organization-admin",
+                label       : "Organization Admin",
+                description : "Sees the full org-wide queue and can manage other contacts in their organization.",
+                surface     : "contact",
+                permissions : []
+            }
+        ];
+        for ( var r in seeds ) {
+            variables.cache[ r.id ] = normalizeRole( r, "core" );
+        }
+    }
+
+}

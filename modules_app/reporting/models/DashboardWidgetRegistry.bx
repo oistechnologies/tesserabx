@@ -1,0 +1,194 @@
+/**
+ * DashboardWidgetRegistry: registry for the reporting dashboard widgets
+ * at /agent/reports.
+ *
+ * Phase 4 ships the registry contract and add-on contribution path.
+ * The existing core widgets (overview tiles, ticket-volume line chart,
+ * three doughnut charts, backlog table, agent-load table) rendered
+ * inline in `modules_app/agent/views/reports/index.bxm` are NOT
+ * migrated to the registry in Phase 4 (deferred). Add-on widgets
+ * register through this service and render after the core inline
+ * widgets via the view helper `#tbxDashboardWidgets()#`.
+ *
+ * Entries declare:
+ *   {
+ *       id                 : "exampleJira.syncStatus",
+ *       title              : "Jira sync status",
+ *       partial            : "widgets/jira-sync-status",  // module-relative
+ *       module             : "example-jira",
+ *       dataProvider       : "JiraReportingService@example-jira",  // optional WireBox name
+ *       dataMethod         : "syncStatusForDashboard",    // optional method on the provider
+ *       defaultGridSize    : "col-12 col-md-6",           // Bootstrap col classes
+ *       sortWeight         : 500,
+ *       requiredPermission : "exampleJira.view",
+ *       capabilityFlag     : ""
+ *   }
+ *
+ * Add-ons declare in manifest:
+ *
+ *   settings.tesserabx.dashboardWidgets = [
+ *       { id: "exampleJira.syncStatus", title: "Jira sync status", partial: "widgets/jira-sync-status", module: "example-jira", defaultGridSize: "col-12 col-md-6", sortWeight: 500, requiredPermission: "exampleJira.view" }
+ *   ];
+ *
+ * --- Resolution ---
+ *
+ * `listForViewer( viewer )` returns the filtered, sorted,
+ * override-applied widgets the viewer is allowed to see. Overrides
+ * live in `registry_overrides` (registry='dashboard_widgets'). The
+ * view helper invokes each widget's `dataProvider.dataMethod()` (if
+ * declared) before rendering the partial.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        var normalized = normalize( arguments.entry, arguments.entry.source ?: "core" );
+        variables.cache[ normalized.id ] = normalized;
+    }
+
+    public array function listForViewer( required struct viewer ){
+        ensureLoaded();
+        var overrides = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
+        var out = [];
+        for ( var id in variables.cache ) {
+            var e = variables.cache[ id ];
+            var resolved = applyOverride( e, overrides );
+            if ( isNull( resolved ) ) continue;
+            if ( !isVisible( resolved, arguments.viewer ) ) continue;
+            out.append( resolved );
+        }
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    /**
+     * Invoke a registered widget's data provider, if it declares one.
+     * Returns whatever the provider method returns (struct, array, etc.)
+     * or an empty struct when no provider is declared.
+     */
+    public any function fetchWidgetData( required struct widget ){
+        if ( !len( arguments.widget.dataProvider ?: "" ) ) return {};
+        if ( !len( arguments.widget.dataMethod   ?: "" ) ) return {};
+        try {
+            var provider = wirebox.getInstance( arguments.widget.dataProvider );
+            return invoke( provider, arguments.widget.dataMethod );
+        } catch ( any e ) {
+            return {};
+        }
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // No core seeds in Phase 4. Add-on widgets stack after the
+        // existing inline widgets in reports/index.bxm.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.dashboardWidgets ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var w in declared ) {
+                if ( !isStruct( w ) || !structKeyExists( w, "id" ) || !len( w.id ?: "" ) ) continue;
+                variables.cache[ w.id ] = normalize( w, moduleName );
+            }
+        }
+        variables.cacheLoaded = true;
+    }
+
+    private struct function normalize( required struct raw, required string source ){
+        return {
+            id                 : arguments.raw.id,
+            title              : arguments.raw.title   ?: arguments.raw.id,
+            partial            : arguments.raw.partial ?: "",
+            module             : arguments.raw.module  ?: arguments.source,
+            dataProvider       : arguments.raw.dataProvider     ?: "",
+            dataMethod         : arguments.raw.dataMethod       ?: "",
+            defaultGridSize    : arguments.raw.defaultGridSize  ?: "col-12 col-md-6",
+            sortWeight         : isNumeric( arguments.raw.sortWeight ?: "" ) ? arguments.raw.sortWeight : 500,
+            requiredPermission : arguments.raw.requiredPermission ?: "",
+            capabilityFlag     : arguments.raw.capabilityFlag     ?: "",
+            source             : arguments.source
+        };
+    }
+
+    private boolean function isVisible( required struct entry, required struct viewer ){
+        if ( len( arguments.entry.capabilityFlag ) && !isCapabilityOn( arguments.entry.capabilityFlag ) ) return false;
+        if ( len( arguments.entry.requiredPermission ) ) {
+            if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
+        }
+        return true;
+    }
+
+    private boolean function isCapabilityOn( required string flag ){
+        try {
+            var raw = coldbox.getSetting( arguments.flag );
+            if ( isBoolean( raw ) ) return raw;
+            return !!( raw ?: false );
+        } catch ( any e ) {
+            return false;
+        }
+    }
+
+    private struct function loadOverridesForOrg( required string organizationId ){
+        var out = {};
+        var rows = queryExecute(
+            "SELECT entry_id, organization_id, disabled, sort_weight_override, label_override
+             FROM   registry_overrides
+             WHERE  registry = 'dashboard_widgets'
+             AND    ( organization_id IS NULL OR organization_id = :o )",
+            { o : len( arguments.organizationId ) ? arguments.organizationId : "" }
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( !len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        return out;
+    }
+
+    private struct function rowToOverride( required query rows, required numeric i ){
+        return {
+            disabled            : !!arguments.rows.disabled[ arguments.i ],
+            sortWeightOverride  : isNumeric( arguments.rows.sort_weight_override[ arguments.i ] ?: "" ) ? arguments.rows.sort_weight_override[ arguments.i ] : javaCast( "null", "" ),
+            labelOverride       : arguments.rows.label_override[ arguments.i ] ?: ""
+        };
+    }
+
+    private any function applyOverride( required struct entry, required struct overrides ){
+        if ( !structKeyExists( arguments.overrides, arguments.entry.id ) ) return arguments.entry;
+        var o = arguments.overrides[ arguments.entry.id ];
+        if ( o.disabled ) return javaCast( "null", "" );
+        var resolved = duplicate( arguments.entry );
+        if ( !isNull( o.sortWeightOverride ) ) resolved.sortWeight = o.sortWeightOverride;
+        if ( len( o.labelOverride ?: "" ) )    resolved.title      = o.labelOverride;
+        return resolved;
+    }
+
+}

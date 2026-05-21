@@ -1,0 +1,122 @@
+/**
+ * /agent/admin/addon-settings handler.
+ *
+ * Surface for the per-tenant overrides registered by add-ons via
+ * `settings.tesserabx.settings = [...]`. Reads through
+ * `SettingsRegistry@core`, which resolves declared defaults from
+ * the add-on manifest plus any override rows in `addon_settings`.
+ *
+ * The UI is grouped by add-on. The user picks an organization from
+ * a dropdown; per-org override values populate the form. Submitting
+ * the form calls SettingsRegistry.set() per changed key. Clearing a
+ * field that previously had an override calls SettingsRegistry.clear().
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*; the registry
+ * card on /agent/admin requires the `admin.addons.manage` permission.
+ *
+ * Secret settings (declared with secret=true) render as password
+ * inputs and round-trip through the form just like the regular
+ * SettingsService mail.password handling: an empty submit means
+ * "leave the existing override alone".
+ */
+class {
+
+    property name="settingsRegistry"     inject="SettingsRegistry@core";
+    property name="addonRegistryService" inject="AddonRegistryService@core";
+    property name="contactsService"      inject="ContactsService@contacts";
+    property name="messagebox"           inject="messagebox@cbmessagebox";
+    property name="auth"                 inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.organizationId = "";
+        prc.pageTitle     = "Add-on settings";
+        prc.organizations = contactsService.listOrganizations();
+        prc.selectedOrgId = rc.organizationId;
+
+        // Build a per-add-on view model. Each entry: { addon, descriptors, currentValues }
+        prc.addons = [];
+        for ( var addon in addonRegistryService.listAll() ) {
+            var descriptors = settingsRegistry.listDescriptors( addon.addonId );
+            if ( !arrayLen( descriptors ) ) continue;
+
+            var currentValues = {};
+            if ( len( rc.organizationId ) ) {
+                for ( var d in descriptors ) {
+                    if ( !( d.perTenant ?: true ) ) continue;
+                    var resolved = settingsRegistry.resolve( addon.addonId, d.key, rc.organizationId );
+                    currentValues[ d.key ] = isNull( resolved ) ? "" : resolved;
+                }
+            }
+
+            prc.addons.append( {
+                addon         : addon,
+                descriptors   : descriptors,
+                currentValues : currentValues
+            } );
+        }
+
+        event.setView( "addon-settings/index" );
+    }
+
+    /**
+     * POST /agent/admin/addon-settings/save
+     *   rc.organizationId : string  (required)
+     *   rc.addonId        : string  (required; one add-on at a time)
+     *   rc.<setting_key>  : string  (one per form field)
+     */
+    function save( event, rc, prc ){
+        param rc.organizationId = "";
+        param rc.addonId        = "";
+        if ( !len( rc.organizationId ) || !len( rc.addonId ) ) {
+            messagebox.error( "Missing organization or add-on identifier." );
+            relocate( uri = "/agent/admin/addon-settings" );
+            return;
+        }
+
+        var actor = currentAgentId();
+        var descriptors = settingsRegistry.listDescriptors( rc.addonId );
+        var updated = 0;
+        for ( var d in descriptors ) {
+            if ( !( d.perTenant ?: true ) ) continue;
+            if ( !structKeyExists( rc, d.key ) ) continue;
+            var newValue = rc[ d.key ] ?: "";
+
+            // Secret-field convention: an empty submit means "leave
+            // the existing override untouched." Mirrors the
+            // SettingsService mail.password pattern.
+            if ( ( d.secret ?: false ) && !len( newValue ) ) continue;
+
+            // Empty value on a non-secret field clears the override
+            // (fall back to declared default). Otherwise persist.
+            if ( !len( newValue ) ) {
+                settingsRegistry.clear( rc.addonId, d.key, rc.organizationId );
+            } else {
+                settingsRegistry.set(
+                    addonId        : rc.addonId,
+                    key            : d.key,
+                    value          : newValue,
+                    organizationId : rc.organizationId,
+                    actorAgentId   : actor
+                );
+            }
+            updated++;
+        }
+
+        messagebox.info( "Saved #updated# setting" & ( updated == 1 ? "" : "s" ) & " for this organization." );
+        relocate( uri = "/agent/admin/addon-settings?organizationId=" & rc.organizationId );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

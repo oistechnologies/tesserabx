@@ -1,0 +1,88 @@
+<bx:output>
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="card-title">Add-on settings</h2>
+        <p class="card-text text-body-secondary mb-3">
+            Per-organization overrides for settings declared by installed add-ons. Each add-on declares its setting schema in its <code>ModuleConfig.bx</code> manifest. Empty a field to clear the override and fall back to the declared default.
+        </p>
+        <form method="get" action="/agent/admin/addon-settings" class="row g-2 align-items-end">
+            <div class="col-md-6">
+                <label for="organizationId" class="form-label">Organization</label>
+                <select class="form-select" id="organizationId" name="organizationId" onchange="this.form.submit()">
+                    <option value="">-- choose an organization --</option>
+                    <bx:loop array="#prc.organizations#" item="org">
+                        <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.selectedOrgId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+        </form>
+    </div>
+</div>
+
+<bx:if !len( prc.selectedOrgId ?: "" )>
+    <div class="alert alert-info">Choose an organization to manage its per-tenant overrides.</div>
+<bx:elseif !arrayLen( prc.addons )>
+    <div class="alert alert-info">No installed add-ons declare any settings yet. When an add-on ships <code>settings.tesserabx.settings = [...]</code> in its <code>ModuleConfig.bx</code>, its settings will appear here per organization.</div>
+<bx:else>
+    <bx:loop array="#prc.addons#" item="row">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title mb-1">
+                    #encodeForHTML( row.addon.displayName )#
+                    <small class="text-body-secondary">v#encodeForHTML( row.addon.version )#</small>
+                </h5>
+                <p class="small text-body-secondary mb-3"><code>#encodeForHTML( row.addon.addonId )#</code></p>
+
+                <form method="post" action="/agent/admin/addon-settings/save">
+                    <input type="hidden" name="organizationId" value="#encodeForHTMLAttribute( prc.selectedOrgId )#">
+                    <input type="hidden" name="addonId" value="#encodeForHTMLAttribute( row.addon.addonId )#">
+
+                    <bx:loop array="#row.descriptors#" item="d">
+                        <bx:if !( d.perTenant ?: true )>
+                            <bx:continue>
+                        </bx:if>
+                        <bx:set local.fieldId = "#row.addon.addonId#_#d.key#">
+                        <bx:set local.fieldType = lcase( d.type ?: "string" )>
+                        <bx:set local.isSecret = !!( d.secret ?: false )>
+                        <bx:set local.currentValue = row.currentValues[ d.key ] ?: "">
+
+                        <div class="mb-3">
+                            <label for="#encodeForHTMLAttribute( local.fieldId )#" class="form-label">
+                                #encodeForHTML( d.label ?: d.key )#
+                                <bx:if local.isSecret> <span class="badge text-bg-light text-black">secret</span></bx:if>
+                            </label>
+                            <bx:if local.fieldType eq "textarea">
+                                <textarea class="form-control" id="#encodeForHTMLAttribute( local.fieldId )#" name="#encodeForHTMLAttribute( d.key )#" rows="3">#local.isSecret ? "" : encodeForHTML( local.currentValue )#</textarea>
+                            <bx:elseif local.fieldType eq "boolean">
+                                <select class="form-select" id="#encodeForHTMLAttribute( local.fieldId )#" name="#encodeForHTMLAttribute( d.key )#">
+                                    <option value="">(use default)</option>
+                                    <option value="true"<bx:if local.currentValue eq "true"> selected</bx:if>>true</option>
+                                    <option value="false"<bx:if local.currentValue eq "false"> selected</bx:if>>false</option>
+                                </select>
+                            <bx:else>
+                                <input
+                                    type="#( local.isSecret ? "password" : ( local.fieldType eq "number" ? "number" : "text" ) )#"
+                                    class="form-control"
+                                    id="#encodeForHTMLAttribute( local.fieldId )#"
+                                    name="#encodeForHTMLAttribute( d.key )#"
+                                    value="#local.isSecret ? "" : encodeForHTMLAttribute( local.currentValue )#"
+                                    placeholder="#encodeForHTMLAttribute( d.default ?: "" )#">
+                            </bx:if>
+                            <bx:if len( d.description ?: "" )>
+                                <small class="form-text text-body-secondary">#encodeForHTML( d.description )#</small>
+                            </bx:if>
+                            <bx:if local.isSecret>
+                                <small class="form-text text-body-secondary d-block">Leave blank to keep the existing override.</small>
+                            <bx:elseif len( d.default ?: "" )>
+                                <small class="form-text text-body-secondary d-block">Default: <code>#encodeForHTML( d.default )#</code>. Empty to clear the override.</small>
+                            </bx:if>
+                        </div>
+                    </bx:loop>
+
+                    <button type="submit" class="btn btn-primary">Save #encodeForHTML( row.addon.displayName )# settings</button>
+                </form>
+            </div>
+        </div>
+    </bx:loop>
+</bx:if>
+</bx:output>

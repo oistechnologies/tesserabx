@@ -98,6 +98,18 @@ class {
         route( "settings/test-email" ).withVerbs( "POST" ).to( "Settings.testEmail" );
         route( "settings" ).to( "Settings.index" );
 
+        // Phase 4 add-on administration. The kebab-case URLs do not
+        // map cleanly to the PascalCase handler names through the
+        // default `:handler/:action?` route, so we declare explicit
+        // routes here.
+        route( "addons/setGlobalEnabled" ).withVerbs( "POST" ).to( "Addons.setGlobalEnabled" );
+        route( "addons/setEnablementMode" ).withVerbs( "POST" ).to( "Addons.setEnablementMode" );
+        route( "addons/setOrgEnablement" ).withVerbs( "POST" ).to( "Addons.setOrgEnablement" );
+        route( "addons" ).to( "Addons.index" );
+
+        route( "addon-settings/save" ).withVerbs( "POST" ).to( "AddonSettings.save" );
+        route( "addon-settings" ).to( "AddonSettings.index" );
+
         // Provider-user RBAC. Most-specific patterns first.
         //  - /users/new and /users/:id/edit serve the CBWire form
         //    component (AgentForm@admin).

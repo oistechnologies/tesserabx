@@ -1,0 +1,189 @@
+/**
+ * AdminPagesRegistry: the registry that drives the cards on the
+ * /agent/admin landing page.
+ *
+ * Entries declare:
+ *   {
+ *       id                 : "admin.users",            // stable across releases
+ *       title              : "Users & roles",
+ *       description        : "Provision agents and assign roles.",
+ *       route              : "/agent/admin/users",
+ *       icon               : "bi bi-people",
+ *       sortWeight         : 100,
+ *       requiredPermission : "admin.users.manage",     // optional
+ *       capabilityFlag     : "aiEnabled"               // optional
+ *   }
+ *
+ * Add-on contributions land via manifest:
+ *
+ *   settings.tesserabx.adminPages = [
+ *       { id: "exampleJira.connection", title: "Jira connection", description: "...", route: "/agent/admin/example-jira", icon: "bi bi-link-45deg", sortWeight: 800, requiredPermission: "exampleJira.manage" }
+ *   ];
+ *
+ * `listForViewer( viewerContext )` returns the cards visible to a
+ * specific agent in their current organization, with overrides
+ * resolved from the `registry_overrides` table (registry='admin_pages').
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        var normalized = normalize( arguments.entry, arguments.entry.source ?: "core" );
+        variables.cache[ normalized.id ] = normalized;
+    }
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    public array function listForViewer( required struct viewer ){
+        ensureLoaded();
+        var overrides = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
+        var out = [];
+        for ( var id in variables.cache ) {
+            var e = variables.cache[ id ];
+            var resolved = applyOverride( e, overrides );
+            if ( isNull( resolved ) ) continue;
+            if ( !isVisible( resolved, arguments.viewer ) ) continue;
+            out.append( resolved );
+        }
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // Set flag first; seedCorePages() calls register() which
+        // re-enters ensureLoaded(). Without the early flag we recurse
+        // infinitely. See gotcha log in docs/EXTENSIBILITY-PLAN.md.
+        variables.cacheLoaded = true;
+        seedCorePages();
+        // Manifest contributions from every loaded module.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.adminPages ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var p in declared ) {
+                if ( !isStruct( p ) || !structKeyExists( p, "id" ) || !len( p.id ?: "" ) ) continue;
+                variables.cache[ p.id ] = normalize( p, moduleName );
+            }
+        }
+    }
+
+    private struct function normalize( required struct raw, required string source ){
+        return {
+            id                 : arguments.raw.id,
+            title              : arguments.raw.title       ?: arguments.raw.id,
+            description        : arguments.raw.description ?: "",
+            route              : arguments.raw.route       ?: "##",
+            icon               : arguments.raw.icon        ?: "bi bi-grid",
+            sortWeight         : isNumeric( arguments.raw.sortWeight ?: "" ) ? arguments.raw.sortWeight : 500,
+            requiredPermission : arguments.raw.requiredPermission ?: "",
+            capabilityFlag     : arguments.raw.capabilityFlag     ?: "",
+            source             : arguments.source
+        };
+    }
+
+    private boolean function isVisible( required struct entry, required struct viewer ){
+        if ( len( arguments.entry.capabilityFlag ) && !isCapabilityOn( arguments.entry.capabilityFlag ) ) return false;
+        if ( len( arguments.entry.requiredPermission ) ) {
+            if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
+        }
+        return true;
+    }
+
+    private boolean function isCapabilityOn( required string flag ){
+        try {
+            var raw = coldbox.getSetting( arguments.flag );
+            if ( isBoolean( raw ) ) return raw;
+            return !!( raw ?: false );
+        } catch ( any e ) {
+            return false;
+        }
+    }
+
+    private struct function loadOverridesForOrg( required string organizationId ){
+        var out = {};
+        var rows = queryExecute(
+            "SELECT entry_id, organization_id, disabled, sort_weight_override, label_override
+             FROM   registry_overrides
+             WHERE  registry = 'admin_pages'
+             AND    ( organization_id IS NULL OR organization_id = :o )",
+            { o : len( arguments.organizationId ) ? arguments.organizationId : "" }
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( !len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        return out;
+    }
+
+    private struct function rowToOverride( required query rows, required numeric i ){
+        return {
+            disabled            : !!arguments.rows.disabled[ arguments.i ],
+            sortWeightOverride  : isNumeric( arguments.rows.sort_weight_override[ arguments.i ] ?: "" ) ? arguments.rows.sort_weight_override[ arguments.i ] : javaCast( "null", "" ),
+            labelOverride       : arguments.rows.label_override[ arguments.i ] ?: ""
+        };
+    }
+
+    private any function applyOverride( required struct entry, required struct overrides ){
+        if ( !structKeyExists( arguments.overrides, arguments.entry.id ) ) return arguments.entry;
+        var o = arguments.overrides[ arguments.entry.id ];
+        if ( o.disabled ) return javaCast( "null", "" );
+        var resolved = duplicate( arguments.entry );
+        if ( !isNull( o.sortWeightOverride ) ) resolved.sortWeight = o.sortWeightOverride;
+        if ( len( o.labelOverride ?: "" ) )    resolved.title      = o.labelOverride;
+        return resolved;
+    }
+
+    private void function seedCorePages(){
+        // Mirror the 12 hard-coded buttons that lived in
+        // modules_app/agent/modules/admin/views/home/index.bxm before
+        // Phase 4. Every page is gated on the admin.access permission
+        // (which the agent-admin role implies) at minimum.
+        register( { id : "admin.users",          title : "Users & roles",         description : "Provision agents, assign roles, reset MFA.",                         route : "/agent/admin/users",         icon : "bi bi-people",          sortWeight : 100, requiredPermission : "admin.users.manage"    } );
+        register( { id : "admin.teams",          title : "Teams",                 description : "Create teams and manage agent memberships.",                          route : "/agent/admin/teams",         icon : "bi bi-diagram-3",       sortWeight : 110, requiredPermission : "admin.teams.manage"    } );
+        register( { id : "admin.settings",       title : "Settings",              description : "Application-wide settings, branding, integrations.",                  route : "/agent/admin/settings",      icon : "bi bi-sliders",         sortWeight : 200, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.custom-fields",  title : "Custom fields",         description : "Define per-tenant custom fields on tickets.",                         route : "/agent/admin/custom-fields", icon : "bi bi-input-cursor",    sortWeight : 210, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.workflow",       title : "Workflow",              description : "Edit ticket statuses and transitions.",                                route : "/agent/admin/workflow",      icon : "bi bi-diagram-2",       sortWeight : 220, requiredPermission : "admin.workflow.manage" } );
+        register( { id : "admin.webhooks",       title : "Webhooks",              description : "Configure outbound webhook subscriptions.",                           route : "/agent/admin/webhooks",      icon : "bi bi-broadcast",       sortWeight : 230, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.gdpr",           title : "GDPR requests",         description : "Process data-subject access and erasure requests.",                   route : "/agent/admin/gdpr",          icon : "bi bi-shield-lock",     sortWeight : 300, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.storage",        title : "Storage",               description : "Verify CBFS storage health and rotate credentials.",                  route : "/agent/admin/storage",       icon : "bi bi-hdd-stack",       sortWeight : 310, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.audit",          title : "Audit log",             description : "Read-only search over every significant operation.",                   route : "/agent/admin/audit",         icon : "bi bi-journal-text",    sortWeight : 400, requiredPermission : "admin.audit.view"      } );
+        register( { id : "admin.blacklist",      title : "Inbound blacklist",     description : "Reject ticket creation from specific email addresses or domains.",    route : "/agent/admin/blacklist",     icon : "bi bi-slash-circle",    sortWeight : 410, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.kb",             title : "Knowledge base",        description : "Author and publish knowledge-base articles.",                          route : "/agent/admin/kb",            icon : "bi bi-book",            sortWeight : 500, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.exports",        title : "Scheduled exports",     description : "Schedule CSV exports of ticket data.",                                 route : "/agent/admin/exports",       icon : "bi bi-file-earmark-arrow-down", sortWeight : 510, requiredPermission : "admin.settings.manage" } );
+
+        // New in Phase 4: the Add-ons admin page (drives
+        // AddonRegistryService.setGlobalEnabled etc.) and the per-add-on
+        // settings page (drives SettingsRegistry).
+        register( { id : "admin.addons",          title : "Add-ons",              description : "Discover, enable, and configure installed add-ons.",                  route : "/agent/admin/addons",        icon : "bi bi-puzzle",          sortWeight : 600, requiredPermission : "admin.addons.manage"   } );
+        register( { id : "admin.addon-settings",  title : "Add-on settings",      description : "Per-tenant overrides for add-on-declared settings.",                 route : "/agent/admin/addon-settings", icon : "bi bi-gear-wide-connected", sortWeight : 610, requiredPermission : "admin.addons.manage" } );
+    }
+
+}

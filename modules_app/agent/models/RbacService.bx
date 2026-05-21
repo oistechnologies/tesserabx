@@ -17,25 +17,19 @@ class singleton=true {
     property name="auditService"        inject="AuditService@audit";
     property name="interceptorService"  inject="coldbox:interceptorService";
     property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
+    property name="roleRegistry"        inject="RoleRegistry@agent";
 
     /**
      * The full set of role keys provider agents can hold, with a
-     * human label and description for the admin UI. Order is the
-     * display order in the picker.
+     * human label and description for the admin UI.
+     *
+     * Phase 4 promoted this from a hard-coded array to a delegation
+     * to RoleRegistry@agent. Returns only agent-surface roles; the
+     * contact-side roles live in the same registry but are filtered
+     * out for the agent admin UI.
      */
     public array function roleCatalog(){
-        return [
-            {
-                key         : "agent-admin",
-                label       : "Administrator",
-                description : "Full access to /agent/admin, including RBAC, blacklist, knowledge-base authoring, and scheduled exports."
-            },
-            {
-                key         : "agent-supervisor",
-                label       : "Supervisor",
-                description : "Reserved for future use: oversight across teams without full admin authority."
-            }
-        ];
+        return roleRegistry.listForSurface( "agent" );
     }
 
     /**

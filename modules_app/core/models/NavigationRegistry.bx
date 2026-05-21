@@ -1,0 +1,273 @@
+/**
+ * NavigationRegistry: the registry that drives every nav menu zone
+ * across both TesseraBX surfaces.
+ *
+ * Six menu zones in total:
+ *   - portal/main      Primary left-hand sidebar on /
+ *   - portal/account   Account dropdown on /
+ *   - portal/topbar    Top bar on / (sparse today)
+ *   - agent/main       Primary left-hand sidebar on /agent
+ *   - agent/account    Account dropdown on /agent
+ *   - agent/topbar     Top bar on /agent (sparse today; the
+ *                      notification bell is a CBWire feature widget,
+ *                      not a nav item, and stays inline in the layout)
+ *
+ * Entries declare:
+ *   {
+ *       id                 : "tickets.main",       // stable across releases
+ *       surface            : "agent" | "portal",
+ *       menu               : "main" | "account" | "topbar",
+ *       label              : "Tickets",
+ *       route              : "/agent/tickets",     // emitted verbatim
+ *       icon               : "bi bi-card-list",    // optional, AdminLTE icon class
+ *       sortWeight         : 100,                  // ascending
+ *       requiresAuth       : true | false,         // when true, anonymous viewers do not see it
+ *       requiresAnonymous  : true | false,         // inverse: shown only to NOT-signed-in viewers
+ *                                                  // (used by the portal "Sign in" link)
+ *       requiredPermission : "tickets.view",       // optional; uses PermissionRegistry semantics
+ *       capabilityFlag     : "aiEnabled"           // optional; setting key that must be truthy
+ *   }
+ *
+ * Add-on contributions land via manifest:
+ *
+ *   settings.tesserabx.navigation = [
+ *       { surface: "agent", menu: "main", label: "Jira", route: "exampleJira.home", icon: "bi bi-link-45deg", sortWeight: 70, requiredPermission: "exampleJira.view" }
+ *   ];
+ *
+ * --- Resolution ---
+ *
+ * `listForZone( surface, menu, viewerContext )` returns the filtered,
+ * sorted, override-applied entries the viewer is allowed to see in
+ * a specific zone. The viewer context carries:
+ *
+ *   {
+ *       signedIn       : boolean,
+ *       userType       : "agent" | "contact" | "anonymous",
+ *       userId         : "<uuid>",
+ *       roles          : [ ... role keys the viewer holds ... ],
+ *       permissions    : [ ... permission ids implied by those roles ... ],
+ *       organizationId : "<uuid>" or ""
+ *   }
+ *
+ * Overrides in `registry_overrides` (registry='navigation') can
+ * disable, rename, or reorder an entry; lookup is per-organization
+ * with a global-override fallback.
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};   // id -> entry struct
+    variables.cacheLoaded = false;
+
+    /**
+     * Imperatively register an entry. Used by core modules during
+     * onLoad() to seed their own nav items; add-ons can also call
+     * this from their own onLoad() instead of declaring in the
+     * manifest if they need to gate registration on runtime state.
+     */
+    public void function register( required struct entry ){
+        ensureLoaded();
+        var normalized = normalize( arguments.entry, arguments.entry.source ?: "core" );
+        variables.cache[ normalized.id ] = normalized;
+    }
+
+    /**
+     * The filtered, sorted, override-applied entries for one
+     * (surface, menu) zone, given a viewer context. Layouts call
+     * this; the view helper #renderNavigation()# wraps it.
+     */
+    public array function listForZone(
+        required string surface,
+        required string menu,
+        struct viewer = anonymousViewer()
+    ){
+        ensureLoaded();
+        var overrides = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
+        var out = [];
+        for ( var id in variables.cache ) {
+            var e = variables.cache[ id ];
+            if ( e.surface != arguments.surface ) continue;
+            if ( e.menu    != arguments.menu )    continue;
+            var resolved = applyOverride( e, overrides );
+            if ( isNull( resolved ) ) continue;        // disabled by override
+            if ( !isVisible( resolved, arguments.viewer ) ) continue;
+            out.append( resolved );
+        }
+        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private struct function anonymousViewer(){
+        return {
+            signedIn       : false,
+            userType       : "anonymous",
+            userId         : "",
+            roles          : [],
+            permissions    : [],
+            organizationId : ""
+        };
+    }
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // Set the flag BEFORE seeding because seedCoreNavigation
+        // calls register() repeatedly, and register() calls
+        // ensureLoaded() at its top to guarantee the cache is
+        // available. Without the early flag we recurse infinitely
+        // (StackOverflowError, no usable message in the catch).
+        variables.cacheLoaded = true;
+        // Seed core navigation. Phase 4 makes the layouts iterate the
+        // registry; the items below are what the layouts used to
+        // emit inline.
+        seedCoreNavigation();
+        // Then manifest-declared add-on navigation overlays. Add-on
+        // declarations with the same id overwrite the core seed.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.navigation ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var n in declared ) {
+                if ( !isStruct( n ) ) continue;
+                var id = n.id ?: ( ( n.surface ?: "" ) & "." & ( n.menu ?: "" ) & "." & lcase( reReplace( n.label ?: "", "[^A-Za-z0-9]+", "-", "all" ) ) );
+                variables.cache[ id ] = normalize( n & { id : id }, moduleName );
+            }
+        }
+        // cacheLoaded is already set at the top of this function.
+    }
+
+    private struct function normalize( required struct raw, required string source ){
+        return {
+            id                 : arguments.raw.id,
+            surface            : arguments.raw.surface ?: "agent",
+            menu               : arguments.raw.menu    ?: "main",
+            label              : arguments.raw.label   ?: arguments.raw.id,
+            route              : arguments.raw.route   ?: "##",
+            icon               : arguments.raw.icon    ?: "",
+            sortWeight         : isNumeric( arguments.raw.sortWeight ?: "" ) ? arguments.raw.sortWeight : 500,
+            requiresAuth       : !!( arguments.raw.requiresAuth      ?: false ),
+            requiresAnonymous  : !!( arguments.raw.requiresAnonymous ?: false ),
+            requiredPermission : arguments.raw.requiredPermission    ?: "",
+            capabilityFlag     : arguments.raw.capabilityFlag        ?: "",
+            source             : arguments.source
+        };
+    }
+
+    private boolean function isVisible( required struct entry, required struct viewer ){
+        if ( arguments.entry.requiresAuth      && !arguments.viewer.signedIn ) return false;
+        if ( arguments.entry.requiresAnonymous &&  arguments.viewer.signedIn ) return false;
+        if ( len( arguments.entry.capabilityFlag ) && !isCapabilityOn( arguments.entry.capabilityFlag ) ) return false;
+        if ( len( arguments.entry.requiredPermission ) ) {
+            if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
+        }
+        return true;
+    }
+
+    private boolean function isCapabilityOn( required string flag ){
+        // Capability flag names are setting keys. Today the only one
+        // is `aiEnabled` (string "true"/"false" in config). Treat any
+        // truthy-castable value as on.
+        try {
+            var raw = coldbox.getSetting( arguments.flag );
+            if ( isBoolean( raw ) ) return raw;
+            return !!( raw ?: false );
+        } catch ( any e ) {
+            return false;
+        }
+    }
+
+    private struct function loadOverridesForOrg( required string organizationId ){
+        // Resolve overrides by (registry='navigation') with the
+        // tenant row taking precedence over the global row.
+        var out = {};
+        var rows = queryExecute(
+            "SELECT entry_id, organization_id, disabled, sort_weight_override, label_override
+             FROM   registry_overrides
+             WHERE  registry = 'navigation'
+             AND    ( organization_id IS NULL OR organization_id = :o )",
+            { o : len( arguments.organizationId ) ? arguments.organizationId : "" }
+        );
+        // First pass: globals.
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( !len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        // Second pass: per-tenant rows overwrite globals.
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            if ( len( rows.organization_id[ i ] ?: "" ) ) {
+                out[ rows.entry_id[ i ] ] = rowToOverride( rows, i );
+            }
+        }
+        return out;
+    }
+
+    private struct function rowToOverride( required query rows, required numeric i ){
+        return {
+            disabled            : !!arguments.rows.disabled[ arguments.i ],
+            sortWeightOverride  : isNumeric( arguments.rows.sort_weight_override[ arguments.i ] ?: "" ) ? arguments.rows.sort_weight_override[ arguments.i ] : javaCast( "null", "" ),
+            labelOverride       : arguments.rows.label_override[ arguments.i ] ?: ""
+        };
+    }
+
+    private any function applyOverride( required struct entry, required struct overrides ){
+        if ( !structKeyExists( arguments.overrides, arguments.entry.id ) ) return arguments.entry;
+        var o = arguments.overrides[ arguments.entry.id ];
+        if ( o.disabled ) return javaCast( "null", "" );
+        var resolved = duplicate( arguments.entry );
+        if ( !isNull( o.sortWeightOverride ) ) resolved.sortWeight = o.sortWeightOverride;
+        if ( len( o.labelOverride ?: "" ) )    resolved.label      = o.labelOverride;
+        return resolved;
+    }
+
+    private void function seedCoreNavigation(){
+        // Portal main menu (left sidebar on /). Mirrors the items
+        // previously emitted inline from modules_app/core/layouts/Portal.bxm.
+        register( { id : "portal.main.home",              surface : "portal", menu : "main",    label : "Home",             route : "/",            icon : "bi bi-house",       sortWeight : 10  } );
+        register( { id : "portal.main.knowledgebase",     surface : "portal", menu : "main",    label : "Knowledge Base",   route : "/kb",          icon : "bi bi-book",        sortWeight : 20  } );
+        register( { id : "portal.main.tickets",           surface : "portal", menu : "main",    label : "My tickets",       route : "/tickets",     icon : "bi bi-card-list",   sortWeight : 30, requiresAuth : true } );
+        register( { id : "portal.main.new-ticket",        surface : "portal", menu : "main",    label : "Submit a ticket",  route : "/tickets/new", icon : "bi bi-plus-square", sortWeight : 40, requiresAuth : true } );
+        register( { id : "portal.main.account",           surface : "portal", menu : "main",    label : "My account",       route : "/account",     icon : "bi bi-person-gear", sortWeight : 50, requiresAuth : true } );
+
+        // Portal account dropdown. The actual logged-in email goes in
+        // a header line that the layout renders directly; this
+        // registry covers the navigable items.
+        register( { id : "portal.account.profile",        surface : "portal", menu : "account", label : "My account",       route : "/account",     icon : "bi bi-person",          sortWeight : 10,  requiresAuth      : true } );
+        register( { id : "portal.account.signout",        surface : "portal", menu : "account", label : "Sign out",         route : "/logout",      icon : "bi bi-box-arrow-right", sortWeight : 90,  requiresAuth      : true } );
+        register( { id : "portal.account.signin",         surface : "portal", menu : "account", label : "Sign in",          route : "/login",       icon : "bi bi-box-arrow-in-right", sortWeight : 10, requiresAnonymous : true } );
+
+        // Agent main menu (left sidebar on /agent).
+        register( { id : "agent.main.dashboard",          surface : "agent",  menu : "main",    label : "Dashboard",        route : "/agent",            icon : "bi bi-speedometer", sortWeight : 10,  requiresAuth : true } );
+        register( { id : "agent.main.tickets",            surface : "agent",  menu : "main",    label : "Tickets",          route : "/agent/tickets",    icon : "bi bi-card-list",   sortWeight : 20,  requiresAuth : true, requiredPermission : "tickets.view" } );
+        register( { id : "agent.main.contacts",           surface : "agent",  menu : "main",    label : "Contacts",         route : "/agent/contacts",   icon : "bi bi-people",      sortWeight : 30,  requiresAuth : true } );
+        register( { id : "agent.main.notifications",      surface : "agent",  menu : "main",    label : "Notifications",    route : "/agent/notifications", icon : "bi bi-bell",     sortWeight : 40,  requiresAuth : true } );
+        register( { id : "agent.main.reports",            surface : "agent",  menu : "main",    label : "Reports",          route : "/agent/reports",    icon : "bi bi-graph-up",    sortWeight : 50,  requiresAuth : true } );
+        register( { id : "agent.main.admin",              surface : "agent",  menu : "main",    label : "Admin",            route : "/agent/admin",      icon : "bi bi-gear",        sortWeight : 90,  requiresAuth : true, requiredPermission : "admin.access" } );
+
+        // Agent account dropdown.
+        register( { id : "agent.account.profile",         surface : "agent",  menu : "account", label : "My Account",       route : "/agent/account",    icon : "bi bi-person-gear", sortWeight : 10, requiresAuth : true } );
+        register( { id : "agent.account.signout",         surface : "agent",  menu : "account", label : "Sign out",         route : "/agent/logout",     icon : "bi bi-box-arrow-right", sortWeight : 90, requiresAuth : true } );
+
+        // Top bars are currently sparse (notifications bell on agent
+        // is a CBWire feature widget, not a nav item, and stays inline
+        // in the layout). Add-ons can declare topbar entries via
+        // manifest; core seeds none today.
+    }
+
+}

@@ -28,10 +28,18 @@ class {
         // ColdBox.
         variables.settings = {};
 
+        // Routes for /agent live in modules_app/agent/config/Router.bx,
+        // which uses verb-aware route() declarations (POST /login goes
+        // to Session.create, GET /login goes to Session.new, etc.).
+        // Previously this array also declared `/login` and `/logout`
+        // entries without verb constraints, but the Phase 1 scope-
+        // walker bug was silently swallowing them. Phase 4's scoping
+        // fix made them active and they began shadowing the verb-aware
+        // routes (POST /login was routing to Session.new instead of
+        // Session.create, breaking login). The duplicates are removed
+        // here; the catch-all is kept for handler/action URL fallback.
         variables.routes = [
             { pattern : "/",                handler : "Home",    action : "index" },
-            { pattern : "/login",           handler : "Session", action : "new"   },
-            { pattern : "/logout",          handler : "Session", action : "delete" },
             { pattern : "/:handler/:action?" }
         ];
 
@@ -81,6 +89,12 @@ class {
               .asSingleton();
         binder.map( "RbacService@agent" )
               .to( "#moduleMapping#.models.RbacService" )
+              .asSingleton();
+        binder.map( "PermissionRegistry@agent" )
+              .to( "#moduleMapping#.models.PermissionRegistry" )
+              .asSingleton();
+        binder.map( "RoleRegistry@agent" )
+              .to( "#moduleMapping#.models.RoleRegistry" )
               .asSingleton();
         binder.map( "TeamsService@agent" )
               .to( "#moduleMapping#.models.TeamsService" )

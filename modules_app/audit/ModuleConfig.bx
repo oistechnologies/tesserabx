@@ -28,10 +28,12 @@ class {
     this.dependencies       = [];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        // `variables.` prefix is REQUIRED. See gotcha log in
+        // docs/EXTENSIBILITY-PLAN.md.
+        variables.settings = {};
+        variables.routes   = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors = [];
     }
 
     function onLoad(){

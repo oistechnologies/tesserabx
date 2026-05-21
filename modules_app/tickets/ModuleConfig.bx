@@ -67,6 +67,9 @@ class {
         binder.map( "TicketDto@tickets" )
               .to( "#moduleMapping#.models.dtos.TicketDto" )
               .asSingleton();
+        binder.map( "TicketPanelRegistry@tickets" )
+              .to( "#moduleMapping#.models.TicketPanelRegistry" )
+              .asSingleton();
         binder.map( "CustomFieldsService@tickets" )
               .to( "#moduleMapping#.models.CustomFieldsService" )
               .asSingleton();

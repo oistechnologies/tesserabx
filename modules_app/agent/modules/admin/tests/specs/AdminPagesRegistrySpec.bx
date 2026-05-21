@@ -1,0 +1,107 @@
+/**
+ * AdminPagesRegistrySpec: the seeded 14 cards + viewer permission
+ * gating + override resolution.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.pages = getController().getWireBox().getInstance( "AdminPagesRegistry@admin" );
+        variables.testIds = [];
+    }
+
+    function afterAll(){
+        for ( var id in variables.testIds ) {
+            queryExecute(
+                "DELETE FROM registry_overrides WHERE registry = 'admin_pages' AND entry_id = :e",
+                { e : id }
+            );
+        }
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "AdminPagesRegistry seed", function(){
+            it( "seeds the canonical 12-plus core admin pages and the two Phase 4 add-on pages", function(){
+                var allTitles = variables.pages.listAll().map( ( p ) => p.title );
+                expect( allTitles ).toInclude( "Users & roles" );
+                expect( allTitles ).toInclude( "Audit log" );
+                expect( allTitles ).toInclude( "Add-ons" );
+                expect( allTitles ).toInclude( "Add-on settings" );
+            } );
+
+            it( "every seeded card requires admin-class permission", function(){
+                for ( var card in variables.pages.listAll() ) {
+                    expect( len( card.requiredPermission ) ).toBeGT( 0 );
+                }
+            } );
+
+            it( "filters cards out for viewers lacking the required permission", function(){
+                var emptyViewer = { signedIn : true, userType : "agent", userId : "a-1", roles : [], permissions : [], organizationId : "" };
+                expect( arrayLen( variables.pages.listForViewer( emptyViewer ) ) ).toBe( 0 );
+            } );
+
+            it( "an admin viewer sees every core seeded card", function(){
+                var admin = adminViewer();
+                var visibleIds = variables.pages.listForViewer( admin ).map( ( p ) => p.id );
+                expect( visibleIds ).toInclude( "admin.users" );
+                expect( visibleIds ).toInclude( "admin.audit" );
+                expect( visibleIds ).toInclude( "admin.addons" );
+            } );
+
+            it( "results are sorted by sortWeight ascending", function(){
+                var cards = variables.pages.listForViewer( adminViewer() );
+                for ( var i = 2; i <= arrayLen( cards ); i++ ) {
+                    expect( cards[ i - 1 ].sortWeight ).toBeLTE( cards[ i ].sortWeight );
+                }
+            } );
+        } );
+
+        describe( "AdminPagesRegistry overrides", function(){
+            it( "honors a disabled global override", function(){
+                addOverride( entryId : "admin.gdpr", disabled : true );
+                var visibleIds = variables.pages.listForViewer( adminViewer() ).map( ( p ) => p.id );
+                expect( visibleIds ).notToInclude( "admin.gdpr" );
+            } );
+
+            it( "applies label_override to the card title", function(){
+                addOverride( entryId : "admin.audit", labelOverride : "Compliance log" );
+                var titles = variables.pages.listForViewer( adminViewer() ).map( ( p ) => p.title );
+                expect( titles ).toInclude( "Compliance log" );
+                expect( titles ).notToInclude( "Audit log" );
+            } );
+        } );
+    }
+
+    private struct function adminViewer(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "a-1",
+            roles          : [ "agent-admin" ],
+            permissions    : [
+                "admin.access", "admin.users.manage", "admin.teams.manage",
+                "admin.workflow.manage", "admin.settings.manage", "admin.audit.view",
+                "admin.addons.manage"
+            ],
+            organizationId : ""
+        };
+    }
+
+    private void function addOverride(
+        required string entryId,
+        boolean disabled = false,
+        string labelOverride = ""
+    ){
+        variables.testIds.append( arguments.entryId );
+        queryExecute(
+            "INSERT INTO registry_overrides
+                ( registry, entry_id, organization_id, disabled, label_override, updated_at )
+             VALUES
+                ( 'admin_pages', :e, NULL, cast( :d as boolean ), NULLIF( :lo, '' ), NOW() )",
+            { e : arguments.entryId, d : arguments.disabled ? "true" : "false", lo : arguments.labelOverride }
+        );
+    }
+
+}

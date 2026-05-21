@@ -27,15 +27,17 @@ class {
     this.dependencies       = [ "contacts", "audit", "tickets", "agent", "knowledgebase" ];
 
     function configure(){
-        settings = {};
+        // `variables.` prefix is REQUIRED. See gotcha log in
+        // docs/EXTENSIBILITY-PLAN.md.
+        variables.settings = {};
 
-        routes = [
+        variables.routes = [
             { pattern : "/",                handler : "Home", action : "index" },
             { pattern : "/:handler/:action?" }
         ];
 
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors = [];
     }
 
     function onLoad(){
@@ -43,6 +45,9 @@ class {
               .to( "#moduleMapping#.models.AppSetting" );
         binder.map( "SettingsService@admin" )
               .to( "#moduleMapping#.models.SettingsService" )
+              .asSingleton();
+        binder.map( "AdminPagesRegistry@admin" )
+              .to( "#moduleMapping#.models.AdminPagesRegistry" )
               .asSingleton();
     }
     function onUnload(){}

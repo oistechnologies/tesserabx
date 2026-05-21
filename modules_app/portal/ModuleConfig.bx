@@ -20,16 +20,24 @@ class {
     this.dependencies       = [ "contacts", "tickets", "knowledgebase", "ai", "notifications" ];
 
     function configure(){
-        settings = {};
+        // `variables.` prefix is REQUIRED. See gotcha log in
+        // docs/EXTENSIBILITY-PLAN.md.
+        variables.settings = {};
 
-        routes = [
-            { pattern : "/",                handler : "Home",    action : "index" },
-            { pattern : "/login",           handler : "Session", action : "new"   },
-            { pattern : "/logout",          handler : "Session", action : "delete" }
+        // Portal routes (verb-aware versions of /login, /logout, /tickets,
+        // /contact, /unsubscribe, etc.) live in the top-level config/Router.bx.
+        // This array previously declared `/login` and `/logout` without verb
+        // constraints, but the Phase 1 scope-walker bug was silently
+        // swallowing them. Phase 4's scoping fix made them active and they
+        // began shadowing the verb-aware routes (POST /login was routing to
+        // Session.new instead of Session.create, breaking login). The
+        // duplicates are removed here.
+        variables.routes = [
+            { pattern : "/",                handler : "Home",    action : "index" }
         ];
 
         // cbSecurity firewall for the / surface.
-        cbSecurity = {
+        variables.cbSecurity = {
             userService         : "ContactAuthService@contacts",
             sessionStorageScope : "session",
             authStorage         : "tesserabx_portal_user",
@@ -43,8 +51,8 @@ class {
             }
         };
 
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors = [];
     }
 
     function onLoad(){

@@ -1,0 +1,80 @@
+<bx:output>
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="card-title">Installed add-ons</h2>
+        <p class="card-text text-body-secondary mb-0">
+            Each row is a discovered add-on. Toggle the global enabled flag to turn it on or off everywhere; switch to per-organization enablement when only a subset of tenants should see it.
+        </p>
+    </div>
+</div>
+
+<bx:if !arrayLen( prc.addons )>
+    <div class="alert alert-info">
+        No add-ons are currently installed. Drop a ColdBox module with a <code>settings.tesserabx</code> manifest block into <code>modules/</code> and reinit the app to register it.
+    </div>
+<bx:else>
+    <bx:loop array="#prc.addons#" item="addon">
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h5 class="card-title mb-1">
+                            #encodeForHTML( addon.displayName )#
+                            <small class="text-body-secondary">v#encodeForHTML( addon.version )#</small>
+                        </h5>
+                        <p class="small text-body-secondary mb-1">
+                            <code>#encodeForHTML( addon.addonId )#</code>
+                            <bx:if !addon.compatible>
+                                <span class="badge text-bg-danger ms-2">Incompatible</span>
+                                <span class="ms-2">#encodeForHTML( addon.compatibilityMessage )#</span>
+                            </bx:if>
+                        </p>
+                    </div>
+                    <div class="text-end">
+                        <form method="post" action="/agent/admin/addons/setGlobalEnabled" class="d-inline">
+                            <input type="hidden" name="addonId" value="#encodeForHTMLAttribute( addon.addonId )#">
+                            <input type="hidden" name="enabled" value="#( addon.enabled ? "false" : "true" )#">
+                            <button class="btn btn-sm #( addon.enabled ? 'btn-outline-success' : 'btn-outline-secondary' )#" type="submit">
+                                #( addon.enabled ? "Enabled (click to disable)" : "Disabled (click to enable)" )#
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <bx:if addon.enabled>
+                    <hr>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <strong>Enablement mode</strong>
+                            <form method="post" action="/agent/admin/addons/setEnablementMode">
+                                <input type="hidden" name="addonId" value="#encodeForHTMLAttribute( addon.addonId )#">
+                                <select class="form-select form-select-sm mt-1" name="mode" onchange="this.form.submit()">
+                                    <option value="all"<bx:if addon.enablementMode eq "all"> selected</bx:if>>All organizations</option>
+                                    <option value="specific"<bx:if addon.enablementMode eq "specific"> selected</bx:if>>Specific organizations only</option>
+                                </select>
+                            </form>
+                        </div>
+                        <bx:if addon.enablementMode eq "specific">
+                            <div class="col-md-8">
+                                <strong>Enable for organization</strong>
+                                <form method="post" action="/agent/admin/addons/setOrgEnablement" class="d-flex gap-2 mt-1">
+                                    <input type="hidden" name="addonId" value="#encodeForHTMLAttribute( addon.addonId )#">
+                                    <input type="hidden" name="enabled" value="true">
+                                    <select class="form-select form-select-sm" name="organizationId">
+                                        <option value="">-- choose --</option>
+                                        <bx:loop array="#prc.organizations#" item="org">
+                                            <option value="#encodeForHTMLAttribute( org.getId() )#">#encodeForHTML( org.getName() )#</option>
+                                        </bx:loop>
+                                    </select>
+                                    <button class="btn btn-sm btn-outline-primary" type="submit">Add</button>
+                                </form>
+                                <p class="small text-body-secondary mt-1 mb-0">Per-org rows live in <code>addon_organization_enablement</code>. Disable individual rows with direct SQL or a future admin tool.</p>
+                            </div>
+                        </bx:if>
+                    </div>
+                </bx:if>
+            </div>
+        </div>
+    </bx:loop>
+</bx:if>
+</bx:output>

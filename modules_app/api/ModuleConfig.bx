@@ -21,8 +21,11 @@ class {
     this.dependencies       = [ "tickets", "contacts", "agent" ];
 
     function configure(){
-        settings = {};
-        routes = [
+        // `variables.` prefix is REQUIRED on every assignment inside
+        // configure(); BoxLang scope-walker drops unscoped names into
+        // function-local. See gotcha log in docs/EXTENSIBILITY-PLAN.md.
+        variables.settings = {};
+        variables.routes = [
             { pattern : "/v1/:handler/:action?" }
         ];
         variables.interceptorSettings = { customInterceptionPoints : [] };

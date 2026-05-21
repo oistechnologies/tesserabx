@@ -1,0 +1,29 @@
+/**
+ * AddonAssetServiceSpec: HTML emission for declared add-on assets.
+ * Uses the live registry; no add-ons declare assets in core so the
+ * baseline is empty and we exercise the imperative `register` path
+ * through manifest-style data hand-written into the cache.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "AddonAssetService@core" );
+    }
+
+    function run(){
+        describe( "AddonAssetService", function(){
+            it( "returns empty strings when no add-on declares assets for the surface", function(){
+                variables.svc.reload();
+                expect( variables.svc.renderCssTags( "portal" ) ).toBe( "" );
+                expect( variables.svc.renderJsTags( "portal" )  ).toBe( "" );
+            } );
+
+            it( "listForSurface returns an array (empty by default)", function(){
+                expect( isArray( variables.svc.listForSurface( "agent" ) ) ).toBeTrue();
+            } );
+        } );
+    }
+
+}

@@ -85,6 +85,12 @@ class {
         binder.map( "EventPayloadBuilder@core" )
               .to( "#moduleMapping#.models.events.EventPayloadBuilder" )
               .asSingleton();
+        binder.map( "NavigationRegistry@core" )
+              .to( "#moduleMapping#.models.NavigationRegistry" )
+              .asSingleton();
+        binder.map( "AddonAssetService@core" )
+              .to( "#moduleMapping#.models.AddonAssetService" )
+              .asSingleton();
         // Patched cbq DBProvider that quotes "reservedBy" in its
         // orderByRaw fragments. Required for Postgres + cbq.
         binder.map( "PostgresDBProvider@core" )

@@ -31,4 +31,132 @@ string function currentSurface(){
     if ( reFindNoCase( "^agent(/|$)", path ) ) return "agent";
     return "portal";
 }
+
+/**
+ * Compute the current viewer context. Used by every UI registry
+ * (NavigationRegistry, AdminPagesRegistry, TicketPanelRegistry,
+ * DashboardWidgetRegistry) to know which surface, who is signed in,
+ * what roles and permissions they hold, and which organization scope
+ * applies.
+ *
+ * Returns a struct with:
+ *   - signedIn       boolean
+ *   - userType       "agent" | "contact" | "anonymous"
+ *   - userId         "<uuid>" or ""
+ *   - roles          [ role-key, ... ]
+ *   - permissions    [ permission-id, ... ]   (resolved from roles)
+ *   - organizationId "<uuid>" or ""
+ */
+struct function tbxViewer(){
+    var ev   = getRequestContext();
+    var prc  = ev.getPrivateCollection();
+    var roles = [];
+    var permissions = [];
+    var orgId = "";
+    var userId = "";
+    var userType = "anonymous";
+    var signedIn = false;
+
+    // Agent surface populates prc.oCurrentUser with an Agent entity.
+    if ( structKeyExists( prc, "oCurrentUser" ) && !isNull( prc.oCurrentUser ) ) {
+        var u = prc.oCurrentUser;
+        try {
+            userId   = u.getId();
+            userType = "agent";
+            signedIn = true;
+            roles    = u.getRoles() ?: [];
+        } catch ( any e ) {}
+    }
+    // Portal surface populates prc.oCurrentContact (when populated)
+    // OR prc.oCurrentUser with a Contact entity. Check both.
+    if ( !signedIn && structKeyExists( prc, "oCurrentContact" ) && !isNull( prc.oCurrentContact ) ) {
+        var c = prc.oCurrentContact;
+        try {
+            userId   = c.getId();
+            userType = "contact";
+            signedIn = true;
+            roles    = c.getRoles() ?: [];
+            orgId    = c.getOrganizationId() ?: "";
+        } catch ( any e ) {}
+    }
+
+    // Resolve roles -> permissions through RoleRegistry. Safe to call
+    // before login (returns []).
+    if ( arrayLen( roles ) ) {
+        try {
+            var registry = application.wirebox.getInstance( "RoleRegistry@agent" );
+            for ( var rk in roles ) {
+                var role = registry.findById( rk );
+                if ( !isNull( role ) ) {
+                    for ( var p in ( role.permissions ?: [] ) ) {
+                        if ( !arrayContains( permissions, p ) ) permissions.append( p );
+                    }
+                }
+            }
+        } catch ( any e ) {}
+    }
+
+    return {
+        signedIn       : signedIn,
+        userType       : userType,
+        userId         : userId,
+        roles          : roles,
+        permissions    : permissions,
+        organizationId : orgId
+    };
+}
+
+/**
+ * Return the navigation entries the current viewer is allowed to
+ * see in one (surface, menu) zone. Use in a layout:
+ *
+ *   <bx:loop array="#tbxNavigation( "agent", "main" )#" item="item">
+ *       <li class="nav-item">
+ *           <a href="#encodeForHTMLAttribute( item.route )#" class="nav-link">
+ *               <bx:if len( item.icon )><i class="nav-icon #encodeForHTMLAttribute( item.icon )#"></i></bx:if>
+ *               <p>#encodeForHTML( item.label )#</p>
+ *           </a>
+ *       </li>
+ *   </bx:loop>
+ */
+array function tbxNavigation( required string surface, required string menu ){
+    var registry = application.wirebox.getInstance( "NavigationRegistry@core" );
+    return registry.listForZone( arguments.surface, arguments.menu, tbxViewer() );
+}
+
+/**
+ * Concatenated add-on `<link>` tags for the surface. Emit inside the
+ * layout's `<head>`.
+ */
+string function tbxAssetCss( required string surface ){
+    return application.wirebox.getInstance( "AddonAssetService@core" ).renderCssTags( arguments.surface );
+}
+
+/**
+ * Concatenated add-on `<script>` tags for the surface. Emit just
+ * before `</body>` in the layout.
+ */
+string function tbxAssetJs( required string surface ){
+    return application.wirebox.getInstance( "AddonAssetService@core" ).renderJsTags( arguments.surface );
+}
+
+/**
+ * Ticket-detail-page panels the viewer is allowed to see in a
+ * specific position ("right" or "tab"). Loop in show.bxm to render
+ * add-on panels after the existing inline core panels.
+ */
+array function tbxTicketPanels( required string position ){
+    var registry = application.wirebox.getInstance( "TicketPanelRegistry@tickets" );
+    return registry.listForViewer( arguments.position, tbxViewer() );
+}
+
+/**
+ * Dashboard widgets the viewer is allowed to see. Loop in
+ * reports/index.bxm to render add-on widgets after the existing
+ * inline core widgets.
+ */
+array function tbxDashboardWidgets(){
+    var registry = application.wirebox.getInstance( "DashboardWidgetRegistry@reporting" );
+    return registry.listForViewer( tbxViewer() );
+}
 </bx:script>

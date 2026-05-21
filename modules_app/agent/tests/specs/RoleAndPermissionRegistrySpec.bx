@@ -1,0 +1,104 @@
+/**
+ * RoleAndPermissionRegistrySpec: core seed roles + permissions; the
+ * surface filter on listForSurface; permissionsFor resolution.
+ *
+ * Manifest-driven add-on registrations are exercised through other
+ * specs (a sample add-on in Phase 11); these specs cover the core
+ * seed and the registry resolution paths.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.roles       = getController().getWireBox().getInstance( "RoleRegistry@agent" );
+        variables.permissions = getController().getWireBox().getInstance( "PermissionRegistry@agent" );
+        // Force a fresh load so seed values are deterministic.
+        variables.roles.reload();
+        variables.permissions.reload();
+    }
+
+    function run(){
+        describe( "RoleRegistry seed", function(){
+            it( "seeds agent-admin with the full admin permission set", function(){
+                var r = variables.roles.findById( "agent-admin" );
+                expect( r ).notToBeNull();
+                expect( r.surface ).toBe( "agent" );
+                expect( r.permissions ).toInclude( "admin.access" );
+                expect( r.permissions ).toInclude( "admin.users.manage" );
+                expect( r.permissions ).toInclude( "admin.addons.manage" );
+            } );
+
+            it( "seeds agent-supervisor with read-side ticket permissions only", function(){
+                var r = variables.roles.findById( "agent-supervisor" );
+                expect( r ).notToBeNull();
+                expect( r.permissions ).toInclude( "tickets.view" );
+                expect( r.permissions ).notToInclude( "admin.access" );
+            } );
+
+            it( "seeds the contact-side roles", function(){
+                expect( variables.roles.findById( "contact" ) ).notToBeNull();
+                expect( variables.roles.findById( "organization-admin" ) ).notToBeNull();
+                expect( variables.roles.findById( "contact" ).surface ).toBe( "contact" );
+            } );
+
+            it( "listForSurface filters by surface", function(){
+                var agents   = variables.roles.listForSurface( "agent" );
+                var contacts = variables.roles.listForSurface( "contact" );
+                expect( arrayLen( agents ) ).toBeGTE( 2 );
+                expect( arrayLen( contacts ) ).toBeGTE( 2 );
+                for ( var r in agents )   expect( r.surface ).toBe( "agent" );
+                for ( var r in contacts ) expect( r.surface ).toBe( "contact" );
+            } );
+
+            it( "exposes role entries with the legacy 'key' field for roleCatalog compatibility", function(){
+                var r = variables.roles.findById( "agent-admin" );
+                expect( r.key ).toBe( "agent-admin" );
+            } );
+
+            it( "permissionsFor returns the role's permission list", function(){
+                var perms = variables.roles.permissionsFor( "agent-admin" );
+                expect( perms ).toInclude( "admin.access" );
+                expect( arrayLen( perms ) ).toBeGTE( 5 );
+            } );
+        } );
+
+        describe( "PermissionRegistry seed", function(){
+            it( "seeds admin.access", function(){
+                var p = variables.permissions.findById( "admin.access" );
+                expect( p ).notToBeNull();
+                expect( p.label ).toInclude( "Access" );
+            } );
+
+            it( "seeds tickets.view", function(){
+                var p = variables.permissions.findById( "tickets.view" );
+                expect( p ).notToBeNull();
+            } );
+
+            it( "returns null for an unknown permission id", function(){
+                expect( isNull( variables.permissions.findById( "does.not.exist" ) ) ).toBeTrue();
+            } );
+
+            it( "listAll returns a sorted array", function(){
+                var all = variables.permissions.listAll();
+                expect( arrayLen( all ) ).toBeGTE( 5 );
+                for ( var i = 2; i <= arrayLen( all ); i++ ) {
+                    expect( compare( all[ i - 1 ].id, all[ i ].id ) ).toBeLTE( 0 );
+                }
+            } );
+        } );
+
+        describe( "RbacService.roleCatalog delegation", function(){
+            it( "now returns only agent-surface roles via RoleRegistry", function(){
+                var rbac = getController().getWireBox().getInstance( "RbacService@agent" );
+                var catalog = rbac.roleCatalog();
+                expect( arrayLen( catalog ) ).toBeGTE( 2 );
+                for ( var r in catalog ) {
+                    expect( r.surface ).toBe( "agent" );
+                    expect( r.key ).notToBe( "" );
+                }
+            } );
+        } );
+    }
+
+}

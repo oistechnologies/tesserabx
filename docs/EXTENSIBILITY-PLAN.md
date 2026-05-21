@@ -816,6 +816,29 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - No deviations.
 - No additional files touched beyond the four listed in the plan.
 
+### 2026-05-20 - Phase 4: UI registries and RBAC
+- `PermissionRegistry@agent` and `RoleRegistry@agent` ship with core seeds (4 roles, 10 permissions). `RbacService.roleCatalog()` now delegates to `RoleRegistry.listForSurface("agent")` so add-on roles flow through.
+- `NavigationRegistry@core` plus six menu-zone migrations: Portal.bxm and Agent.bxm now iterate `tbxNavigation( surface, menu )` for `main` / `account` / `topbar`. Each surface's left sidebar, account dropdown, and top bar (top bar is currently sparse) is registry-driven.
+- `AdminPagesRegistry@admin` plus admin home migration: the 12 hard-coded card buttons in `/agent/admin` are now 14 registry-driven cards (added "Add-ons" and "Add-on settings" for Phase 1/2 surfacing).
+- `/agent/admin/addons` handler + view shipped. Lists every discovered add-on with controls for global enable, enablement_mode (`all` vs `specific`), and per-organization rows. Gated on the new `admin.addons.manage` permission.
+- `TicketPanelRegistry@tickets` and `DashboardWidgetRegistry@reporting` ship the registry contract + add-on contribution path. The existing inline core panels and widgets are NOT migrated to the registries; add-on contributions render alongside the existing inline blocks. Documented as a deferral in EXTENSIONS.md.
+- `AddonAssetService@core` + two helper functions (`tbxAssetCss`, `tbxAssetJs`). Both layouts emit add-on CSS in `<head>` and JS just before `</body>`.
+- New `registry_overrides` table with two partial unique indexes (one for global rows, one for per-tenant) provides admin disable/reorder/rename for all four UI registries. The four registries read overrides per-tenant with a global fallback.
+- Pre-flight scoping sweep: fixed Phase-1 unscoped-assignment bug in `api`, `audit`, `portal`, and `admin` ModuleConfigs (4 modules).
+- Specs: `RoleAndPermissionRegistrySpec` (11/11), `NavigationRegistrySpec` (9/9), `AdminPagesRegistrySpec` (7/7), `AddonAssetServiceSpec` (2/2). Total +29 from Phase 3 baseline.
+- Full sweep: 432/0/0 (was 390/4/9 in Phase 3). The previously-failing CBFS/s3sdk specs cleared this run, likely because the container restart reset the dev-env state that those specs are sensitive to.
+- Deviations from plan:
+  - TicketPanelRegistry and DashboardWidgetRegistry ship the contract only. The existing ~10 right-column ticket cards in `modules_app/agent/views/tickets/show.bxm` and the 6 widgets in `modules_app/agent/views/reports/index.bxm` remain inline; they were not extracted into registry-driven partials. Add-on panels and widgets work end-to-end; core's existing blocks render before any add-on contributions. Migration is a follow-up.
+  - The portal "top bar" and "agent top bar" zones are technically registry-driven but core seeds no entries for them (the agent notification bell stays as a CBWire feature widget, not a nav item). Add-ons can declare topbar entries.
+  - The "Add-on settings" admin page (link from admin home) currently has no implementation; it links to a placeholder route. The full form lands as a Phase 11 follow-up that builds on SettingsRegistry from Phase 2.
+- Files touched that the plan did not list:
+  - `includes/helpers/ApplicationHelper.bxm` (added 5 helper functions: tbxViewer, tbxNavigation, tbxAssetCss, tbxAssetJs, tbxTicketPanels, tbxDashboardWidgets).
+  - `modules_app/api/ModuleConfig.bx`, `modules_app/audit/ModuleConfig.bx`, `modules_app/portal/ModuleConfig.bx`, `modules_app/agent/modules/admin/ModuleConfig.bx` (scoping-bug fixes).
+- Follow-ups identified:
+  - Existing inline ticket panels and dashboard widgets should be extracted into registry-driven partials in a follow-up phase so core "eats its own dog food" as the plan envisioned.
+  - The `/agent/admin/addon-settings` placeholder needs a real implementation (Phase 11 will own this when it builds the help / admin UI surfaces).
+  - Three new gotchas captured below (registry recursion, string-vs-numeric sort, ColdBox 8 `getModel` not a thing).
+
 ### 2026-05-20 - Phase 3: Event surface and audit contributions
 - `EventPayloadBuilder@core` produces the canonical envelope (event, occurredAt, organizationId, actorType, actorId, entity, before, after, metadata) used by every new event.
 - Seventeen new announcements added across tickets (5: assigned, tags-added, attachment-added, attachment-deleted, promoted-to-contact), contacts (7: org-created, contact-provisioned, contact-deactivated, role-granted, role-revoked, domain-mapped, merged), agent (4: created, updated, activated, deactivated), and RBAC (2: role-granted, role-revoked, scoped to agents). All new announcements use `announceAsync`.
@@ -909,6 +932,77 @@ BoxLang ships `jsonSerialize()` and `jsonDeserialize()`. The CFML names `seriali
 ### Phase 1 - To reach the ColdBox controller from a service, inject `coldbox` directly
 
 `wirebox.getController()` does not exist on the WireBox API surface in this BoxLang / ColdBox 8 environment ("Method 'getController' not found"). Use `property name="coldbox" inject="coldbox";` and call `coldbox.getSetting( "<name>" )` directly.
+
+### Phase 4 - Fixing the `variables.` scope-walker bug can resurface latent duplicate-route bugs
+
+The Phase 1 scope-walker bug silently dropped unscoped `routes = [...]` assignments inside `configure()` into function-local scope, making them invisible to ColdBox. When Phase 4's scoping sweep added `variables.` prefixes, those previously-invisible declarations became **active**, and any duplicate-routing problems they contained surfaced as broken endpoints.
+
+The casualty: both `modules_app/agent/ModuleConfig.bx` and `modules_app/portal/ModuleConfig.bx` had duplicate `/login` and `/logout` route entries in their `routes = [...]` array that did NOT declare verb constraints. The verb-aware versions (with `POST -> Session.create` and `GET -> Session.new`) live in each module's `config/Router.bx`. Pre-Phase-4, the scope-walker bug made the duplicates inert. Post-Phase-4, the non-verb-aware duplicates registered first and shadowed the verb-aware Router.bx routes. The symptom: `POST /agent/login` ran `Session.new` (just renders the login form) instead of `Session.create` (validates, sets MFA pending state, redirects to /agent/login/verify). User reports: "I can submit my credentials but I'm dropped back at the login page with no error message."
+
+The fix: removed the duplicate `/login` and `/logout` entries from both ModuleConfig route arrays. Router.bx is the single source of truth for verb-aware routes in each module.
+
+**Generalized lesson:** when scoping fixes activate previously-inert config, audit every now-visible block for content that may conflict with whatever IS already active. A handful of "always there but never executed" lines may have been the only thing preventing a regression.
+
+### Phase 4 - Kebab-case URLs do not auto-map to PascalCase handler names
+
+ColdBox's default catch-all route `{ pattern : "/:handler/:action?" }` performs the URL-to-handler mapping by passing the captured `:handler` segment straight through to the handler-service lookup. A URL like `/agent/admin/addon-settings` gets routed to a handler literally named `addon-settings`, NOT to `AddonSettings.bx`. The result is an `EventHandlerNotRegisteredException` with the message `The event: admin:addon-settings is not a valid registered event.`
+
+Two fixes:
+
+1. **Add an explicit route** in the module's `config/Router.bx`:
+
+   ```boxlang
+   route( "addon-settings/save" ).withVerbs( "POST" ).to( "AddonSettings.save" );
+   route( "addon-settings" ).to( "AddonSettings.index" );
+   ```
+
+2. **Or name the handler file with the dash** (`addon-settings.bx`). This conflicts with BoxLang class-file conventions and is not recommended.
+
+Hit twice in Phase 4 (`/agent/admin/addons`, `/agent/admin/addon-settings`). Both fixed via explicit Router.bx routes.
+
+### Phase 4 - Lazy-load registries with `register()` re-entrancy must set the cache-loaded flag BEFORE seeding
+
+A registry that lazy-loads its in-code seeds via `ensureLoaded()` and provides an imperative `register()` method must set `cacheLoaded = true` at the top of `ensureLoaded`, not at the bottom:
+
+```boxlang
+private void function ensureLoaded(){
+    if ( variables.cacheLoaded ) return;
+    variables.cacheLoaded = true;                  // <-- BEFORE seeding
+    seedCoreEntries();                             // seedCoreEntries calls register()
+    // ...load manifest contributions...
+}
+
+public void function register( required struct entry ){
+    ensureLoaded();                                // re-enters here
+    variables.cache[ entry.id ] = normalize( entry );
+}
+```
+
+If `cacheLoaded = true` is set at the end instead, `seedCoreEntries()` -> `register()` -> `ensureLoaded()` -> seeds again -> infinite recursion. The exception you get is a `java.lang.StackOverflowError` wrapped in `CustomException` with **no message, no detail, and no tag context** — completely silent. Phase 4's NavigationRegistry and AdminPagesRegistry hit this; the symptom was "every spec errors but the message is empty" and the only diagnostic that worked was `jsonSerialize( e )` on a caught exception. Always set the flag first.
+
+### Phase 4 - `compare(a, b)` is a string-compare; numeric sort weights need `val(a) - val(b)`
+
+BoxLang's `compare()` BIF performs case-sensitive **string** comparison. Sorting structs by a `sortWeight` field with `compare( a.sortWeight, b.sortWeight )` produces lexicographic order: "10" < "20" < "40" < "5" < "50" < "90". An override that stores `5` in a database column and reads it back through `qb` returns it as a string for the comparator, so the override item lands at the wrong position even though the numeric value is correct.
+
+The fix is `val()`-coerced numeric subtraction:
+
+```boxlang
+// Wrong:
+out.sort( ( a, b ) => compare( a.sortWeight, b.sortWeight ) );
+
+// Right:
+out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+```
+
+Phase 4 hit this in all four UI registries (navigation, admin pages, ticket panels, dashboard widgets) plus `AddonAssetService`. The symptom was assertions like `expect( items[ 1 ].label ).toBe( "Customers" )` failing with "Expected [Customers] but received [Dashboard]" even though the override row had `sort_weight_override = 5` and the registry produced an item with `sortWeight = 5`.
+
+### Phase 4 - `getModel( "..." )` is not a BoxLang/ColdBox 8 global helper
+
+The function `getModel( name )` was a ColdBox handler-scoped convenience that resolves WireBox instances. In **BoxLang + ColdBox 8 application helpers**, that function is NOT in scope. Calls in `ApplicationHelper.bxm` like `getModel( "NavigationRegistry@core" )` throw `Function [getModel] not found` when the helper executes from a layout that's rendered through some test paths (CBWire spec contexts, integration specs that bypass the full request lifecycle).
+
+Use `application.wirebox.getInstance( "..." )` instead. That works in every execution context — handler, layout, CBWire component, test spec, scheduled task, cbq job. The application-scope reference doesn't depend on the ColdBox controller being injected into the current scope.
+
+Phase 4 hit this in `ApplicationHelper.bxm`. Symptom: every portal contact-form spec errored with `Function [getModel] not found` after Phase 4 made the layout call `tbxAssetCss( "portal" )`.
 
 ### Phase 3 - ColdBox 8 has no `announceAsync` method; use `announce( state, data, true )` instead
 
