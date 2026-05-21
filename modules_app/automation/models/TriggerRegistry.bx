@@ -1,0 +1,130 @@
+/**
+ * TriggerRegistry: declared automation triggers.
+ *
+ * Each trigger entry maps a stable trigger key (the value stored in
+ * `automation_rules.trigger`) to the interceptor event the
+ * AutomationRuleInterceptor listens on. Add-ons can declare their
+ * own triggers via the manifest:
+ *
+ *   settings.tesserabx.automationTriggers = [
+ *       {
+ *           id          : "kb.article_published",
+ *           label       : "Knowledge-base article published",
+ *           description : "Fires when an article reaches the published state.",
+ *           eventName   : "onKbArticlePublished"
+ *       }
+ *   ];
+ *
+ * The interceptor pairs `eventName` with a handler method (the add-on
+ * is responsible for shipping that listener). The Phase 3 canonical
+ * event payload is what the listener receives.
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "TriggerRegistry@automation" );
+ *   var all      = registry.listAll();
+ *   var t        = registry.findById( "ticket.created" );
+ *   var keys     = registry.listIds();
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, arguments.entry.source ?: "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // Flag first; see gotcha log in docs/EXTENSIBILITY-PLAN.md.
+        variables.cacheLoaded = true;
+
+        seedCoreTriggers();
+
+        // Add-on contributions from manifests.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.automationTriggers ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var t in declared ) addEntry( t, moduleName );
+        }
+    }
+
+    private void function seedCoreTriggers(){
+        addEntry(
+            {
+                id          : "ticket.created",
+                label       : "Ticket created",
+                description : "Fires when any ticket (accountless or contact-backed) is created.",
+                eventName   : "onTicketCreated"
+            },
+            "core"
+        );
+        addEntry(
+            {
+                id          : "ticket.status_changed",
+                label       : "Ticket status changed",
+                description : "Fires when a ticket transitions to a different status.",
+                eventName   : "onTicketStatusChanged"
+            },
+            "core"
+        );
+        addEntry(
+            {
+                id          : "ticket.escalation",
+                label       : "Ticket escalation scan",
+                description : "Fires periodically from the SLA escalation scheduler for active tickets. Dedupes per (rule, ticket) so a single rule does not re-execute on every scan.",
+                eventName   : ""
+            },
+            "core"
+        );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id          : arguments.raw.id,
+            label       : arguments.raw.label       ?: arguments.raw.id,
+            description : arguments.raw.description ?: "",
+            eventName   : arguments.raw.eventName   ?: "",
+            source      : arguments.source
+        };
+    }
+
+}

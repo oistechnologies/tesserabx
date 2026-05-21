@@ -1,0 +1,174 @@
+/**
+ * ActionRegistry: declared automation actions and their executors.
+ *
+ * Each entry maps an action id (the value stored in
+ * `automation_rules.actions[].type`) to:
+ *   - a parameter schema describing the form fields the rule editor
+ *     should render
+ *   - a WireBox mapping name for the executor class that runs the
+ *     action against a ticket
+ *
+ * `AutomationService.applyOne` resolves the executor through this
+ * registry and calls `execute( action, ticket, rule )`. Add-ons
+ * declare additional actions via manifest:
+ *
+ *   settings.tesserabx.automationActions = [
+ *       {
+ *           id              : "slack.postToChannel",
+ *           label           : "Post to Slack channel",
+ *           description     : "Notify a Slack channel when the rule fires.",
+ *           executor        : "SlackPostExecutor@example-slack",
+ *           parameterSchema : [
+ *               { name : "value", label : "Channel", type : "string", required : true, placeholder : "##incidents" }
+ *           ]
+ *       }
+ *   ];
+ *
+ * The parameter schema is a list of field descriptors. Each
+ * descriptor has:
+ *   - name        the rc key the form submits
+ *   - label       human label
+ *   - type        "string" | "select" | "boolean" | "textarea" | "number"
+ *   - required    boolean (default false)
+ *   - options     array<string>           (for type=select)
+ *   - placeholder string                  (optional)
+ *   - description string                  (optional)
+ *
+ * Storage note: rules persist a single `value` per action. The plan
+ * envisions schemas with multiple fields (Slack: channel + message);
+ * those land as the rule editor migrates from `{ type, value }` to
+ * `{ type, params : { ... } }`. Until then add-on schemas should
+ * stick to a single `name : "value"` descriptor so they round-trip
+ * through the existing storage.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    /**
+     * Resolve the executor for an action id and run it. Returns a
+     * struct describing the outcome, mirroring the shape
+     * `AutomationService.applyOne` previously emitted.
+     */
+    public struct function dispatch( required struct action, required any ticket, required any rule ){
+        var entry = findById( arguments.action.type ?: "" );
+        if ( isNull( entry ) ) {
+            return { type : arguments.action.type ?: "", skipped : true, reason : "unsupported" };
+        }
+        if ( !len( entry.executor ?: "" ) ) {
+            return { type : arguments.action.type, skipped : true, reason : "no executor registered" };
+        }
+        var executor = wirebox.getInstance( entry.executor );
+        return executor.execute( arguments.action, arguments.ticket, arguments.rule );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, arguments.entry.source ?: "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreActions();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.automationActions ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var a in declared ) addEntry( a, moduleName );
+        }
+    }
+
+    private void function seedCoreActions(){
+        var seeds = [
+            {
+                id              : "setPriority",
+                label           : "Set priority",
+                description     : "Set the ticket's priority to a chosen value.",
+                executor        : "SetPriorityExecutor@automation",
+                parameterSchema : [
+                    { name : "value", label : "Priority", type : "select", required : true, options : [ "low", "normal", "high", "urgent" ] }
+                ]
+            },
+            {
+                id              : "setStatus",
+                label           : "Set status",
+                description     : "Transition the ticket to a new status (workflow validation still applies).",
+                executor        : "SetStatusExecutor@automation",
+                parameterSchema : [
+                    { name : "value", label : "Status key", type : "string", required : true, description : "Must be a status key from the workflow editor (e.g., 'open', 'closed')." }
+                ]
+            },
+            {
+                id              : "assignToAgent",
+                label           : "Assign to specific agent",
+                description     : "Assign the ticket to a known agent id. Empty value unassigns.",
+                executor        : "AssignToAgentExecutor@automation",
+                parameterSchema : [
+                    { name : "value", label : "Agent id", type : "string", required : false, description : "UUID of the agent. Empty unassigns." }
+                ]
+            },
+            {
+                id              : "assignByStrategy",
+                label           : "Assign by strategy",
+                description     : "Pick an agent through the named strategy (round-robin or least-loaded) and assign.",
+                executor        : "AssignByStrategyExecutor@automation",
+                parameterSchema : [
+                    { name : "value", label : "Strategy", type : "select", required : true, options : [ "roundRobin", "leastLoaded" ] }
+                ]
+            }
+        ];
+        for ( var s in seeds ) addEntry( s, "core" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id              : arguments.raw.id,
+            label           : arguments.raw.label           ?: arguments.raw.id,
+            description     : arguments.raw.description     ?: "",
+            executor        : arguments.raw.executor        ?: "",
+            parameterSchema : isArray( arguments.raw.parameterSchema ?: [] ) ? arguments.raw.parameterSchema : [],
+            source          : arguments.source
+        };
+    }
+
+}

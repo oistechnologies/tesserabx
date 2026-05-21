@@ -1,0 +1,20 @@
+/**
+ * SetPriorityExecutor: action executor for "setPriority".
+ *
+ * Action shape: { type : "setPriority", value : "<priority-key>" }
+ *
+ * Sets the ticket's priority column directly and saves. Does NOT
+ * go through TicketsService.assignToAgent / changeStatus because
+ * there is no first-class "change priority" method on TicketsService
+ * (yet). When that lands, this executor should delegate.
+ */
+class singleton=true {
+
+    public struct function execute( required struct action, required any ticket, required any rule ){
+        var value = arguments.action.value ?: "";
+        arguments.ticket.setPriority( value );
+        arguments.ticket.save();
+        return { type : arguments.action.type, value : value };
+    }
+
+}

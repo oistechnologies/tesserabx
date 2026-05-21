@@ -1,0 +1,127 @@
+/**
+ * OperatorRegistry: declared condition operators.
+ *
+ * Each operator is referenced by id from an automation rule's
+ * condition struct (`{ field, op, value }`). The registry exists to:
+ *   - drive the operator-picker dropdown in the rule editor
+ *   - let add-ons declare additional operators (e.g. a "matchesRegex"
+ *     operator shipped by a compliance add-on)
+ *
+ * Implementation note: the underlying boolean evaluation lives in
+ * `AutomationService.conditionPasses()` for the core operators. The
+ * registry declares the OPERATOR; the evaluator dispatches by id.
+ * Add-on operators provide an evaluator via the `evaluator` field
+ * (WireBox mapping name); AutomationService resolves it at evaluation
+ * time and calls `evaluate(field, op, lhs, rhs)` which returns a
+ * boolean.
+ *
+ * --- Public extension contract ---
+ *
+ *   settings.tesserabx.automationOperators = [
+ *       {
+ *           id          : "matchesRegex",
+ *           label       : "matches regex",
+ *           description : "RHS is treated as a regular expression matched against the field's string value.",
+ *           valueShape  : "string",
+ *           evaluator   : "RegexOperatorEvaluator@compliance"
+ *       }
+ *   ];
+ *
+ *   var registry = wirebox.getInstance( "OperatorRegistry@automation" );
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, arguments.entry.source ?: "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreOperators();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.automationOperators ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var op in declared ) addEntry( op, moduleName );
+        }
+    }
+
+    private void function seedCoreOperators(){
+        // Implementations for these live in AutomationService.conditionPasses.
+        // The `evaluator` field is empty for core operators because the
+        // service inlines them; add-on operators populate it with a
+        // WireBox mapping name.
+        var seeds = [
+            { id : "eq",           label : "equals",                 description : "Strict string-equality match.",                         valueShape : "string"  },
+            { id : "neq",          label : "does not equal",         description : "Inverse of eq.",                                        valueShape : "string"  },
+            { id : "contains",     label : "contains",               description : "LHS string includes RHS substring (case-sensitive).",   valueShape : "string"  },
+            { id : "notContains",  label : "does not contain",       description : "Inverse of contains.",                                  valueShape : "string"  },
+            { id : "in",           label : "is one of",              description : "RHS is a comma-separated list; LHS must be one entry.", valueShape : "list"    },
+            { id : "notIn",        label : "is not one of",          description : "Inverse of in.",                                        valueShape : "list"    },
+            { id : "isEmpty",      label : "is empty",               description : "LHS has zero length. RHS ignored.",                     valueShape : "none"    },
+            { id : "isNotEmpty",   label : "is not empty",           description : "LHS has non-zero length. RHS ignored.",                 valueShape : "none"    },
+            { id : "gt",           label : "is greater than",        description : "Numeric LHS greater than numeric RHS.",                 valueShape : "number"  },
+            { id : "gte",          label : "is greater than or equal", description : "Numeric LHS >= numeric RHS.",                         valueShape : "number"  },
+            { id : "lt",           label : "is less than",           description : "Numeric LHS less than numeric RHS.",                    valueShape : "number"  },
+            { id : "lte",          label : "is less than or equal",  description : "Numeric LHS <= numeric RHS.",                           valueShape : "number"  }
+        ];
+        for ( var s in seeds ) {
+            s.evaluator = "";   // core ops inlined in AutomationService
+            addEntry( s, "core" );
+        }
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id          : arguments.raw.id,
+            label       : arguments.raw.label       ?: arguments.raw.id,
+            description : arguments.raw.description ?: "",
+            valueShape  : arguments.raw.valueShape  ?: "string",
+            evaluator   : arguments.raw.evaluator   ?: "",
+            source      : arguments.source
+        };
+    }
+
+}

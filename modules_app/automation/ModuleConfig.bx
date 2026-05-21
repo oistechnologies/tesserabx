@@ -50,6 +50,36 @@ class {
         binder.map( "RecurringTicketService@automation" )
               .to( "#moduleMapping#.models.RecurringTicketService" )
               .asSingleton();
+
+        // Phase 6 registries: trigger / operator / field / action.
+        binder.map( "TriggerRegistry@automation" )
+              .to( "#moduleMapping#.models.TriggerRegistry" )
+              .asSingleton();
+        binder.map( "OperatorRegistry@automation" )
+              .to( "#moduleMapping#.models.OperatorRegistry" )
+              .asSingleton();
+        binder.map( "ConditionFieldRegistry@automation" )
+              .to( "#moduleMapping#.models.ConditionFieldRegistry" )
+              .asSingleton();
+        binder.map( "ActionRegistry@automation" )
+              .to( "#moduleMapping#.models.ActionRegistry" )
+              .asSingleton();
+
+        // Phase 6 action executors: one per built-in action. The
+        // ActionRegistry's seed declares the executor mapping name;
+        // these bindings make them resolvable.
+        binder.map( "SetPriorityExecutor@automation" )
+              .to( "#moduleMapping#.models.actions.SetPriorityExecutor" )
+              .asSingleton();
+        binder.map( "SetStatusExecutor@automation" )
+              .to( "#moduleMapping#.models.actions.SetStatusExecutor" )
+              .asSingleton();
+        binder.map( "AssignToAgentExecutor@automation" )
+              .to( "#moduleMapping#.models.actions.AssignToAgentExecutor" )
+              .asSingleton();
+        binder.map( "AssignByStrategyExecutor@automation" )
+              .to( "#moduleMapping#.models.actions.AssignByStrategyExecutor" )
+              .asSingleton();
     }
 
     function onUnload(){}

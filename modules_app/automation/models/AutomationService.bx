@@ -31,21 +31,26 @@
  */
 class singleton=true {
 
-    property name="wirebox"            inject="wirebox";
-    property name="ticketsService"     inject="TicketsService@tickets";
-
-    variables.SUPPORTED_TRIGGERS = [ "ticket.created", "ticket.status_changed", "ticket.escalation" ];
-    variables.SUPPORTED_OPS      = [ "eq", "neq", "contains", "notContains", "in", "notIn", "isEmpty", "isNotEmpty", "gt", "gte", "lt", "lte" ];
-    variables.SUPPORTED_ACTIONS  = [ "setPriority", "setStatus", "assignToAgent", "assignByStrategy" ];
+    property name="wirebox"                  inject="wirebox";
+    property name="ticketsService"           inject="TicketsService@tickets";
+    property name="triggerRegistry"          inject="TriggerRegistry@automation";
+    property name="operatorRegistry"         inject="OperatorRegistry@automation";
+    property name="conditionFieldRegistry"   inject="ConditionFieldRegistry@automation";
+    property name="actionRegistry"           inject="ActionRegistry@automation";
 
     // Per-thread re-entrancy guard. createObject().init() makes a Java
     // ThreadLocal we set/clear around every action execution; an
     // action-initiated event will see it set and bail out.
     variables.reentryGuard = createObject( "java", "java.lang.ThreadLocal" ).init();
 
-    public array function listSupportedTriggers() { return variables.SUPPORTED_TRIGGERS; }
-    public array function listSupportedOps()      { return variables.SUPPORTED_OPS; }
-    public array function listSupportedActions()  { return variables.SUPPORTED_ACTIONS; }
+    // Phase 6: these methods read from the registries so add-on
+    // triggers / operators / actions automatically surface. They
+    // return plain string arrays for backwards compatibility with
+    // the prior `SUPPORTED_*` constants (the admin rule editor and
+    // tests treated them as flat lists of ids).
+    public array function listSupportedTriggers() { return triggerRegistry.listIds(); }
+    public array function listSupportedOps()      { return operatorRegistry.listIds(); }
+    public array function listSupportedActions()  { return actionRegistry.listIds(); }
 
     // ---------------- CRUD ----------------
 
@@ -257,45 +262,13 @@ class singleton=true {
     }
 
     private struct function applyOne( required struct action, required any ticket, required any rule ){
-        var type  = arguments.action.type ?: "";
-        var value = arguments.action.value ?: "";
-        var t     = arguments.ticket;
-        switch ( type ) {
-            case "setPriority":
-                t.setPriority( value );
-                t.save();
-                return { "type" : type, "value" : value };
-            case "setStatus":
-                ticketsService.changeStatus( {
-                    ticketId  : t.getId(),
-                    status    : value,
-                    actorType : "automation",
-                    actorId   : arguments.rule.getId()
-                } );
-                return { "type" : type, "value" : value };
-            case "assignToAgent":
-                ticketsService.assignToAgent( {
-                    ticketId  : t.getId(),
-                    agentId   : value,
-                    actorType : "automation",
-                    actorId   : arguments.rule.getId()
-                } );
-                return { "type" : type, "value" : value };
-            case "assignByStrategy":
-                var assignment = wirebox.getInstance( "AssignmentService@automation" );
-                var picked     = assignment.pickAgent( value );
-                if ( !len( picked ) ) {
-                    return { "type" : type, "value" : value, "skipped" : true, "reason" : "no eligible agent" };
-                }
-                ticketsService.assignToAgent( {
-                    ticketId  : t.getId(),
-                    agentId   : picked,
-                    actorType : "automation",
-                    actorId   : arguments.rule.getId()
-                } );
-                return { "type" : type, "value" : value, "pickedAgentId" : picked };
-        }
-        return { "type" : type, "skipped" : true, "reason" : "unsupported" };
+        // Phase 6: dispatch via ActionRegistry. The four core actions
+        // (setPriority, setStatus, assignToAgent, assignByStrategy)
+        // are now individual executor classes under models/actions/;
+        // add-ons declare additional executors via the manifest's
+        // settings.tesserabx.automationActions = [...]. The previous
+        // switch-case has been removed.
+        return actionRegistry.dispatch( arguments.action, arguments.ticket, arguments.rule );
     }
 
     // ---------------- Interceptor handlers ----------------

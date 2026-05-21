@@ -1,0 +1,25 @@
+/**
+ * AssignToAgentExecutor: action executor for "assignToAgent".
+ *
+ * Action shape: { type : "assignToAgent", value : "<agent-uuid>" }
+ *
+ * Delegates to TicketsService.assignToAgent for the full assignment
+ * flow (audit + ticket event + announcement). Empty agent id means
+ * "unassign," matching TicketsService's contract.
+ */
+class singleton=true {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    public struct function execute( required struct action, required any ticket, required any rule ){
+        var value = arguments.action.value ?: "";
+        ticketsService.assignToAgent( {
+            ticketId  : arguments.ticket.getId(),
+            agentId   : value,
+            actorType : "automation",
+            actorId   : arguments.rule.getId()
+        } );
+        return { type : arguments.action.type, value : value };
+    }
+
+}

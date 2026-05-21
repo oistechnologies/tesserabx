@@ -1,0 +1,33 @@
+/**
+ * AssignByStrategyExecutor: action executor for "assignByStrategy".
+ *
+ * Action shape: { type : "assignByStrategy", value : "<strategy-key>" }
+ *
+ * Strategy keys supported: "roundRobin", "leastLoaded" (per
+ * AssignmentService.pickAgent). Picks an eligible agent through the
+ * strategy, then delegates to TicketsService.assignToAgent. Returns
+ * a skipped+reason struct when no eligible agent is available so the
+ * rule's fire log records WHY the action did not produce an
+ * assignment.
+ */
+class singleton=true {
+
+    property name="ticketsService"    inject="TicketsService@tickets";
+    property name="assignmentService" inject="AssignmentService@automation";
+
+    public struct function execute( required struct action, required any ticket, required any rule ){
+        var value = arguments.action.value ?: "";
+        var picked = assignmentService.pickAgent( value );
+        if ( !len( picked ) ) {
+            return { type : arguments.action.type, value : value, skipped : true, reason : "no eligible agent" };
+        }
+        ticketsService.assignToAgent( {
+            ticketId  : arguments.ticket.getId(),
+            agentId   : picked,
+            actorType : "automation",
+            actorId   : arguments.rule.getId()
+        } );
+        return { type : arguments.action.type, value : value, pickedAgentId : picked };
+    }
+
+}

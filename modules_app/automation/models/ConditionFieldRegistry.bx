@@ -1,0 +1,132 @@
+/**
+ * ConditionFieldRegistry: declared fields a rule condition can
+ * reference.
+ *
+ * Each entry declares one field name (the LHS of a condition struct
+ * `{ field, op, value }`) along with metadata the rule editor needs
+ * to render the right input control. Core ships fields for ticket
+ * direct properties, event-context fields used by status-change
+ * triggers, and time-based fields used by the escalation trigger.
+ *
+ * Add-on contributions are scoped by `appliesTo` (the trigger ids
+ * the field is relevant for). A field shown for `ticket.escalation`
+ * but not for `ticket.created` declares `appliesTo : [ "ticket.escalation" ]`;
+ * a universal field uses an empty array or omits the key.
+ *
+ *   settings.tesserabx.automationFields = [
+ *       {
+ *           id          : "ticket.tags",
+ *           label       : "Tag",
+ *           description : "Any tag currently attached to the ticket.",
+ *           type        : "string",
+ *           appliesTo   : []
+ *       }
+ *   ];
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    /**
+     * Fields that apply to a given trigger. A field with empty or
+     * absent `appliesTo` is considered universal.
+     */
+    public array function listForTrigger( required string trigger ){
+        var all = listAll();
+        var out = [];
+        for ( var f in all ) {
+            var applies = f.appliesTo ?: [];
+            if ( !arrayLen( applies ) || arrayContains( applies, arguments.trigger ) ) {
+                out.append( f );
+            }
+        }
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, arguments.entry.source ?: "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreFields();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.automationFields ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var f in declared ) addEntry( f, moduleName );
+        }
+    }
+
+    private void function seedCoreFields(){
+        // Mirrors the fields AutomationService.conditionPasses already
+        // resolves. Keep this list in sync with that switch when a new
+        // ticket field is added to the engine.
+        var seeds = [
+            // Ticket direct (any trigger)
+            { id : "priority",                    label : "Priority",                       type : "string"  },
+            { id : "status",                      label : "Status",                         type : "string"  },
+            { id : "ticketType",                  label : "Ticket type",                    type : "string"  },
+            { id : "source",                      label : "Source",                         type : "string"  },
+            { id : "subject",                     label : "Subject",                        type : "string"  },
+            { id : "organizationId",              label : "Organization ID",                type : "string"  },
+            { id : "requesterContactId",          label : "Requester contact ID",           type : "string"  },
+            { id : "originatingEmail",            label : "Originating email",              type : "string"  },
+            { id : "isAccountless",               label : "Is accountless",                 type : "boolean" },
+            // Event-context (status-change triggers)
+            { id : "from",                        label : "Previous status (for status_changed)", type : "string",  appliesTo : [ "ticket.status_changed" ] },
+            { id : "to",                          label : "Next status (for status_changed)",     type : "string",  appliesTo : [ "ticket.status_changed" ] },
+            // Time-based (escalation trigger)
+            { id : "minutesSinceCreated",         label : "Minutes since created",          type : "number", appliesTo : [ "ticket.escalation" ] },
+            { id : "minutesSinceFirstResponseDue", label : "Minutes since first-response due", type : "number", appliesTo : [ "ticket.escalation" ] },
+            { id : "minutesSinceResolutionDue",   label : "Minutes since resolution due",   type : "number", appliesTo : [ "ticket.escalation" ] },
+            { id : "hasFirstResponse",            label : "Has first response",             type : "boolean", appliesTo : [ "ticket.escalation" ] }
+        ];
+        for ( var s in seeds ) addEntry( s, "core" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id          : arguments.raw.id,
+            label       : arguments.raw.label       ?: arguments.raw.id,
+            description : structKeyExists( arguments.raw, "description" ) ? arguments.raw.description : "",
+            type        : structKeyExists( arguments.raw, "type" )        ? arguments.raw.type        : "string",
+            appliesTo   : ( structKeyExists( arguments.raw, "appliesTo" ) && isArray( arguments.raw.appliesTo ) ) ? arguments.raw.appliesTo : [],
+            source      : arguments.source
+        };
+    }
+
+}

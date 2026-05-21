@@ -1,0 +1,26 @@
+/**
+ * SetStatusExecutor: action executor for "setStatus".
+ *
+ * Action shape: { type : "setStatus", value : "<status-key>" }
+ *
+ * Delegates to TicketsService.changeStatus so the full status
+ * transition (workflow validation, ticket events, announcements)
+ * fires. The actor is the rule id so the audit trail attributes
+ * the change to the automation engine, not to a human agent.
+ */
+class singleton=true {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    public struct function execute( required struct action, required any ticket, required any rule ){
+        var value = arguments.action.value ?: "";
+        ticketsService.changeStatus( {
+            ticketId  : arguments.ticket.getId(),
+            status    : value,
+            actorType : "automation",
+            actorId   : arguments.rule.getId()
+        } );
+        return { type : arguments.action.type, value : value };
+    }
+
+}

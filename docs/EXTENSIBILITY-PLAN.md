@@ -816,6 +816,20 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - No deviations.
 - No additional files touched beyond the four listed in the plan.
 
+### 2026-05-20 - Phase 6: Automation registries
+- Four new registries under `modules_app/automation/models/`: `TriggerRegistry` (3 core seeds), `OperatorRegistry` (12 core seeds), `ConditionFieldRegistry` (~14 core seeds, scoped by `appliesTo`), `ActionRegistry` (4 core seeds with parameter schemas).
+- Four core actions extracted into individual executor classes under `models/actions/`: `SetPriorityExecutor`, `SetStatusExecutor`, `AssignToAgentExecutor`, `AssignByStrategyExecutor`. Each wraps the exact body that previously lived in `AutomationService.applyOne`'s switch-case.
+- `AutomationService.applyOne` simplified from a 40-line switch-case to a single line: `return actionRegistry.dispatch( action, ticket, rule );`. Backwards-compatible: the four core action ids work unchanged.
+- `AutomationService.listSupportedTriggers / listSupportedOps / listSupportedActions` now read from the registries. Add-on triggers, operators, and actions automatically surface in any UI listing those.
+- `docs/EXTENSIONS.md` Automation section published: declaration paths for triggers, operators, fields, actions, plus the parameter-schema descriptor format and the storage-shape note (`{ type, value }` for now, multi-field schemas land when the rule editor migrates).
+- Specs: `AutomationRegistriesSpec` (16/16). Regression: existing `AutomationServiceSpec` (12/12) passes unchanged, confirming the ActionRegistry dispatch reproduces the switch-case behavior exactly.
+- Full sweep: 445/4/9 (+16 from Phase 5 baseline, identical pre-existing CBFS/s3sdk failures).
+- One new gotcha (added below): BoxLang's elvis operator `?:` does NOT catch `KeyNotFoundException` on a missing struct key; it only handles null returns from successful access. The ConditionFieldRegistry seeds had heterogeneous shapes (some entries had `appliesTo`, some did not), and `arguments.raw.appliesTo ?: []` threw on the entries without it. Fixed by switching to `structKeyExists( raw, "appliesTo" ) ? raw.appliesTo : []`.
+- Deferrals:
+  - **Rule editor admin UI** is still not built (was already deferred before Phase 6). The registries now expose every declared trigger / operator / field / action with parameter schemas, so the rule editor when built can render generic forms instead of hardcoding fields per action.
+  - **Multi-field action parameters**: rules currently store `{ type, value }`. The parameter schema supports more (e.g., Slack: channel + message), but until the rule editor migrates to `{ type, params : { ... } }` storage, add-on action schemas should stick to a single `name : "value"` descriptor.
+  - **Add-on operator evaluators**: the `evaluator` field on OperatorRegistry entries lets an add-on register a custom evaluator; the host-side dispatch in `AutomationService.conditionPasses` still inlines the 12 core operators and does not yet route add-on operator ids to their evaluator mappings. The plumbing is documented; the dispatch hookup is a small follow-up.
+
 ### 2026-05-20 - Phase 5: Channel adapter registry
 - `IChannelAdapter` contract published at `modules_app/channels/models/contracts/IChannelAdapter.bx`. Documents the eight-method shape every adapter implements: `getChannelId`, `getDisplayName`, `getIcon`, `isPullBased`, `verifyConfig`, `pollOnce`, `normalizeInbound`, `sendOutbound`. The normalized inbound struct contract is documented in the class docblock and in `docs/EXTENSIONS.md`.
 - `ChannelAdapterRegistry@channels` ships. Reads add-on adapters from each module's `settings.tesserabx.channelAdapters = [ { mapping : "..." } ]` manifest declaration; seeds the core email adapter in its own `ensureLoaded()` (same pattern as `RoleRegistry` / `PermissionRegistry`). Public surface: `register`, `adapterFor`, `listAdapters`, `listChannelIds`, `pollAll`, `reload`.
@@ -948,6 +962,23 @@ BoxLang ships `jsonSerialize()` and `jsonDeserialize()`. The CFML names `seriali
 ### Phase 1 - To reach the ColdBox controller from a service, inject `coldbox` directly
 
 `wirebox.getController()` does not exist on the WireBox API surface in this BoxLang / ColdBox 8 environment ("Method 'getController' not found"). Use `property name="coldbox" inject="coldbox";` and call `coldbox.getSetting( "<name>" )` directly.
+
+### Phase 6 - BoxLang `?:` elvis does NOT catch KeyNotFoundException on missing struct keys
+
+The null-coalescing operator `?:` in BoxLang only handles **null returns from successful access**. It does not catch exceptions thrown during the left-side evaluation. Specifically:
+
+```boxlang
+// Throws KeyNotFoundException if `appliesTo` is not a key on raw.
+// The elvis does NOT save you.
+var x = arguments.raw.appliesTo ?: [];
+
+// Safe.
+var x = structKeyExists( arguments.raw, "appliesTo" ) ? arguments.raw.appliesTo : [];
+```
+
+The symptom in Phase 6 was a `<GLOBAL BUNDLE EXCEPTION>` from TestBox with `Application: The key [appliesTo] was not found in the struct. Valid keys are ([type, id, label])` — the registry's seed array had heterogeneous shapes (universal fields lacked `appliesTo`; trigger-scoped fields had it), and the normalize step blew up on the universal ones.
+
+Whenever a registry's normalize/upsert step accepts an entry struct that may have varying shapes (which is always the case for manifest declarations from add-ons), use `structKeyExists` instead of `?:` for every optional key access. The default-on-missing pattern looks longer but it's the only safe form.
 
 ### Phase 4 - Fixing the `variables.` scope-walker bug can resurface latent duplicate-route bugs
 

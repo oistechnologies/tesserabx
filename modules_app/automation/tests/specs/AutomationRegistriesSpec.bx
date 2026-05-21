@@ -1,0 +1,156 @@
+/**
+ * AutomationRegistriesSpec: the four Phase 6 registries seed core
+ * triggers / operators / fields / actions, and AutomationService's
+ * legacy listSupported* methods now read from them.
+ *
+ * The existing AutomationServiceSpec covers end-to-end rule firing;
+ * if Phase 6 broke action dispatch, that spec catches it. This file
+ * focuses on the registry surfaces themselves.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.triggers   = wb.getInstance( "TriggerRegistry@automation" );
+        variables.operators  = wb.getInstance( "OperatorRegistry@automation" );
+        variables.fields     = wb.getInstance( "ConditionFieldRegistry@automation" );
+        variables.actions    = wb.getInstance( "ActionRegistry@automation" );
+        variables.automation = wb.getInstance( "AutomationService@automation" );
+
+        variables.triggers.reload();
+        variables.operators.reload();
+        variables.fields.reload();
+        variables.actions.reload();
+    }
+
+    function run(){
+        describe( "TriggerRegistry seed", function(){
+            it( "seeds the three core triggers", function(){
+                var ids = variables.triggers.listIds();
+                expect( ids ).toInclude( "ticket.created" );
+                expect( ids ).toInclude( "ticket.status_changed" );
+                expect( ids ).toInclude( "ticket.escalation" );
+            } );
+
+            it( "maps ticket.created to onTicketCreated", function(){
+                var t = variables.triggers.findById( "ticket.created" );
+                expect( t.eventName ).toBe( "onTicketCreated" );
+            } );
+
+            it( "returns null for an unknown trigger", function(){
+                expect( isNull( variables.triggers.findById( "does.not.exist" ) ) ).toBeTrue();
+            } );
+        } );
+
+        describe( "OperatorRegistry seed", function(){
+            it( "seeds all twelve core operators", function(){
+                var ids = variables.operators.listIds();
+                for ( var expected in [ "eq", "neq", "contains", "notContains", "in", "notIn", "isEmpty", "isNotEmpty", "gt", "gte", "lt", "lte" ] ) {
+                    expect( ids ).toInclude( expected );
+                }
+            } );
+
+            it( "core operators have empty evaluator (inlined in AutomationService)", function(){
+                expect( variables.operators.findById( "eq" ).evaluator ).toBe( "" );
+            } );
+        } );
+
+        describe( "ConditionFieldRegistry seed", function(){
+            it( "seeds the ticket direct fields", function(){
+                var ids = structKeyArray( {} );
+                for ( var f in variables.fields.listAll() ) ids.append( f.id );
+                expect( ids ).toInclude( "priority" );
+                expect( ids ).toInclude( "status" );
+                expect( ids ).toInclude( "subject" );
+                expect( ids ).toInclude( "isAccountless" );
+            } );
+
+            it( "scopes from / to to ticket.status_changed", function(){
+                var ids = structKeyArray( {} );
+                for ( var f in variables.fields.listForTrigger( "ticket.status_changed" ) ) ids.append( f.id );
+                expect( ids ).toInclude( "from" );
+                expect( ids ).toInclude( "to" );
+
+                var createdIds = structKeyArray( {} );
+                for ( var f in variables.fields.listForTrigger( "ticket.created" ) ) createdIds.append( f.id );
+                expect( createdIds ).notToInclude( "from" );
+            } );
+
+            it( "scopes time-based fields to ticket.escalation", function(){
+                var ids = structKeyArray( {} );
+                for ( var f in variables.fields.listForTrigger( "ticket.escalation" ) ) ids.append( f.id );
+                expect( ids ).toInclude( "minutesSinceCreated" );
+                expect( ids ).toInclude( "hasFirstResponse" );
+            } );
+        } );
+
+        describe( "ActionRegistry seed", function(){
+            it( "seeds the four core actions", function(){
+                var ids = variables.actions.listIds();
+                for ( var expected in [ "setPriority", "setStatus", "assignToAgent", "assignByStrategy" ] ) {
+                    expect( ids ).toInclude( expected );
+                }
+            } );
+
+            it( "every core action declares an executor mapping", function(){
+                for ( var a in variables.actions.listAll() ) {
+                    expect( len( a.executor ) ).toBeGT( 0, "action [#a.id#] missing executor mapping" );
+                }
+            } );
+
+            it( "setPriority parameter schema declares the value field as a select", function(){
+                var entry = variables.actions.findById( "setPriority" );
+                expect( arrayLen( entry.parameterSchema ) ).toBe( 1 );
+                expect( entry.parameterSchema[ 1 ].name ).toBe( "value" );
+                expect( entry.parameterSchema[ 1 ].type ).toBe( "select" );
+                expect( entry.parameterSchema[ 1 ].options ).toInclude( "high" );
+            } );
+
+            it( "assignByStrategy parameter schema declares roundRobin and leastLoaded", function(){
+                var entry = variables.actions.findById( "assignByStrategy" );
+                expect( entry.parameterSchema[ 1 ].options ).toInclude( "roundRobin" );
+                expect( entry.parameterSchema[ 1 ].options ).toInclude( "leastLoaded" );
+            } );
+        } );
+
+        describe( "ActionRegistry.dispatch unknown action", function(){
+            it( "returns skipped + unsupported instead of throwing", function(){
+                var fakeTicket = {};
+                var fakeRule   = { getId : () => "rule-1" };
+                var result = variables.actions.dispatch(
+                    { type : "does.not.exist", value : "x" },
+                    fakeTicket,
+                    fakeRule
+                );
+                expect( result.skipped ?: false ).toBeTrue();
+                expect( result.reason ).toBe( "unsupported" );
+            } );
+        } );
+
+        describe( "AutomationService legacy methods read from registries", function(){
+            it( "listSupportedTriggers returns at least the three core trigger ids", function(){
+                var triggers = variables.automation.listSupportedTriggers();
+                expect( triggers ).toInclude( "ticket.created" );
+                expect( triggers ).toInclude( "ticket.status_changed" );
+                expect( triggers ).toInclude( "ticket.escalation" );
+            } );
+
+            it( "listSupportedOps returns the twelve core operators", function(){
+                var ops = variables.automation.listSupportedOps();
+                for ( var expected in [ "eq", "neq", "in", "isEmpty", "gt", "lte" ] ) {
+                    expect( ops ).toInclude( expected );
+                }
+            } );
+
+            it( "listSupportedActions returns the four core actions", function(){
+                var actions = variables.automation.listSupportedActions();
+                for ( var expected in [ "setPriority", "setStatus", "assignToAgent", "assignByStrategy" ] ) {
+                    expect( actions ).toInclude( expected );
+                }
+            } );
+        } );
+    }
+
+}
