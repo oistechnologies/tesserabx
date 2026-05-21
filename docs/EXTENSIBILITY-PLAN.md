@@ -1,0 +1,829 @@
+# TesseraBX Extensibility Plan
+
+## Context
+
+TesseraBX today is a tightly integrated, multi-tenant help-desk product. The current architecture has solid service-layer separation (per-module `*Service` facades) and respects the tenancy boundary, but almost every other extension point is hard-coded: navigation lives inline in `Portal.bxm` and `Agent.bxm`; the admin home is static buttons; automation triggers/conditions/actions are class-level arrays; AI features call a single facade; the `api` module's router lists every route; channels are hard-wired to email; custom fields only attach to tickets; roles are a returned array; and only four interceptor announcements exist in the entire codebase.
+
+This plan opens TesseraBX to **third-party BoxLang ColdBox modules** so developers can ship drop-in add-ons (Jira sync, custom channels, billing connectors, new dashboard widgets, new AI features) without forking core. The intent is not to invent a new plug-in framework - add-ons are **standard ColdBox modules** discovered via the standard `modules/` location (for ForgeBox installs) or `modules_app/` (for first-party). The TesseraBX-specific contract layers on top through a manifest block in `ModuleConfig.bx`, a set of in-code registries with DB overrides, formal service interfaces, an expanded event surface, and a tenancy-safe extension model.
+
+The outcome: a developer can `box install` a third-party add-on, the host discovers and validates it, an admin enables it (globally or per-organization), and the add-on contributes nav items, admin pages, ticket panels, dashboard widgets, channel adapters, automation actions, AI features, API routes, roles, custom-field types, and notification templates - all without touching core code.
+
+---
+
+## Decisions locked in (from clarifying questions)
+
+1. **Core eats its own dog food.** Existing hard-coded navigation, admin cards, dashboard widgets, channel intake, automation constants, AI features, API routes, and role lists will be migrated to register through the same registries an add-on would use. One contract, proven by core itself.
+2. **Standard ColdBox module locations.** Core modules stay in `modules_app/`. Add-ons installed from ForgeBox land in `modules/` via `box install`. No custom discovery path. An add-on is a normal ColdBox module whose `ModuleConfig.bx` carries a TesseraBX-specific settings block declaring version compatibility and the registries it contributes to.
+3. **Per-organization enable/disable lands in the foundation phase**, with an explicit "All organizations" mode so a deployment can opt into the simpler global-enablement model without losing the per-tenant capability later.
+4. **Registries are in-code with DB overrides.** Modules declare registrations in `ModuleConfig.bx` at load time. A small set of override tables (per registry) lets an admin disable, reorder, or rename items without forking the add-on. Resolution is always: in-code declaration ⟶ DB override applied on top.
+
+---
+
+## Hard constraints (carried from CLAUDE.md)
+
+These never move:
+
+- **Module ownership is preserved.** No new shared `domain` module. Add-ons must reach core entities through service layers, never directly.
+- **Tenant isolation is non-negotiable.** Every registry, every add-on entity, every override table must respect the `organization_id` boundary. The tenant scope primitive lives in `contacts` and is the only sanctioned mechanism.
+- **AI remains strictly optional.** Add-on AI features inherit the capability flag from the registry; when `AI_ENABLED=false` they vanish from every surface.
+- **`/agent/admin` stays nested inside `agent`.** Admin extension points live within that nested module's lifecycle.
+- **No em dashes** in any artifact written to the repo (docs, code comments, READMEs, sample add-on).
+- **Provider-side visibility is asymmetric from client-side.** No add-on contribution may leak internal-only content to a client surface.
+
+---
+
+## How phases work
+
+Each phase below is a coherent, independently testable slice. The execution rhythm for every phase is:
+
+1. Build the phase's deliverables.
+2. Run the cleanup checklist (lint, format, dead-code sweep).
+3. Run automated tests (TestBox unit + integration + CBWire specs as relevant).
+4. **PAUSE FOR USER TESTING.** The user verifies the feature in the browser / API client on both surfaces. No local commit happens before the user signs off.
+5. Update this plan document's progress log and gotchas log with whatever was learned.
+6. Local commit on the phase's work.
+7. Move to the next phase.
+
+This matches the existing project's per-phase workflow: finish work, run cleanup, run automated tests, hand off to the human for UI verification, then commit, then move to the next phase.
+
+---
+
+## Phase 0: Plan persistence and progress tracking
+
+**Goal.** Get the plan itself into the repository so it survives across sessions, and establish how progress is recorded.
+
+**Scope.**
+- Save the final, user-approved version of this plan to `docs/EXTENSIBILITY-PLAN.md` (mirrored from this file).
+- Add a top-of-file "Progress log" and "Gotchas log" to the saved copy so subsequent phases append notes there.
+- Cross-link from `docs/BUILD-PLAN.md` and `docs/FUTURE-WORK.md` to `EXTENSIBILITY-PLAN.md` so future contributors find it.
+- Add a one-paragraph pointer in `CLAUDE.md` under "How to use this with the build plan" so the rule of "BUILD-PLAN is what to do next, this file is what must remain true" is preserved while announcing the new doc.
+
+**Critical files.**
+- `docs/EXTENSIBILITY-PLAN.md` (new)
+- `docs/BUILD-PLAN.md` (edit: cross-link)
+- `docs/FUTURE-WORK.md` (edit: cross-link)
+- `CLAUDE.md` (edit: pointer paragraph)
+
+**Verification.**
+- `docs/EXTENSIBILITY-PLAN.md` opens cleanly, has the empty progress/gotchas logs, and the cross-links resolve.
+
+**Pause point.** User reviews the persisted doc, confirms the structure is what they want for ongoing notes, then commit.
+
+---
+
+## Phase 1: Add-on foundation
+
+**Goal.** Establish the lowest layer: what an add-on *is*, how it declares itself, how it is discovered, how it is enabled or disabled.
+
+**Scope - items A1, A2, A3, M1, M2 (stub).**
+
+### 1.1 Discovery
+- Confirm `config/Coldbox.bx` `modulesExternalLocation` covers the path ForgeBox installs into. Standard ColdBox discovery already loads `modules/` and `modules_app/` automatically; no custom loader is added. Document this explicitly in the new `docs/EXTENSIONS.md`.
+
+### 1.2 Manifest block
+- Define the `settings.tesserabx` block format inside an add-on's `ModuleConfig.bx`. Shape (subject to iteration during phase build):
+  ```
+  settings = {
+      tesserabx : {
+          addonId         : "example-jira",
+          displayName     : "Jira Sync",
+          version         : "1.0.0",
+          minCoreVersion  : "1.0.0",
+          maxCoreVersion  : "2.0.0",
+          contributesTo   : [ "navigation", "ticketPanel", "automationAction" ],
+          requiresAi      : false
+      }
+  };
+  ```
+- At app boot, a new `AddonRegistryService@core` reads every loaded module's `settings.tesserabx` block (if present), validates the version range against the core version, and records the add-on.
+- **Version range semantics.** `minCoreVersion` is required. `maxCoreVersion` is optional: when blank, missing, or omitted entirely, the add-on is accepted on **any core version equal to or greater than `minCoreVersion`** (effectively an open upper bound). When present, it caps the supported range inclusively. The intent is to let add-on authors opt into "works forever forward" without having to bump their manifest on every core release.
+- Add-ons without a `tesserabx` block are treated as ordinary ColdBox modules (no special handling, no admin surfacing).
+
+### 1.3 Per-organization enable/disable (A3 + foundation table)
+- New migration adds two tables:
+  - `addons` - one row per discovered add-on. Columns: `addon_id` (slug, PK), `display_name`, `version`, `installed_at`, `enabled` (global on/off), `enablement_mode` ('all' or 'specific'), `metadata` (jsonb of the manifest).
+  - `addon_organization_enablement` - composite PK `(addon_id, organization_id)`, `enabled` boolean, `enabled_at`, `enabled_by_agent_id`.
+- Resolution logic in `AddonRegistryService`:
+  - `addons.enabled = false` ⟶ off everywhere.
+  - `enablement_mode = 'all'` ⟶ on for every organization.
+  - `enablement_mode = 'specific'` ⟶ on only for organizations with an `enabled=true` row in the join table.
+- Admin UI lands later (Phase 4 builds the admin page that drives these rows). For Phase 1 the rows are seeded at install time: `enabled=true`, `enablement_mode='all'`.
+
+### 1.4 Scaffolding generator (M1)
+- New CommandBox task `box tesserabx:scaffold-addon <slug>` (lives at `tasks/scaffoldAddon.bx`). Generates a skeleton add-on under `modules/<slug>/` containing:
+  - `ModuleConfig.bx` with the manifest block pre-filled.
+  - `models/`, `handlers/`, `views/`, `wires/`, `migrations/`, `tests/` folders.
+  - A `README.md` explaining what to fill in.
+  - A passing `tests/specs/InstallSpec.bx` that asserts the manifest is well-formed and the add-on registers cleanly.
+
+### 1.5 Extensions docs stub
+- New `docs/EXTENSIONS.md`. For Phase 1 it documents: manifest block fields, discovery convention, enablement rules, scaffolding command. Subsequent phases append a section per registry.
+
+**Critical files.**
+- `modules_app/core/models/AddonRegistryService.bx` (new)
+- `modules_app/core/interceptors/AddonDiscoveryInterceptor.bx` (new - listens on `afterAspectsLoad`)
+- `modules_app/core/migrations/<timestamp>_create_addon_tables.bx` (new)
+- `tasks/scaffoldAddon.bx` (new)
+- `docs/EXTENSIONS.md` (new)
+- `config/Coldbox.bx` (edit: confirm modules path documentation)
+
+**Verification.**
+- Run the scaffolder against a throwaway slug and confirm the generated module loads, registers in the `addons` table with `enabled=true, enablement_mode='all'`, and the InstallSpec passes.
+- Manually edit the throwaway add-on's manifest to declare a `minCoreVersion` newer than core; on reinit the service refuses to register it and logs a clear warning rather than crashing the app.
+- Toggle `addons.enabled = false` via direct SQL; reinit; confirm `AddonRegistryService.isEnabled(addonId, orgId)` returns false for every org.
+- Insert an `addon_organization_enablement` row with `enabled=false` for one org while `enablement_mode='specific'`; confirm the service returns false for that org and true (or as configured) for others.
+
+**Pause point.** User exercises the scaffolder + enable/disable resolution before commit.
+
+---
+
+## Phase 2: Service contracts and tenancy safety
+
+**Goal.** Lock in the contract surface add-ons code against, and the safety helpers that prevent the most common mistake (silent tenancy leak).
+
+**Scope - items B1, B2, K1, K2, K3, N1.**
+
+### 2.1 Service interfaces (B1)
+- For each headline service add-ons are expected to depend on, publish a thin interface class in the owning module's `models/contracts/` subfolder:
+  - `tickets.models.contracts.ITicketsService` - `createTicket`, `addMessage`, `assign`, `transitionStatus`, `findByIdForOrg`, `searchForOrg`.
+  - `contacts.models.contracts.IContactsService` - `findContactByEmailForOrg`, `findOrCreateOrganizationByDomain`, `mergeContacts`, `listOfficesForOrg`.
+  - `audit.models.contracts.IAuditService` - `record(eventType, actorId, organizationId, entity, payload)`.
+  - `notifications.models.contracts.INotificationsService` - `dispatch(eventKey, recipients, payload)`.
+  - `ai.models.contracts.IAiMiddleware` - `complete(feature, prompt, options)`, `embed(text, model)`, `isEnabled()`, `isFeatureEnabled(feature, orgId)`.
+- Existing service classes implement these interfaces. Add-ons resolve them by interface alias via WireBox.
+
+### 2.2 DTOs (B2)
+- Each service interface returns DTOs rather than Quick entities at its public surface. Add `models/dtos/<EntityName>Dto.bx` per module.
+- Inside the owning module, services still work in Quick entities; the DTO mapping happens at the facade boundary.
+- Existing internal call sites that already receive entities are unaffected; only cross-module callers move to the DTO shape.
+
+### 2.3 Tenant scope publication (K3)
+- The Quick global scope (or shared base entity) that enforces `organization_id` currently lives in `contacts`. Promote it to a documented, supported primitive: `contacts.models.tenancy.TenantScopedEntity` (or whatever the actual class is) gets a class-level docblock declaring it part of the public extension contract, and `docs/EXTENSIONS.md` gets a "Building tenant-scoped add-on entities" section.
+
+### 2.4 Tenancy guard (N1)
+- New helper `contacts.models.tenancy.TenancyGuard@contacts` exposing `assertScopedQuery(qbBuilder, organizationId)` which throws if the builder does not include an `organization_id` predicate against the right table. Add-on authors call this before executing any `qb` query that touches a tenant-scoped table; in development the guard also logs a stack trace to make leaks loud during testing.
+- An interceptor `TenancyAuditInterceptor` listens on `preProcess` in dev/test environments and applies the guard to incoming requests for known sensitive routes as a backstop.
+
+### 2.5 Per-module migration namespacing (K1)
+- Document the migration convention for add-ons: each module owns a `migrations/` folder under its root; migrations are prefixed with the `addonId` to avoid name collisions across the global `cfmigrations` table.
+- The migration runner is extended (or its config updated) to scan add-on migration folders. If the existing migration runner already supports per-module scanning, this is documentation-only.
+
+### 2.6 Settings registry (K2)
+- New `core.models.SettingsRegistry@core`. Modules contribute settings descriptors in `ModuleConfig.bx`:
+  ```
+  settings.tesserabx.settings = [
+      {
+          key            : "exampleJira.baseUrl",
+          type           : "string",
+          label          : "Jira Base URL",
+          description    : "...",
+          default        : "",
+          secret         : false,
+          perTenant      : true
+      }
+  ];
+  ```
+- A new `addon_settings` table stores per-tenant overrides keyed by `(addon_id, organization_id, setting_key)`.
+- Global settings remain in env vars; the registry only governs add-on-defined settings.
+- The admin UI to drive this lands in Phase 4 alongside other admin pages; Phase 2 just publishes the registry and DB tier.
+
+**Critical files.**
+- `modules_app/tickets/models/contracts/ITicketsService.bx` (new)
+- `modules_app/contacts/models/contracts/IContactsService.bx` (new)
+- `modules_app/audit/models/contracts/IAuditService.bx` (new)
+- `modules_app/notifications/models/contracts/INotificationsService.bx` (new)
+- `modules_app/ai/models/contracts/IAiMiddleware.bx` (new)
+- `modules_app/contacts/models/tenancy/TenancyGuard.bx` (new)
+- `modules_app/core/models/SettingsRegistry.bx` (new)
+- `modules_app/core/migrations/<timestamp>_create_addon_settings.bx` (new)
+- `docs/EXTENSIONS.md` (edit: contracts + tenancy + migrations + settings sections)
+
+**Verification.**
+- Existing TestBox suite passes unchanged (interfaces are additive).
+- Write a one-off integration spec that resolves each interface from WireBox and asserts the implementation conforms.
+- Write a spec that deliberately omits the `organization_id` clause and asserts `TenancyGuard.assertScopedQuery` throws.
+- Manually run a settings round-trip: register a sample setting in a throwaway add-on's manifest, write a per-tenant override via service, read it back.
+
+**Pause point.** User confirms existing flows still work and the new contracts are documented.
+
+---
+
+## Phase 3: Event surface and audit contributions
+
+**Goal.** Expand the event vocabulary to something an add-on can realistically build on, lock in a canonical payload shape, and give add-ons a way to write to the central audit log.
+
+**Scope - items C1, C2, C3, N2.**
+
+### 3.1 Event audit and expansion (C1)
+- Walk every module's service layer and identify state transitions an add-on would plausibly care about. The catalog from the survey is the starting point:
+  - **tickets:** `onTicketCreated`, `onTicketUpdated`, `onTicketAssigned`, `onTicketUnassigned`, `onTicketPriorityChanged`, `onTicketTypeChanged`, `onTicketStatusChanged`, `onTicketMessageAdded`, `onTicketMerged`, `onTicketSplit`, `onTicketLinked`, `onTicketUnlinked`, `onTicketTagAdded`, `onTicketTagRemoved`, `onTicketAttachmentAdded`, `onTicketAttachmentRemoved`.
+  - **contacts:** `onContactCreated`, `onContactUpdated`, `onContactMerged`, `onContactDeleted`, `onOrganizationCreated`, `onOrganizationUpdated`, `onOfficeCreated`, `onOfficeUpdated`.
+  - **agent:** `onAgentInvited`, `onAgentActivated`, `onAgentDeactivated`, `onAgentRoleAssigned`, `onAgentRoleRevoked`, `onAgentLoginSuccess`, `onAgentLoginFailure`, `onAgentMfaEnrolled`, `onAgentMfaReset`.
+  - **sla:** `onSlaPolicyAttached`, `onSlaPaused`, `onSlaResumed`, `onSlaBreached`, `onSlaWarning`.
+  - **automation:** `onAutomationRuleFired`, `onAutomationActionExecuted`, `onAutomationActionFailed`.
+  - **knowledgebase:** `onKbArticleCreated`, `onKbArticleUpdated`, `onKbArticlePublished`, `onKbArticleUnpublished`, `onKbArticleDeleted`, `onKbArticleViewed`, `onKbArticleFeedbackSubmitted`.
+  - **channels:** `onInboundMessageReceived`, `onInboundBlocked`, `onOutboundMessageSent`, `onOutboundMessageFailed`.
+  - **api:** `onWebhookDelivered`, `onWebhookFailed`, `onApiTokenIssued`, `onApiTokenRevoked`.
+  - **ai:** `onAiFeatureInvoked`, `onAiFeatureFailed`.
+- Each module declares its events in `interceptorSettings.customInterceptionPoints` inside its `ModuleConfig.bx`. The service that owns the state transition announces it.
+
+### 3.2 Canonical payload shape (C2)
+- Every announcement uses the same struct shape:
+  ```
+  {
+      event           : "onTicketStatusChanged",
+      occurredAt      : <UTC timestamp>,
+      organizationId  : <int or null for accountless>,
+      actorId         : <agent id or contact id or "system">,
+      actorType       : "agent" | "contact" | "system",
+      entity          : { type: "Ticket", id: 123 },
+      before          : {...},
+      after           : {...},
+      metadata        : {...}
+  }
+  ```
+- A helper `core.models.events.EventPayloadBuilder.bx` produces the struct so every call site stays consistent.
+
+### 3.3 Async vs sync policy (C3)
+- Default rule: events that other modules might want to react to with network calls or heavy work go through `announceAsync()` so they cannot stall the request that triggered them. Events that need to influence the in-flight transaction (rare in this codebase) stay synchronous.
+- Document the policy in `docs/EXTENSIONS.md` so add-on authors know what to expect from each event.
+- Where async is used, ensure the dispatched event payload is fully serialized at announcement time so the listener does not see stale entity state.
+
+### 3.4 Audit-event contributions (N2)
+- Extend `AuditService.record()` to accept a `source` field identifying the originating add-on. Add-ons register their audit event types in `ModuleConfig.bx`:
+  ```
+  settings.tesserabx.auditEvents = [
+      { type: "exampleJira.issueCreated", label: "Jira issue created", severity: "info" }
+  ];
+  ```
+- The admin audit search UI (already shipped per the build plan) gains a filter by `source` so add-on events can be inspected independently.
+
+**Critical files.**
+- Every module's `ModuleConfig.bx` (edit: expand `customInterceptionPoints`).
+- Every module's `*Service.bx` that owns a state transition (edit: add `announce` / `announceAsync` call with canonical payload).
+- `modules_app/core/models/events/EventPayloadBuilder.bx` (new)
+- `modules_app/audit/models/AuditService.bx` (edit: accept `source`)
+- `modules_app/agent/modules/admin/handlers/Audit.bx` and its views (edit: source filter)
+- `docs/EXTENSIONS.md` (edit: event catalog + payload shape + async policy)
+
+**Verification.**
+- Add a temporary interceptor in the sample/throwaway add-on that captures every announced event into an in-memory list. Drive each state transition manually through the UI and confirm the corresponding event fires with the expected canonical payload.
+- Run the existing test suite; spec the canonical shape on at least three representative events.
+- Verify the admin audit UI's new source filter returns the expected rows after registering a sample audit type.
+
+**Pause point.** User reviews the event catalog and audit filter before commit.
+
+---
+
+## Phase 4: UI registries and RBAC
+
+**Goal.** Replace every hard-coded UI surface with a registry, migrate core's existing entries onto those registries, and let add-ons contribute roles and permissions that gate access.
+
+**Scope - items D1, D2, D3, D4, D5, I1, I2.**
+
+This phase is the largest. Sub-phases below are still committed together once the user signs off on the full UI surface, but they describe the build order.
+
+### 4.1 Role and permission registry (I1, I2)
+- New `agent.models.RoleRegistry@agent` and `agent.models.PermissionRegistry@agent`. Each role declares a set of permissions; each permission has an id and a human-readable label.
+- Migrate `RbacService.roleCatalog()` to seed the registry from core's roles (`agent-admin`, `agent-supervisor`, plus client-side roles). Existing role assignments in `agent_roles` continue to work; the registry adds the "what roles exist" indirection.
+- Add-on registration shape in `ModuleConfig.bx`:
+  ```
+  settings.tesserabx.roles = [
+      { id: "billing-viewer", label: "Billing Viewer", permissions: ["billing.view"] }
+  ];
+  settings.tesserabx.permissions = [
+      { id: "billing.view", label: "View billing data" }
+  ];
+  ```
+- The admin Users page renders the registry rather than a hard-coded role list.
+
+### 4.2 Navigation registry (D1)
+- New `core.models.NavigationRegistry@core`. Entries declare **surface** (`portal` or `agent`), **menu** (the menu zone within that surface), label, route, icon, sort weight, required permission id, and capability flag (e.g. `AI_ENABLED`).
+- **Menu zones per surface.** Each surface has three distinct navigation menus, and entries target exactly one:
+  - `main` - the primary left-hand sidebar navigation (the AdminLTE main menu).
+  - `account` - the user account dropdown (profile, settings, sign out).
+  - `topbar` - the small top-bar menu (notifications, quick actions, breadcrumb adjacents).
+- Resolution key inside the registry is `(surface, menu)`; each layout zone iterates only the entries that match its `(surface, menu)` pair. An add-on can contribute to any combination by registering multiple entries.
+- Migrate `modules_app/core/layouts/Portal.bxm` and `modules_app/core/layouts/Agent.bxm` to iterate the registry for each of the three menu zones rather than emit inline `<a>` tags. Each menu zone becomes a discrete `#renderNavigation( surface, menu )#` (or equivalent helper) call.
+- Existing core nav items in **all three menus on both surfaces** become registrations seeded by each module's `ModuleConfig.bx`. The portal's left menu, account dropdown, and top bar; and the agent surface's left menu, account dropdown, and top bar - six menu zones total - must end up registry-driven before this phase exits.
+- Add-on registration shape:
+  ```
+  settings.tesserabx.navigation = [
+      { surface: "agent", menu: "main",    label: "Jira Sync",     route: "exampleJira.home", icon: "...", sortWeight: 50, requiredPermission: "exampleJira.view" },
+      { surface: "agent", menu: "account", label: "Jira Settings", route: "exampleJira.settings", icon: "...", sortWeight: 30, requiredPermission: "exampleJira.manage" }
+  ];
+  ```
+
+### 4.3 Admin pages registry (D2)
+- New `agent.modules.admin.models.AdminPagesRegistry@admin`. Entries declare card title, description, route, icon, required permission, sort weight.
+- Migrate `modules_app/agent/modules/admin/views/home/index.bxm` from hard-coded buttons to a loop over the registry.
+- Each existing admin destination registers itself from the appropriate module (`tickets`, `contacts`, `automation`, `sla`, `audit`, etc.).
+- Add-ons contribute via `settings.tesserabx.adminPages = [...]`.
+- The Phase 1 `addons` table now gets its own admin page here: an "Add-ons" card lists every discovered add-on, lets the admin toggle global enable, switch enablement mode between 'all' and 'specific', and edit per-organization rows.
+- The Phase 2 settings registry surfaces here too: each registered setting becomes a row on an "Add-on Settings" admin page, grouped by add-on, with per-tenant override controls.
+
+### 4.4 Ticket detail panel registry (D3)
+- New `tickets.models.TicketPanelRegistry@tickets`. Entries declare panel id, CBWire component name, position (`right` or `tab`), sort weight, required permission, capability flag, default-collapsed boolean (defaults true per the right-column memory convention).
+- Migrate `modules_app/agent/views/tickets/show.bxm` (or its equivalent) so every right-column card and tab is registered. The view becomes a loop that renders each registered CBWire component.
+- Add-ons contribute via `settings.tesserabx.ticketPanels = [...]`.
+
+### 4.5 Dashboard widget registry (D4)
+- New `reporting.models.DashboardWidgetRegistry@reporting`. Entries declare widget id, title, CBWire component (or view partial), data-provider callable, default grid size, required permission.
+- Migrate existing reporting widgets currently driven by `ReportingService` hard-coded queries into registrations. The dashboard view iterates the registry.
+- Add-ons contribute via `settings.tesserabx.dashboardWidgets = [...]`.
+
+### 4.6 Asset publishing (D5)
+- New helper `core.models.AddonAssetService@core`. Add-ons declare published asset paths in `settings.tesserabx.assets = [...]`. The helper resolves a public URL the layout can emit (either through CBFS with a public provider or through a route the core module exposes for streaming static assets out of the add-on's `resources/` folder, depending on what works cleanest with the existing CBFS configuration).
+- Both surface layouts gain a `#renderAddonAssetTags()#` helper call that emits `<link>` and `<script>` tags for every enabled add-on, ordered by load weight.
+
+### 4.7 Override tables (DB layer for all four registries)
+- Single generic `registry_overrides` table: `(registry, entry_id, organization_id nullable, disabled boolean, sort_weight_override int, label_override varchar, payload jsonb)`. Resolution: in-code declaration ⟶ apply override row matching `(registry, entry_id, organization_id)` ⟶ fall back to override row with `organization_id IS NULL` (global override).
+- The Add-ons admin page gains controls to disable/reorder/rename any registered entry, writing rows to this table.
+
+**Critical files.**
+- `modules_app/core/models/NavigationRegistry.bx` (new)
+- `modules_app/agent/models/RoleRegistry.bx` (new)
+- `modules_app/agent/models/PermissionRegistry.bx` (new)
+- `modules_app/agent/modules/admin/models/AdminPagesRegistry.bx` (new)
+- `modules_app/tickets/models/TicketPanelRegistry.bx` (new)
+- `modules_app/reporting/models/DashboardWidgetRegistry.bx` (new)
+- `modules_app/core/models/AddonAssetService.bx` (new)
+- `modules_app/core/migrations/<timestamp>_create_registry_overrides.bx` (new)
+- `modules_app/core/layouts/Portal.bxm` (edit: registry-driven nav + asset tags)
+- `modules_app/core/layouts/Agent.bxm` (edit: same)
+- `modules_app/agent/modules/admin/views/home/index.bxm` (edit: registry-driven cards)
+- `modules_app/agent/modules/admin/handlers/Addons.bx` (new - manage add-ons page)
+- `modules_app/agent/modules/admin/views/addons/*` (new)
+- `modules_app/agent/views/tickets/show.bxm` (edit: registry-driven panels)
+- Every module's `ModuleConfig.bx` (edit: contribute its own existing nav/admin/widget/panel entries)
+- `modules_app/agent/models/RbacService.bx` (edit: feed from registry)
+- `docs/EXTENSIONS.md` (edit: per-registry section, each with example registrations)
+
+**Verification.**
+- Smoke test both surfaces across **all six menu zones** (portal `main`/`account`/`topbar` + agent `main`/`account`/`topbar`). Every existing nav link in every zone still works, in the same order it had before. Every admin home card still works. Every dashboard widget still renders. Every right-column ticket card still appears and respects its collapse-by-default state.
+- Spin up the scaffolded throwaway add-on from Phase 1; register sample nav items targeting at least two different menu zones (e.g., one in `agent/main` and one in `agent/account`), a sample admin card, a sample ticket panel, a sample dashboard widget, a sample role with a permission. Confirm each appears in the right surface + menu zone and is gated by the role.
+- Toggle the throwaway add-on off via the Add-ons admin page; confirm all contributions disappear.
+- Switch the throwaway add-on to `enablement_mode='specific'` and enable it for one org only; log in as a contact in that org and confirm contributions appear, then log in as a contact in another org and confirm they do not.
+- Override the sort weight and label of one of the throwaway add-on's nav items through the registry-overrides admin row; confirm the layout reflects the override.
+
+**Pause point.** User exercises both surfaces, the admin pages, the per-org toggle, and the overrides before commit.
+
+---
+
+## Phase 5: Channel adapter registry
+
+**Goal.** Make channel intake plug-in driven so live chat, SMS, Slack-DM, Discord, etc. can all be add-ons.
+
+**Scope - items E1, E2.**
+
+### 5.1 Channel adapter interface
+- New `channels.models.contracts.IChannelAdapter` declaring: `getChannelId()`, `getDisplayName()`, `getIcon()`, `verifyConfig(configStruct)`, `pollOnce()` (optional, for pull-based adapters), `normalizeInbound(rawPayload)`, `sendOutbound(message, ticket)`.
+- The contract returns a normalized struct that maps cleanly onto `TicketsService.createTicket()` and `TicketsService.addMessage()`.
+
+### 5.2 Channel adapter registry
+- New `channels.models.ChannelAdapterRegistry@channels`. Adapters register via `settings.tesserabx.channelAdapters = [...]` declaring the WireBox mapping name of the implementation.
+- Migrate the existing email adapter (currently inlined as `InboundEmailProcessor` and `OutboundEmailService`) into a registry entry conforming to the interface. The IMAP poller, blacklist check, and outbound SMTP path all stay where they are; they are now reached through the adapter shape.
+
+### 5.3 Inbound normalization contract
+- Document the normalized struct format in `docs/EXTENSIONS.md` and ship a TestBox suite that asserts each registered adapter conforms (round-trip an inbound payload through `normalizeInbound`, confirm the resulting struct passes `TicketsService.createTicket`'s validation).
+
+**Critical files.**
+- `modules_app/channels/models/contracts/IChannelAdapter.bx` (new)
+- `modules_app/channels/models/ChannelAdapterRegistry.bx` (new)
+- `modules_app/channels/models/adapters/EmailChannelAdapter.bx` (new - wraps existing email logic)
+- `modules_app/channels/ModuleConfig.bx` (edit: register email adapter)
+- `modules_app/channels/handlers/Inbound.bx` (edit: route through registry)
+- `docs/EXTENSIONS.md` (edit: Channel adapters section)
+
+**Verification.**
+- Inbound email still produces tickets identically (manual: send a test message through Mailpit and confirm a ticket appears with the right fields).
+- Outbound email still sends.
+- Register a stub adapter in the throwaway add-on (just enough to declare a channel id and a `sendOutbound` that writes to a file); confirm the admin "Channels" page now lists it.
+
+**Pause point.** User verifies both inbound and outbound email still behave correctly and the registry shows core + add-on adapters.
+
+---
+
+## Phase 6: Automation registries
+
+**Goal.** Convert the hard-coded automation engine to a triple-registry pattern so add-ons can ship custom triggers, conditions, and actions.
+
+**Scope - items F1, F2.**
+
+### 6.1 Trigger / condition / action registries
+- New registries in `automation.models.`: `TriggerRegistry`, `ConditionRegistry`, `ActionRegistry`. Each entry has an id, label, description, and the relevant evaluator/executor reference.
+- Replace the `SUPPORTED_TRIGGERS`, `SUPPORTED_OPS`, `SUPPORTED_ACTIONS` constants in `AutomationService` with reads from the registries. Existing values become registrations seeded by the automation module itself.
+- Add-on registrations via `settings.tesserabx.automationTriggers`, `automationConditions`, `automationActions`.
+
+### 6.2 Parameter schema metadata (F2)
+- Every registered condition and action declares its parameter schema:
+  ```
+  {
+      id: "slack.postToChannel",
+      label: "Post to Slack channel",
+      schema: [
+          { name: "channel", type: "string", required: true, label: "Channel" },
+          { name: "message", type: "textarea", required: true, label: "Message" }
+      ],
+      executor: "SlackPostExecutor@example-slack"
+  }
+  ```
+- The automation rule editor in the admin UI reads the schema and renders the form generically. No more per-action hard-coded inputs.
+
+**Critical files.**
+- `modules_app/automation/models/TriggerRegistry.bx` (new)
+- `modules_app/automation/models/ConditionRegistry.bx` (new)
+- `modules_app/automation/models/ActionRegistry.bx` (new)
+- `modules_app/automation/models/AutomationService.bx` (edit: read from registries)
+- `modules_app/automation/ModuleConfig.bx` (edit: seed core triggers/conditions/actions)
+- `modules_app/agent/modules/admin/handlers/Automation.bx` and views (edit: schema-driven form)
+- `docs/EXTENSIONS.md` (edit: Automation section)
+
+**Verification.**
+- Every existing automation rule continues to evaluate identically (run the existing automation test suite).
+- The rule editor now renders condition and action parameters from schemas; manually edit an existing rule and confirm it round-trips.
+- Register a stub action in the throwaway add-on (e.g., "Log to file"); confirm it appears in the rule editor's action dropdown and can be configured and saved.
+
+**Pause point.** User builds at least one rule that uses an add-on action end to end.
+
+---
+
+## Phase 7: AI feature, provider, and embedding registries
+
+**Goal.** Open the AI subsystem to add-on contributions without losing the "AI off = no AI UI" invariant.
+
+**Scope - items G1, G2, G3, N3.**
+
+### 7.1 AI feature registry (G1)
+- New `ai.models.AiFeatureRegistry@ai`. Each feature declares id, label, default system prompt, default model, optional preprocessor and postprocessor references, UI placement metadata (which registries it contributes a panel/button to), and `requiresAi=true`.
+- Migrate existing AI features (triage, suggested-reply, summarization, KB indexing) to registry entries.
+- `AiMiddleware.complete(feature, prompt, options)` resolves the feature through the registry and applies its system prompt + model defaults. Existing admin prompt-override flow continues to work (the registry holds the *default*; the override table holds the customization).
+
+### 7.2 Provider plug-in interface (G2)
+- New `ai.models.contracts.IAiProvider` declaring `complete(promptStruct)`, `embed(text, model)`, `listModels()`, `verifyConfig(configStruct)`.
+- The current `bx-ai` integration becomes a built-in provider conforming to the interface. Add-ons can register additional providers via `settings.tesserabx.aiProviders = [...]`.
+- The admin AI settings page lets the operator choose any registered provider, with per-tenant override.
+
+### 7.3 Embedding consumer registry (G3)
+- New `ai.models.EmbeddingConsumerRegistry@ai`. Consumers declare an id (e.g. `kb.article`), the source-of-truth lookup function, the chunking strategy, and the embedding model preference.
+- The KB embedding pipeline becomes a registered consumer; add-ons that want to index external content register their own consumer.
+- A single scheduled task drives all registered consumers (re-embed on change, periodic sweep).
+
+### 7.4 AI-off invariant (N3)
+- The four UI registries from Phase 4 already honor a capability flag per entry. The AI feature registry sets `requiresAi=true` on every AI-contributed entry it surfaces, so the UI registries automatically hide them when `AI_ENABLED=false`.
+- Add a TestBox spec that boots the app with `AI_ENABLED=false`, scans the navigation, admin pages, ticket panels, and dashboard widgets, and asserts zero AI-flagged entries are reachable.
+
+**Critical files.**
+- `modules_app/ai/models/AiFeatureRegistry.bx` (new)
+- `modules_app/ai/models/EmbeddingConsumerRegistry.bx` (new)
+- `modules_app/ai/models/contracts/IAiProvider.bx` (new)
+- `modules_app/ai/models/providers/BxAiProvider.bx` (refactor of existing integration)
+- `modules_app/ai/models/AiMiddleware.bx` (edit: route through registries)
+- `modules_app/ai/ModuleConfig.bx` (edit: seed core features and provider)
+- `tests/specs/integration/AiOffInvariantSpec.bx` (new)
+- `docs/EXTENSIONS.md` (edit: AI features, providers, embeddings section)
+
+**Verification.**
+- Run the existing AI test suite. All passing scenarios still pass; the registry change is transparent to call sites.
+- With `AI_ENABLED=true`, all AI features behave identically to today.
+- With `AI_ENABLED=false`, the invariant spec proves no AI surface leaks.
+- Register a stub AI feature in the throwaway add-on (e.g., a translation feature); confirm it shows up under AI features and respects the capability flag.
+
+**Pause point.** User verifies AI on and AI off scenarios on both surfaces.
+
+---
+
+## Phase 8: API extensibility
+
+**Goal.** Let add-ons contribute REST endpoints, OpenAPI docs, and webhook event types without modifying `api`.
+
+**Scope - items H1, H2, H3.**
+
+### 8.1 API resource registry (H1)
+- New `api.models.ApiResourceRegistry@api`. Entries declare `{ httpMethod, path, version, handler, action, jwtScopesRequired, requiredPermission, mementifierIncludes }`.
+- Migrate every existing route in `modules_app/api/config/Router.bx` to a registration sourced from the module that owns the entity being exposed (e.g., the `/api/v1/tickets/*` routes are seeded by the `tickets` module).
+- The `api` module's router becomes a loop over the registry, applying routes in declared order and version groupings.
+- Add-on registrations via `settings.tesserabx.apiResources = [...]`.
+
+### 8.2 OpenAPI contribution (H2)
+- cbswagger already scans handler annotations. Confirm that registered routes pointing at add-on handlers are picked up. If cbswagger's scan path is fixed to the `api` module, extend it to follow the resource registry's handler references.
+- Add a docblock convention for add-on handlers so cbswagger generates schemas correctly. Document in `docs/EXTENSIONS.md`.
+
+### 8.3 Webhook event registry (H3)
+- The set of event keys a webhook subscriber can subscribe to becomes a registry rather than a hard-coded list. Every module's interception points from Phase 3 register themselves as subscribable webhook events.
+- The admin webhook subscription form (already shipped) reads the registry rather than a static dropdown.
+- Add-ons can register additional webhook events that are also fan-out targets.
+
+**Critical files.**
+- `modules_app/api/models/ApiResourceRegistry.bx` (new)
+- `modules_app/api/config/Router.bx` (edit: drive from registry)
+- `modules_app/api/models/WebhooksService.bx` (edit: event list from registry)
+- Every module that exposes API endpoints (edit `ModuleConfig.bx`: seed its routes)
+- `modules_app/agent/modules/admin/handlers/Webhooks.bx` and views (edit: dropdown from registry)
+- `docs/EXTENSIONS.md` (edit: API + webhooks section)
+
+**Verification.**
+- Every existing `/api/v1/...` route still responds identically (run the API test suite plus a manual curl against a representative endpoint).
+- cbswagger output at `/api/swagger.json` (or wherever it lives) still includes every existing route and now also includes routes registered from the throwaway add-on.
+- Register a webhook subscription against an add-on-contributed event from the throwaway add-on; fire the event manually; confirm the webhook delivers.
+
+**Pause point.** User exercises the API and webhook surfaces before commit.
+
+---
+
+## Phase 9: Custom fields generalization and data extension
+
+**Goal.** Let custom fields attach to entities beyond `Ticket`, and define the convention for add-ons to attach their own data to core entities without altering core tables.
+
+**Scope - items J1, J2.**
+
+### 9.1 Generalize custom fields (J1)
+- Audit `CustomFieldsService` for hard-coded `entityType='ticket'` queries. Parameterize them.
+- Add the admin UI surfaces for managing custom fields on `Contact`, `Organization`, `Article`. Each becomes a new admin page registered via Phase 4's AdminPagesRegistry.
+- The CBWire components that render custom-field forms become entity-agnostic and accept `entityType` and `entityId` props.
+- Add `Contact`, `Organization`, `Article` custom-field value tables analogous to the existing `ticket_custom_field_values`.
+
+### 9.2 Entity extension table convention (J2)
+- Document the pattern: an add-on that needs to attach data to a core entity creates a table named `<core_entity>_<addon_id>` (e.g., `tickets_example_jira`) with `(entity_id PK FK, organization_id, ...add-on columns)`. Tenancy is enforced through `organization_id` and the published tenant scope from Phase 2.
+- Provide a helper `core.models.EntityExtensionService@core` that resolves an add-on's extension row for a given core entity id, validates tenancy, and caches per request.
+
+**Critical files.**
+- `modules_app/tickets/models/CustomFieldsService.bx` (edit: parameterize)
+- `modules_app/contacts/models/CustomFieldsService.bx` (new or shared)
+- `modules_app/knowledgebase/models/CustomFieldsService.bx` (new or shared)
+- `modules_app/core/migrations/<timestamp>_contact_custom_field_values.bx` (new)
+- `modules_app/core/migrations/<timestamp>_organization_custom_field_values.bx` (new)
+- `modules_app/core/migrations/<timestamp>_article_custom_field_values.bx` (new)
+- `modules_app/agent/modules/admin/handlers/CustomFields.bx` (edit: entity-aware)
+- `modules_app/core/models/EntityExtensionService.bx` (new)
+- `docs/EXTENSIONS.md` (edit: custom fields + entity extension sections)
+
+**Verification.**
+- Existing ticket custom fields work exactly as before (run the existing suite).
+- Manually add a custom field to `Contact` via the admin UI, fill it on a contact, and confirm it persists and reads.
+- Have the throwaway add-on create a `tickets_<addon>` extension table, write a row through the helper, and read it back. Confirm tenancy is enforced.
+
+**Pause point.** User verifies ticket and contact custom fields, then add-on extension table.
+
+---
+
+## Phase 10: Notifications extensibility
+
+**Goal.** Let add-ons ship default email templates and contribute new delivery channels into the existing fan-out.
+
+**Scope - items L1, L2.**
+
+### 10.1 Notification template registry (L1)
+- New `notifications.models.NotificationTemplateRegistry@notifications`. Each template declares event key, default subject, default body (markdown or HTML), and supported substitution variables.
+- Existing core notification templates become registrations.
+- An admin "Notification Templates" page (registered via AdminPagesRegistry) lets the admin override the default per template per organization.
+- Add-on registrations via `settings.tesserabx.notificationTemplates = [...]`.
+
+### 10.2 Delivery channel plug-ins (L2)
+- New `notifications.models.contracts.INotificationChannel` declaring `getChannelId()`, `getDisplayName()`, `send(recipient, payload, prefs)`, `supportsBatch()`.
+- The current email + Slack/Teams delivery paths become built-in channel implementations.
+- Add-ons can register additional channels via `settings.tesserabx.notificationChannels = [...]` (e.g., SMS via Twilio, Pushover, in-house webhook).
+- The per-user notification preferences UI dynamically lists every registered channel.
+
+**Critical files.**
+- `modules_app/notifications/models/NotificationTemplateRegistry.bx` (new)
+- `modules_app/notifications/models/contracts/INotificationChannel.bx` (new)
+- `modules_app/notifications/models/channels/EmailChannel.bx` (new - wraps existing)
+- `modules_app/notifications/models/channels/SlackChannel.bx` (new - wraps existing)
+- `modules_app/notifications/models/NotificationsService.bx` (edit: dispatch through registered channels)
+- `modules_app/notifications/ModuleConfig.bx` (edit: register templates + channels)
+- `modules_app/agent/modules/admin/handlers/NotificationTemplates.bx` (new)
+- `docs/EXTENSIONS.md` (edit: notifications section)
+
+**Verification.**
+- Every existing notification still sends through the right channel(s) with the same content.
+- Override one template's subject through the admin UI for one organization; confirm the next dispatch for that org uses the override.
+- Register a stub channel in the throwaway add-on (e.g., write-to-file channel); confirm it appears in user preference UI and receives dispatches.
+
+**Pause point.** User verifies email + Slack fan-out and the stub channel before commit.
+
+---
+
+## Phase 11: Extendable in-app help module
+
+**Goal.** Ship a first-party `help` module that hosts an in-app online help system. Every core module and every add-on contributes pages to it through the same registry-style mechanism the rest of the plan uses. The initial scope covers a general help landing page, an audience-gated module-development section that mirrors `docs/EXTENSIONS.md` for add-on authors (rendered inline and downloadable), and AI-powered semantic search that gracefully degrades to text matching when AI is off.
+
+**Scope - new first-party module + new registry + integration with several earlier phases.**
+
+### 11.1 The `help` module itself
+
+- New first-party module at `modules_app/help/`, following the same internal layout as every other core module (`ModuleConfig.bx`, `handlers/`, `models/`, `views/`, `wires/`, `resources/`, `tests/`).
+- The module is **extendable**: it owns the help system, but contributes only its own structural pages (the landing page, the table of contents, search, the developer-section index, the EXTENSIONS download endpoint). Actual topical pages (e.g., "How to submit a ticket", "Setting an SLA policy") are contributed by the module that owns the topic.
+- Routes:
+  - `/help` - public landing + browse on the portal surface.
+  - `/agent/help` - auth-required landing + browse on the agent surface.
+  - `/help/:sectionId/:pageId` and `/agent/help/:sectionId/:pageId` - per-page rendering, audience-filtered by the resolved viewer.
+  - `/help/download/extensions.md` - serves the live `docs/EXTENSIONS.md` (auth-required, gated to the `developer` audience).
+  - `/help/search` - search endpoint backing the search box (delegates to embeddings when AI is on, text matching otherwise).
+- The help layout extends the surface layout that hosts it; it inherits navigation, account menu, and top bar from each surface, so help pages live inside the normal shell. A "Help" entry is registered into both the portal and agent main-menu nav zones from Phase 4.2.
+
+### 11.2 Help page registry (the new extension point)
+
+- New `help.models.HelpPageRegistry@help` and `help.models.HelpSectionRegistry@help`.
+- Modules contribute pages via `settings.tesserabx.helpPages` and sections via `settings.tesserabx.helpSections` in `ModuleConfig.bx`:
+  ```
+  settings.tesserabx.helpSections = [
+      { id: "tickets",     title: "Tickets",         audience: "any",       sortWeight: 100, icon: "ticket"    },
+      { id: "development", title: "Module Development", audience: "developer", sortWeight: 900, icon: "code"  }
+  ];
+  settings.tesserabx.helpPages = [
+      {
+          id          : "tickets.creating-a-ticket",
+          title       : "Creating a ticket",
+          section     : "tickets",
+          audience    : "client",
+          sortWeight  : 10,
+          source      : "resources/help/tickets/creating-a-ticket.md",
+          searchable  : true,
+          keywords    : [ "new ticket", "submit", "create" ]
+      }
+  ];
+  ```
+- `audience` values: `public` (anonymous viewers allowed), `client` (logged-in contacts on the portal), `agent` (provider agents only), `developer` (gated to a new `help.developer` permission registered in Phase 4.1).
+- Page resolution: the `source` path is relative to the contributing module's root. Markdown is rendered through bx-markdown at request time, cached per page until next reinit.
+- An audience-aware index helper returns the set of sections + pages visible to the current viewer. The browse page renders this index grouped by section.
+
+### 11.3 Module-development help section
+
+- The `help` module ships its own section registration with id `development`, audience `developer`.
+- The section's pages mirror the structure of `docs/EXTENSIONS.md` chapter-by-chapter, each rendered inline. Implementation choice between (a) shipping the entire `EXTENSIONS.md` as a single rendered page or (b) splitting it into one page per registry chapter is decided during this phase; recommended approach is **split into per-chapter pages** so each chapter is independently linkable and searchable.
+- The section index includes a prominent "Download EXTENSIONS.md" button hitting `/help/download/extensions.md`. The endpoint streams the file directly from `docs/EXTENSIONS.md` with the correct content-disposition; no duplicate copy is maintained.
+- A short "About this section" intro page on the section landing explains the relationship between the inline pages and the downloadable markdown (same content, different format).
+- The `developer` audience permission (`help.developer`) is auto-granted to the `agent-admin` role; other agents can be granted it explicitly through the Phase 4.1 admin Users page.
+
+### 11.4 Search
+
+- Search is wired through Phase 7's `EmbeddingConsumerRegistry`. The help module registers a consumer with id `help.page`, source-of-truth being the resolved set of help pages (audience-filtered at query time, not at index time - the embedding index is global; access control happens after ranking).
+- When `AI_ENABLED=true`: search box on the help index runs a vector similarity search through `AiMiddleware.embed()` against the help embedding store, then filters out pages the viewer cannot see.
+- When `AI_ENABLED=false`: the same search box falls back to a substring/keyword match across page titles, declared `keywords`, and rendered body text. The user-facing search box behavior is identical; only the ranking quality differs. The page does not advertise "AI search" or reveal which mode is active.
+- The embedding consumer's chunking strategy is per-page (each registered help page becomes one embedded chunk, body truncated to a sensible length); if a page is long enough to warrant multi-chunk indexing, that is a future refinement.
+
+### 11.5 Initial content
+
+- The general help landing page ships with: a short "Welcome" intro, links to the top-level sections, and a search box.
+- Core modules (`tickets`, `contacts`, `knowledgebase`, `automation`, `sla`, `agent`, `portal`) each ship **at minimum one initial help page** representing the most common task in their domain. These initial pages are placeholders that the team can expand over time; the goal of Phase 11 is to prove the registry, not to ship a complete user manual.
+- The `development` section ships fully populated (every chapter of `EXTENSIONS.md` rendered as a page).
+
+### 11.6 Manifest documentation update
+
+- `docs/EXTENSIONS.md` gains a "Help pages" section documenting the manifest fields, audience values, the `developer` permission, and the search behavior. This section itself becomes one of the rendered pages in the development section, so the help module reads its own contract.
+
+**Critical files.**
+- `modules_app/help/ModuleConfig.bx` (new)
+- `modules_app/help/handlers/Home.bx` (new - landing + index)
+- `modules_app/help/handlers/Section.bx` (new - per-section browse)
+- `modules_app/help/handlers/Page.bx` (new - render single page)
+- `modules_app/help/handlers/Search.bx` (new - text + semantic search)
+- `modules_app/help/handlers/Download.bx` (new - EXTENSIONS.md serve)
+- `modules_app/help/models/HelpPageRegistry.bx` (new)
+- `modules_app/help/models/HelpSectionRegistry.bx` (new)
+- `modules_app/help/models/HelpAudienceResolver.bx` (new)
+- `modules_app/help/models/HelpEmbeddingConsumer.bx` (new - implements G3's consumer interface)
+- `modules_app/help/views/...` (new - index, section, page, search)
+- `modules_app/help/resources/help/development/*.md` (new - EXTENSIONS chapters split into pages)
+- `modules_app/help/resources/help/welcome.md` (new - landing intro)
+- Initial content drops in `modules_app/<each-core-module>/resources/help/*.md` (new)
+- Each core module's `ModuleConfig.bx` (edit: register at least one help page + any sections it owns)
+- `modules_app/agent/models/PermissionRegistry.bx` (edit: register `help.developer` permission)
+- `modules_app/agent/models/RoleRegistry.bx` (edit: auto-grant to `agent-admin`)
+- `modules_app/core/NavigationRegistry` registrations (edit: register the "Help" main-menu item on both surfaces)
+- `docs/EXTENSIONS.md` (edit: "Help pages" section)
+
+**Verification.**
+- Anonymous visitor hits `/help`: sees only `public` pages and sections containing public pages. No agent or developer content is reachable or even listed.
+- Logged-in contact hits `/help`: sees `public` + `client` pages.
+- Logged-in agent without `help.developer` permission hits `/agent/help`: sees `public` + `client` + `agent` pages; the development section is not listed.
+- Logged-in agent with `help.developer` hits `/agent/help`: sees everything, including the development section. Each EXTENSIONS chapter renders cleanly. The "Download EXTENSIONS.md" button delivers the live file.
+- Toggle `AI_ENABLED=false`: search box still works, returning text-match results. Toggle `AI_ENABLED=true`: same search box returns semantically ranked results. Both modes respect audience filtering.
+- Register a help page from the throwaway add-on with audience `agent`; confirm it appears in the agent help index but not the portal help index.
+- Disable the throwaway add-on via the Add-ons admin page; confirm its help pages disappear from both indexes and direct navigation to the page returns a clean "not found / not available" rather than a server error.
+
+**Pause point.** User walks the help system on both surfaces as each audience, verifies the AI-on and AI-off search modes, and downloads the EXTENSIONS.md file before commit.
+
+---
+
+## Phase 12: Reference add-on, CI integration, complete docs
+
+**Goal.** Prove the entire extension surface end to end with a real, useful sample add-on, wire it into CI, and finish `docs/EXTENSIONS.md` so a developer can build their own from the doc alone.
+
+**Scope - items M3, M4, M2 (complete).**
+
+### 12.1 Sample reference add-on (M3)
+- Build a meaningful sample add-on that exercises every registry. Recommended subject: an "Example Jira-style sync" add-on that:
+  - Registers navigation items in **multiple menu zones** (e.g., main menu plus account dropdown) on the agent surface.
+  - Registers an admin page for connection settings.
+  - Registers a ticket right-column panel showing the linked external issue.
+  - Registers a dashboard widget showing sync status.
+  - Registers a role and permission (`example-sync-admin` / `exampleSync.manage`).
+  - Registers a channel adapter for inbound webhook from the external system.
+  - Registers an automation action ("Link this ticket to a new external issue").
+  - Registers an AI feature (optional summarization of the external issue).
+  - Registers API routes under `/api/v1/example-sync/*`.
+  - Registers a webhook event for "external issue linked".
+  - Defines an entity extension table `tickets_example_sync`.
+  - Registers a notification template for the link event.
+  - Registers a delivery channel that posts to a stub HTTP endpoint.
+  - **Registers at least two help pages**: one with audience `agent` describing the day-to-day use of the integration, and one with audience `developer` documenting the add-on's own internal contract for anyone extending it further.
+- The add-on lives in a separate repo (`tesserabx-example-sync` on the same git host) and is installed into `modules/` via `box install` during local dev and CI setup.
+- Alternatively, for the very first iteration of this phase the add-on may be developed in-tree under a `/sample-addons/example-sync/` scratch folder (excluded from production builds) and only published to its own repo once stable; pick whichever the user prefers when this phase is reached.
+
+### 12.2 CI integration (M4)
+- Update `.github/workflows/*` so CI installs the sample add-on into `modules/` before running the test suite, and runs the add-on's own `tests/` suite in the same job. A failure in the add-on's specs fails the whole pipeline, which is how the extension contract stays honest.
+
+### 12.3 Complete `docs/EXTENSIONS.md` (M2)
+- The doc, accumulated incrementally through phases 1 to 10, gets a final polish pass. Every registry has a "What it does", "How to register", "Example", and "What happens when it is disabled" subsection. Every interface lists its method signatures and return shapes. Every event lists its payload shape and async behavior. A table-of-contents at the top makes the doc navigable.
+- A "Quick start: build your first add-on" section walks through the scaffolder + a 30-line registration example end to end.
+
+**Critical files.**
+- `tesserabx-example-sync/` (new repo) or `sample-addons/example-sync/` (in-tree scratch)
+- `.github/workflows/<existing workflow>.yml` (edit: install + run sample add-on tests)
+- `docs/EXTENSIONS.md` (final polish)
+- `README.md` (edit: link to `docs/EXTENSIONS.md` and the sample add-on)
+
+**Verification.**
+- CI green with the sample add-on's specs included.
+- Walk a fresh developer through the "Quick start" in the doc; they should be able to scaffold and register a working nav item in under 15 minutes.
+- Toggle the sample add-on off via the Add-ons admin page; confirm every contribution vanishes from every surface.
+
+**Pause point.** User reads the final doc and explores the running sample add-on before commit.
+
+---
+
+## Phase 13: Hardening pass
+
+**Goal.** Treat the extension surface as a now-shipped feature and look for the things easy to miss when each registry was built in isolation.
+
+**Scope - cross-cutting review.**
+
+### 13.1 Tenancy safety sweep
+- Search every registry implementation for queries that touch tenant-scoped tables without `organization_id`. The `TenancyGuard` from Phase 2 should catch them, but a manual review is warranted before declaring done.
+- Write a deliberately bad add-on (under a `tests/fixtures/leaky-addon/` folder) that tries to leak data across tenants, and confirm the guard catches it in every code path.
+
+### 13.2 Performance review
+- Measure registry lookup cost on app boot (every module's `ModuleConfig.bx` reads should be cached and resolved once).
+- Measure layout render cost when navigation registry has, say, 50 entries (synthetic load) across all six menu zones.
+- Add an indexed read path for `registry_overrides` since it is hit on every render.
+- Confirm help page rendering is cached after first render and the bx-markdown pass is not repeated per request.
+
+### 13.3 Security review of extension surface
+- Confirm an add-on cannot register a nav item or admin page that bypasses cbsecurity. The required permission id is mandatory on every contribution; entries missing one are rejected at registration time with a loud error.
+- Confirm that registered API routes inherit JWT validation from the api module's pre-handler; an add-on cannot ship an unauthenticated route by omission.
+- Confirm that the `requiresAi=true` flag is checked centrally so an add-on cannot leak AI UI when AI is off.
+- Confirm the help audience filter is enforced server-side at render time, not just at index time - direct navigation to a `developer`-audience help page URL by an unauthorized viewer returns the same outcome as an unknown page, never the content.
+
+### 13.4 Final docs polish
+- Update `docs/BUILD-PLAN.md` and `docs/FUTURE-WORK.md` to mark the relevant deferred items as now unblocked (live chat as a channel adapter, Jira/GitHub as add-ons, approval workflows as an automation action + admin page combination).
+- Update `CLAUDE.md` "Modules" section to mention that add-ons live in `modules/` and what new hard constraints govern them.
+
+**Critical files.**
+- `modules_app/contacts/models/tenancy/TenancyGuard.bx` (edit: any tightening discovered during sweep)
+- `tests/fixtures/leaky-addon/` (new)
+- `tests/specs/integration/TenancySweepSpec.bx` (new)
+- `docs/BUILD-PLAN.md` (edit: mark unblocked items)
+- `docs/FUTURE-WORK.md` (edit: same)
+- `CLAUDE.md` (edit: add-on hard constraints)
+
+**Verification.**
+- Tenancy sweep spec passes.
+- Performance numbers acceptable (define acceptable bar during this phase based on whatever the baseline render time is).
+- Security review checklist completed.
+- All docs cross-references resolve.
+
+**Pause point.** User reviews the hardening summary, the perf numbers, and the updated docs before final commit.
+
+---
+
+## Progress log
+
+_Append a dated, one-paragraph note here at the end of every completed phase. Format:_
+
+```
+### YYYY-MM-DD - Phase N: <title>
+- What landed.
+- Anything that diverged from the plan and why.
+- Files touched that the plan did not list.
+- Follow-ups identified.
+```
+
+(empty)
+
+---
+
+## Gotchas and workarounds log
+
+_Append BoxLang / ColdBox / cbSecurity / cbq / cbfs surprises encountered during build, with the workaround applied. Future phases (and future contributors) read this before working in the same area._
+
+(empty)
+
+---
+
+## Open questions / parking lot
+
+_Items deferred or unresolved during execution. Each gets a dated entry plus a status (`open`, `resolved`, `wontfix`)._
+
+(empty)

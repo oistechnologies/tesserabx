@@ -247,4 +247,6 @@ Runs standalone with no reverse proxy and no external network. `app` publishes i
 
 `docs/BUILD-PLAN.md` defines the phased build order: Phase 0 scaffolding through Phase 6 integrations and hardening. Work through it in order. Each phase has concrete deliverables and an exit condition.
 
-At every phase, the constraints in this file still apply. The build plan tells you what to build next; this file tells you what must remain true while you build it. When the two seem to disagree, this file governs and the disagreement is worth raising with the human.
+`docs/EXTENSIBILITY-PLAN.md` is a separate phased plan covering the work to open TesseraBX to third-party BoxLang ColdBox add-ons: the manifest contract, the in-code registries with DB overrides, the service interfaces add-ons code against, the expanded event surface, the per-organization enable/disable, and the extendable in-app help module. It runs alongside or after `BUILD-PLAN.md`. Use it the same way: this file is still the "what must always be true," that file is the "what to do next" for the extensibility work, and where the two appear to disagree, this file governs.
+
+At every phase of either plan, the constraints in this file still apply. The build plan and the extensibility plan tell you what to build next; this file tells you what must remain true while you build it. When the two seem to disagree, this file governs and the disagreement is worth raising with the human.
