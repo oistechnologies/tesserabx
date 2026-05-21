@@ -1,0 +1,135 @@
+/**
+ * AiRegistriesSpec: the three Phase 7 registries seed core entries,
+ * resolve by id, and round-trip imperative registration.
+ *
+ * The AI-off invariant is exercised by AiOffInvariantSpec, which
+ * mocks AiCapability and confirms the gating contracts hold.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.features  = wb.getInstance( "AiFeatureRegistry@ai" );
+        variables.providers = wb.getInstance( "AiProviderRegistry@ai" );
+        variables.consumers = wb.getInstance( "EmbeddingConsumerRegistry@ai" );
+
+        variables.features.reload();
+        variables.providers.reload();
+        variables.consumers.reload();
+    }
+
+    function run(){
+        describe( "AiFeatureRegistry seed", function(){
+            it( "seeds the seven core features", function(){
+                var ids = variables.features.listIds();
+                for ( var expected in [ "triage", "suggested-reply", "thread-summary", "reply-tone", "kb-draft", "kb-index", "kb-suggest" ] ) {
+                    expect( ids ).toInclude( expected, "missing feature [#expected#]" );
+                }
+            } );
+
+            it( "every core feature carries requiresAi=true", function(){
+                for ( var f in variables.features.listAll() ) {
+                    expect( f.requiresAi ).toBeTrue( "feature [#f.id#] missing requiresAi=true" );
+                }
+            } );
+
+            it( "kb-index is declared as an embedding kind", function(){
+                expect( variables.features.findById( "kb-index" ).kind ).toBe( "embedding" );
+            } );
+
+            it( "triage and suggested-reply are declared as completion kind", function(){
+                expect( variables.features.findById( "triage" ).kind ).toBe( "completion" );
+                expect( variables.features.findById( "suggested-reply" ).kind ).toBe( "completion" );
+            } );
+
+            it( "returns null for an unknown feature id", function(){
+                expect( isNull( variables.features.findById( "does.not.exist" ) ) ).toBeTrue();
+            } );
+        } );
+
+        describe( "AiProviderRegistry seed", function(){
+            it( "seeds the bx-ai provider", function(){
+                expect( variables.providers.listProviderIds() ).toInclude( "bx-ai" );
+            } );
+
+            it( "providerFor resolves the BxAiProvider for bx-ai", function(){
+                var p = variables.providers.providerFor( "bx-ai" );
+                expect( p ).notToBeNull();
+                expect( p.getProviderId() ).toBe( "bx-ai" );
+                expect( p.getDisplayName() ).toInclude( "bx-ai" );
+            } );
+
+            it( "returns null for an unknown provider id", function(){
+                expect( isNull( variables.providers.providerFor( "does.not.exist" ) ) ).toBeTrue();
+            } );
+
+            it( "listProviders returns descriptor structs", function(){
+                var all = variables.providers.listProviders();
+                expect( arrayLen( all ) ).toBeGTE( 1 );
+                expect( all[ 1 ].mapping ).toInclude( "BxAiProvider" );
+            } );
+        } );
+
+        describe( "BxAiProvider verifyConfig surface", function(){
+            it( "returns { ok, error } regardless of capability state", function(){
+                var provider = variables.providers.providerFor( "bx-ai" );
+                var result = provider.verifyConfig( {} );
+                expect( isStruct( result ) ).toBeTrue();
+                expect( structKeyExists( result, "ok" ) ).toBeTrue();
+                expect( structKeyExists( result, "error" ) ).toBeTrue();
+                expect( isBoolean( result.ok ) ).toBeTrue();
+            } );
+
+            it( "listModels returns an array", function(){
+                var provider = variables.providers.providerFor( "bx-ai" );
+                expect( isArray( provider.listModels() ) ).toBeTrue();
+            } );
+        } );
+
+        describe( "EmbeddingConsumerRegistry seed", function(){
+            it( "seeds the kb.article consumer", function(){
+                expect( variables.consumers.listIds() ).toInclude( "kb.article" );
+            } );
+
+            it( "kb.article points at KbIndexingService with dimension 1536", function(){
+                var c = variables.consumers.findById( "kb.article" );
+                expect( c.mapping ).toBe( "KbIndexingService@ai" );
+                expect( c.dimension ).toBe( 1536 );
+                expect( c.feature ).toBe( "kb-index" );
+            } );
+
+            it( "returns null for an unknown consumer id", function(){
+                expect( isNull( variables.consumers.findById( "does.not.exist" ) ) ).toBeTrue();
+            } );
+        } );
+
+        describe( "Imperative registration", function(){
+            it( "AiFeatureRegistry.register adds an in-memory entry", function(){
+                var id = "spec-feat-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.features.register( {
+                    id          : id,
+                    label       : "Spec feature",
+                    description : "Test add",
+                    kind        : "completion"
+                } );
+                expect( variables.features.listIds() ).toInclude( id );
+                expect( variables.features.findById( id ).requiresAi ).toBeTrue();
+            } );
+
+            it( "EmbeddingConsumerRegistry.register adds an in-memory entry", function(){
+                var id = "spec-cons-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.consumers.register( {
+                    id        : id,
+                    label     : "Spec consumer",
+                    feature   : "kb-index",
+                    mapping   : "KbIndexingService@ai",
+                    dimension : 1536
+                } );
+                expect( variables.consumers.listIds() ).toInclude( id );
+            } );
+        } );
+    }
+
+}

@@ -816,6 +816,16 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - No deviations.
 - No additional files touched beyond the four listed in the plan.
 
+### 2026-05-20 - Phase 7: AI registries
+- `AiFeatureRegistry@ai` seeds the 7 features actually wired into core today: `triage`, `suggested-reply`, `thread-summary`, `reply-tone`, `kb-draft`, `kb-index`, `kb-suggest`. Every entry carries `requiresAi : true` by construction; add-on AI features inherit the Phase 4 UI gating automatically.
+- `IAiProvider` contract published at `modules_app/ai/models/contracts/IAiProvider.bx`. `BxAiProvider` wraps the existing `aiChat()` / `aiEmbed()` BIF calls. `AiProviderRegistry@ai` seeds bx-ai inside its own `ensureLoaded()` (same pattern as `ChannelAdapterRegistry`); add-ons declare additional providers via `settings.tesserabx.aiProviders = [...]`.
+- **AiMiddleware NOT refactored**: the middleware still calls `aiChat()` / `aiEmbed()` BIFs inline. The provider contract + registry ship for future use; registering an add-on provider has no runtime effect on the middleware today. The full middleware refactor (route every provider call through the registry) is a follow-up. This deferral preserves backwards compatibility for the 7 existing AI features.
+- `EmbeddingConsumerRegistry@ai` seeds the `kb.article` consumer (wraps the existing `KbIndexingService` flow). Add-ons declare additional consumers via `settings.tesserabx.embeddingConsumers = [...]`. A scheduled task that iterates the registry to re-embed stale entries across every consumer is a follow-up.
+- `docs/EXTENSIONS.md` AI section: declaration paths for all three registries, the AI-off invariant contract (6 numbered guarantees), and the BxAiProvider caveat about the middleware refactor.
+- Specs: `AiRegistriesSpec` (16/16) + `AiOffInvariantSpec` (7/7). The invariant spec verifies the FILTER LOGIC using a synthetic capability flag that never resolves so the test holds regardless of the live `AI_ENABLED` state.
+- Full sweep: 468/4/9 (+23 from Phase 6 baseline; pre-existing CBFS/s3sdk failures unchanged).
+- One new gotcha discovered + 4 capability-flag fixes: BoxLang's `!!("false")` evaluates to **true** because non-empty strings are truthy. The Phase 4 UI registries (Navigation, AdminPages, TicketPanel, DashboardWidget) all had the same buggy `!!( raw ?: false )` check on the capability flag value. Fixed to compare literally: `if ( isSimpleValue( raw ) ) return toString( raw ) == "true"`. The bug had been latent because no UI surface yet contributed a `capabilityFlag : "aiEnabled"` entry; the AI-off invariant spec was the first thing to exercise the code path.
+
 ### 2026-05-20 - Phase 6: Automation registries
 - Four new registries under `modules_app/automation/models/`: `TriggerRegistry` (3 core seeds), `OperatorRegistry` (12 core seeds), `ConditionFieldRegistry` (~14 core seeds, scoped by `appliesTo`), `ActionRegistry` (4 core seeds with parameter schemas).
 - Four core actions extracted into individual executor classes under `models/actions/`: `SetPriorityExecutor`, `SetStatusExecutor`, `AssignToAgentExecutor`, `AssignByStrategyExecutor`. Each wraps the exact body that previously lived in `AutomationService.applyOne`'s switch-case.
@@ -962,6 +972,25 @@ BoxLang ships `jsonSerialize()` and `jsonDeserialize()`. The CFML names `seriali
 ### Phase 1 - To reach the ColdBox controller from a service, inject `coldbox` directly
 
 `wirebox.getController()` does not exist on the WireBox API surface in this BoxLang / ColdBox 8 environment ("Method 'getController' not found"). Use `property name="coldbox" inject="coldbox";` and call `coldbox.getSetting( "<name>" )` directly.
+
+### Phase 7 - `!!("false")` is `true` because non-empty strings are truthy
+
+BoxLang follows CFML's coercion rules: the **string** `"false"` is non-empty, so casting it to boolean via the `!!` double-negation idiom yields `true`. This means the common pattern `!!( setting ?: false )` for "treat this setting value as a boolean" is wrong whenever the setting is read from `getSystemSetting` (which returns the env-var value as a string):
+
+```boxlang
+// Wrong — returns true when the env var is "false"
+var raw = coldbox.getSetting( "aiEnabled" );   // -> "false" (string)
+return !!( raw ?: false );                      // -> true  (BUG)
+
+// Right — compare the string literally
+if ( isBoolean( raw ) ) return raw;
+if ( isSimpleValue( raw ) ) return toString( raw ) == "true";
+return false;
+```
+
+The Phase 4 UI registries (Navigation, AdminPages, TicketPanel, DashboardWidget) all carried this bug in their `isCapabilityOn()` helper. It had been latent because no UI surface contributed an entry with `capabilityFlag : "aiEnabled"` yet; the Phase 7 AI-off invariant spec was the first thing to exercise the code path. All four registries are now fixed.
+
+The pre-existing `isAiEnabled()` helper in `includes/helpers/ApplicationHelper.bxm` already used the correct pattern (`flag == "true"`); whenever the same setting is read from a registry-style helper, mirror that comparison.
 
 ### Phase 6 - BoxLang `?:` elvis does NOT catch KeyNotFoundException on missing struct keys
 

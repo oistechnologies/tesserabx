@@ -1,0 +1,101 @@
+/**
+ * IAiProvider: documented contract for AI provider backends.
+ *
+ * The current Phase 7 AiMiddleware calls bx-ai's `aiChat()` and
+ * `aiEmbed()` BIFs directly. To let add-ons swap providers (Anthropic
+ * direct, in-house model, Azure-hosted OpenAI, a stub for offline
+ * testing), this contract documents the interface the future
+ * generalized middleware will resolve through.
+ *
+ * Phase 7 ships:
+ *   - the contract (this file)
+ *   - a BxAiProvider that wraps the existing aiChat/aiEmbed BIFs
+ *   - registry plumbing so add-ons can register additional providers
+ *
+ * Phase 7 does NOT refactor AiMiddleware to call providers through
+ * the registry; the aiChat/aiEmbed BIF path is preserved for
+ * backwards compatibility. The middleware refactor is a follow-up.
+ *
+ * Add-on registration:
+ *
+ *   settings.tesserabx.aiProviders = [
+ *       {
+ *           id          : "anthropic-direct",
+ *           label       : "Anthropic Claude (direct)",
+ *           description : "Talks to Anthropic's API without going through OpenRouter.",
+ *           mapping     : "AnthropicProvider@my-addon"
+ *       }
+ *   ];
+ *
+ * --- Method contract ---
+ */
+class {
+
+    /** Stable provider id. Lowercase, no spaces. */
+    public string function getProviderId(){
+        throw( type = "ContractClass.NotImplemented", message = "IAiProvider is a contract; resolve the concrete provider via WireBox" );
+    }
+
+    /** Human-readable provider label. */
+    public string function getDisplayName(){
+        throw( type = "ContractClass.NotImplemented", message = "IAiProvider is a contract; resolve the concrete provider via WireBox" );
+    }
+
+    /**
+     * Confirm the provider's credentials and connectivity. Called
+     * from the admin AI settings page when an operator wants to
+     * verify a key/base-url change before saving.
+     *
+     * Returns: { ok : boolean, error : string }.
+     */
+    public struct function verifyConfig( required struct config ){
+        throw( type = "ContractClass.NotImplemented", message = "IAiProvider is a contract; resolve the concrete provider via WireBox" );
+    }
+
+    /**
+     * List models the provider can talk to. Used by the admin AI
+     * settings page to populate a model picker. Returns an array
+     * of model identifiers. May be expensive; callers cache.
+     */
+    public array function listModels(){
+        throw( type = "ContractClass.NotImplemented", message = "IAiProvider is a contract; resolve the concrete provider via WireBox" );
+    }
+
+    /**
+     * Run a chat completion. Returns a struct mirroring the
+     * outcome envelope AiMiddleware.complete produces today:
+     *
+     *   {
+     *       outcome   : "ok" | "error" | ...,
+     *       text      : string,
+     *       tokensIn  : numeric,
+     *       tokensOut : numeric,
+     *       latencyMs : numeric,
+     *       error     : string
+     *   }
+     *
+     * `messages` is an array of role/content structs in OpenAI
+     * shape: [ { role : "system", content : "..." }, { role : "user", content : "..." } ].
+     * `params` carries model / temperature / max_tokens.
+     */
+    public struct function complete( required array messages, required struct params, struct options ){
+        throw( type = "ContractClass.NotImplemented", message = "IAiProvider is a contract; resolve the concrete provider via WireBox" );
+    }
+
+    /**
+     * Compute an embedding vector. Returns a struct mirroring
+     * AiMiddleware.embed's envelope:
+     *
+     *   {
+     *       outcome   : "ok" | "error" | ...,
+     *       vector    : array<float>,
+     *       dimension : numeric,
+     *       latencyMs : numeric,
+     *       error     : string
+     *   }
+     */
+    public struct function embed( required string text, required struct params, struct options ){
+        throw( type = "ContractClass.NotImplemented", message = "IAiProvider is a contract; resolve the concrete provider via WireBox" );
+    }
+
+}

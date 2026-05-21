@@ -1,0 +1,140 @@
+/**
+ * AiFeatureRegistry: declared AI features that the AI middleware can
+ * run on behalf of a caller.
+ *
+ * Each feature entry declares:
+ *   - id                  stable string passed as `feature` to
+ *                         AiMiddleware.complete / .embed
+ *   - label               human label for the admin UI
+ *   - description         what the feature does and when it fires
+ *   - defaultSystemPrompt the system prompt used when no row exists
+ *                         in the ai_system_prompts table (overrides
+ *                         live in that table and take precedence)
+ *   - defaultModel        empty string falls back to the global
+ *                         AI_MODEL env var; non-empty pins the
+ *                         feature to a specific model
+ *   - kind                "completion" | "embedding"; embedding
+ *                         features may have a different defaultModel
+ *   - requiresAi          always true; the UI registries hide every
+ *                         entry that contributes to a "requiresAi"
+ *                         surface when AI_ENABLED=false
+ *   - source              auto-populated: "core" or the contributing
+ *                         module name for manifest declarations
+ *
+ * Add-ons contribute via:
+ *
+ *   settings.tesserabx.aiFeatures = [
+ *       {
+ *           id                  : "billing.invoice-summary",
+ *           label               : "Invoice summary",
+ *           description         : "Generate a one-line summary of a billing invoice.",
+ *           defaultSystemPrompt : "You write concise invoice summaries.",
+ *           defaultModel        : "",
+ *           kind                : "completion"
+ *       }
+ *   ];
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "AiFeatureRegistry@ai" );
+ *   var features = registry.listAll();
+ *   var triage   = registry.findById( "triage" );
+ *
+ * Add-on contribution to add ON-OFF gating: each feature's
+ * `requiresAi` is always true. UI registry entries that contribute
+ * an AI surface should set their own `requiresAi : true`; the
+ * navigation / admin-pages / ticket-panel / dashboard-widget
+ * registries hide them when the AI capability is off (Phase 4
+ * invariant). The AI feature registry itself does NOT auto-hide
+ * its entries; callers (handlers, scheduled tasks, etc.) gate on
+ * AiCapability.isFeatureEnabled().
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreFeatures();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.aiFeatures ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var f in declared ) addEntry( f, moduleName );
+        }
+    }
+
+    private void function seedCoreFeatures(){
+        // The seven features wired into core today. Each calls
+        // AiMiddleware.complete (or .embed for kb-index) with the
+        // matching `feature` id.
+        var seeds = [
+            { id : "triage",          label : "Ticket triage",          description : "Classify a new ticket: priority, type, tags, sentiment.",            kind : "completion" },
+            { id : "suggested-reply", label : "Suggested reply",        description : "Draft a customer-facing reply plus internal notes.",                  kind : "completion" },
+            { id : "thread-summary",  label : "Thread summary",         description : "Summarize the conversation so far: summary, key points, next step.", kind : "completion" },
+            { id : "reply-tone",      label : "Reply tone review",      description : "Score a draft reply for tone and suggest specific improvements.",     kind : "completion" },
+            { id : "kb-draft",        label : "KB article draft",       description : "Generate an unpublished KB article from a resolved ticket.",          kind : "completion" },
+            { id : "kb-index",        label : "KB article embedding",   description : "Embed a published article into pgvector for semantic search.",        kind : "embedding"  },
+            { id : "kb-suggest",      label : "KB article suggestions", description : "Return the top-N most relevant articles for a ticket subject + body.", kind : "completion" }
+        ];
+        for ( var s in seeds ) addEntry( s, "core" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id                  : arguments.raw.id,
+            label               : structKeyExists( arguments.raw, "label" )               ? arguments.raw.label               : arguments.raw.id,
+            description         : structKeyExists( arguments.raw, "description" )         ? arguments.raw.description         : "",
+            defaultSystemPrompt : structKeyExists( arguments.raw, "defaultSystemPrompt" ) ? arguments.raw.defaultSystemPrompt : "",
+            defaultModel        : structKeyExists( arguments.raw, "defaultModel" )        ? arguments.raw.defaultModel        : "",
+            kind                : structKeyExists( arguments.raw, "kind" )                ? arguments.raw.kind                : "completion",
+            requiresAi          : true,
+            source              : arguments.source
+        };
+    }
+
+}

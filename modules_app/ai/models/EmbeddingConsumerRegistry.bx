@@ -1,0 +1,134 @@
+/**
+ * EmbeddingConsumerRegistry: declared sources of content that get
+ * embedded into pgvector for semantic search.
+ *
+ * Core ships one consumer: `kb.article` (the KbIndexingService
+ * embedding of published KB articles into `kb_articles.embedding`).
+ * Add-ons register additional consumers so an extension's content
+ * (Confluence pages, an external runbook collection, the Phase 11
+ * help-pages registry, etc.) participates in the same embedding
+ * pipeline.
+ *
+ * Each consumer entry declares:
+ *   - id              stable key (e.g., "kb.article", "help.page")
+ *   - label           human label for the admin UI
+ *   - description     what content this consumer indexes
+ *   - feature         the AI feature id used for embedding calls
+ *                     (typically "kb-index" or an add-on-defined
+ *                     feature registered in AiFeatureRegistry)
+ *   - mapping         WireBox mapping name for the consumer class
+ *                     that implements:
+ *                       - getTextForEmbedding(entityId) -> string
+ *                       - saveEmbedding(entityId, vector) -> void
+ *                       - listEntitiesNeedingIndex() -> array<id>
+ *                     The consumer owns the storage decision (which
+ *                     table, which column, what dimension).
+ *   - dimension       embedding vector dimension (must match the
+ *                     storage column)
+ *   - source          auto-populated: "core" or contributing module
+ *
+ * Add-on contribution:
+ *
+ *   settings.tesserabx.embeddingConsumers = [
+ *       {
+ *           id          : "example.confluence-page",
+ *           label       : "Confluence pages",
+ *           description : "Indexes pages from the Confluence space the add-on syncs.",
+ *           feature     : "example.confluence-index",
+ *           mapping     : "ConfluenceEmbeddingConsumer@example-confluence",
+ *           dimension   : 1536
+ *       }
+ *   ];
+ *
+ * Phase 7 ships the registry contract; the existing KbIndexingService
+ * flow (interceptor on onKbArticlePublished → indexArticle → embed →
+ * save to kb_articles.embedding) is unchanged. A scheduled task that
+ * iterates EmbeddingConsumerRegistry to re-embed stale entries
+ * across every consumer is a follow-up.
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreConsumers();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.embeddingConsumers ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var c in declared ) addEntry( c, moduleName );
+        }
+    }
+
+    private void function seedCoreConsumers(){
+        addEntry(
+            {
+                id          : "kb.article",
+                label       : "Knowledge-base articles",
+                description : "Embeds published KB articles for semantic search. Vectors land in kb_articles.embedding.",
+                feature     : "kb-index",
+                mapping     : "KbIndexingService@ai",
+                dimension   : 1536
+            },
+            "core"
+        );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id          : arguments.raw.id,
+            label       : structKeyExists( arguments.raw, "label" )       ? arguments.raw.label       : arguments.raw.id,
+            description : structKeyExists( arguments.raw, "description" ) ? arguments.raw.description : "",
+            feature     : structKeyExists( arguments.raw, "feature" )     ? arguments.raw.feature     : "",
+            mapping     : structKeyExists( arguments.raw, "mapping" )     ? arguments.raw.mapping     : "",
+            dimension   : structKeyExists( arguments.raw, "dimension" )   ? arguments.raw.dimension   : 1536,
+            source      : arguments.source
+        };
+    }
+
+}

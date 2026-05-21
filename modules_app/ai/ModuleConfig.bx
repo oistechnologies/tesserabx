@@ -77,6 +77,24 @@ class {
         binder.map( "ReplyToneService@ai" )
               .to( "#moduleMapping#.models.ReplyToneService" )
               .asSingleton();
+
+        // Phase 7 registries.
+        binder.map( "AiFeatureRegistry@ai" )
+              .to( "#moduleMapping#.models.AiFeatureRegistry" )
+              .asSingleton();
+        binder.map( "AiProviderRegistry@ai" )
+              .to( "#moduleMapping#.models.AiProviderRegistry" )
+              .asSingleton();
+        binder.map( "EmbeddingConsumerRegistry@ai" )
+              .to( "#moduleMapping#.models.EmbeddingConsumerRegistry" )
+              .asSingleton();
+
+        // Phase 7 provider: BxAiProvider wraps the existing
+        // aiChat / aiEmbed BIF calls; add-ons register additional
+        // providers via the manifest's settings.tesserabx.aiProviders.
+        binder.map( "BxAiProvider@ai" )
+              .to( "#moduleMapping#.models.providers.BxAiProvider" )
+              .asSingleton();
     }
 
     function onUnload(){}

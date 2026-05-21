@@ -181,12 +181,14 @@ class singleton=true {
 
     private boolean function isCapabilityOn( required string flag ){
         // Capability flag names are setting keys. Today the only one
-        // is `aiEnabled` (string "true"/"false" in config). Treat any
-        // truthy-castable value as on.
+        // is `aiEnabled` (string "true"/"false" in config). The string
+        // "false" is a non-empty string and so casts to boolean true
+        // via `!!` -- treat strings literally instead.
         try {
             var raw = coldbox.getSetting( arguments.flag );
             if ( isBoolean( raw ) ) return raw;
-            return !!( raw ?: false );
+            if ( isSimpleValue( raw ) ) return ( toString( raw ) == "true" );
+            return false;
         } catch ( any e ) {
             return false;
         }

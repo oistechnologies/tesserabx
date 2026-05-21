@@ -125,7 +125,8 @@ class singleton=true {
         try {
             var raw = coldbox.getSetting( arguments.flag );
             if ( isBoolean( raw ) ) return raw;
-            return !!( raw ?: false );
+            if ( isSimpleValue( raw ) ) return ( toString( raw ) == "true" );
+            return false;
         } catch ( any e ) {
             return false;
         }

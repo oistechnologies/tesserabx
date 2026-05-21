@@ -1,0 +1,105 @@
+/**
+ * AiProviderRegistry: discovery and lookup for AI provider backends.
+ *
+ * Phase 7 ships the registry contract; AiMiddleware does not yet
+ * resolve through it (the middleware still calls aiChat/aiEmbed
+ * BIFs inline). Add-ons can register additional providers here so
+ * a future AiMiddleware refactor can route to them.
+ *
+ *   settings.tesserabx.aiProviders = [
+ *       {
+ *           id      : "anthropic-direct",
+ *           label   : "Anthropic Claude (direct)",
+ *           mapping : "AnthropicProvider@my-addon"
+ *       }
+ *   ];
+ *
+ * Core seeds the bx-ai provider in its own ensureLoaded() (same
+ * pattern as ChannelAdapterRegistry).
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public any function providerFor( required string providerId ){
+        ensureLoaded();
+        if ( !structKeyExists( variables.cache, arguments.providerId ) ) return javaCast( "null", "" );
+        return wirebox.getInstance( variables.cache[ arguments.providerId ].mapping );
+    }
+
+    public array function listProviders(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listProviderIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public void function register( required string mapping ){
+        ensureLoaded();
+        addByMapping( arguments.mapping, "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        // Core seed: bx-ai.
+        addByMapping( "BxAiProvider@ai", "core" );
+
+        // Add-on providers from manifests.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.aiProviders ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var entry in declared ) {
+                if ( !isStruct( entry ) ) continue;
+                if ( !structKeyExists( entry, "mapping" ) || !len( entry.mapping ?: "" ) ) continue;
+                addByMapping( entry.mapping, moduleName );
+            }
+        }
+    }
+
+    private void function addByMapping( required string mapping, required string source ){
+        var provider = wirebox.getInstance( arguments.mapping );
+        try {
+            var id          = provider.getProviderId();
+            var displayName = provider.getDisplayName();
+        } catch ( any e ) {
+            writeLog(
+                text : "AiProviderRegistry rejected mapping [#arguments.mapping#] from [#arguments.source#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return;
+        }
+        variables.cache[ id ] = {
+            id          : id,
+            displayName : displayName,
+            mapping     : arguments.mapping,
+            source      : arguments.source
+        };
+    }
+
+}

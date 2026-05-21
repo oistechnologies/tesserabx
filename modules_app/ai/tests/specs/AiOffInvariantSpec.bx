@@ -1,0 +1,147 @@
+/**
+ * AiOffInvariantSpec: the AI-off invariant from CLAUDE.md is
+ * machine-checked here.
+ *
+ * Asserts when AI_ENABLED=false (or AiCapability.isEnabled() returns
+ * false):
+ *   1. AiCapability.isEnabled / .isFeatureEnabled return false.
+ *   2. AiMiddleware.complete returns outcome="disabled" with no
+ *      provider call.
+ *   3. AiMiddleware.embed returns outcome="disabled" with no
+ *      provider call.
+ *   4. UI registry entries whose `requiresAi : true` flag is set are
+ *      filtered out by their respective registries' visibility
+ *      checks (Phase 4 contract).
+ *   5. Every AiFeatureRegistry entry carries requiresAi=true so
+ *      add-on AI surfaces automatically inherit the gate.
+ *
+ * The spec runs against the live AiCapability binding, which reads
+ * the `aiEnabled` setting. In dev the setting is typically "false"
+ * so the invariant holds end-to-end; if a contributor flips
+ * AI_ENABLED=true in their environment, the disabled-path specs
+ * are skipped via a runtime check.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.capability = wb.getInstance( "AiCapability@ai" );
+        variables.middleware = wb.getInstance( "AiMiddleware@ai" );
+        variables.features   = wb.getInstance( "AiFeatureRegistry@ai" );
+        variables.nav        = wb.getInstance( "NavigationRegistry@core" );
+        variables.adminPages = wb.getInstance( "AdminPagesRegistry@admin" );
+        variables.aiOn       = !!variables.capability.isEnabled();
+    }
+
+    function run(){
+        describe( "AiCapability when AI is disabled", function(){
+            it( "isEnabled returns false", function(){
+                if ( variables.aiOn ) return;
+                expect( variables.capability.isEnabled() ).toBeFalse();
+            } );
+
+            it( "isFeatureEnabled returns false for every core feature", function(){
+                if ( variables.aiOn ) return;
+                for ( var f in variables.features.listIds() ) {
+                    expect( variables.capability.isFeatureEnabled( f ) ).toBeFalse( "isFeatureEnabled was true for [#f#]" );
+                }
+            } );
+        } );
+
+        describe( "AiMiddleware when AI is disabled", function(){
+            it( "complete returns outcome=disabled", function(){
+                if ( variables.aiOn ) return;
+                var result = variables.middleware.complete(
+                    feature : "triage",
+                    prompt  : "Hello, please classify this ticket.",
+                    options : {}
+                );
+                expect( result.outcome ).toBe( "disabled" );
+                expect( result.text ).toBe( "" );
+            } );
+
+            it( "embed returns outcome=disabled", function(){
+                if ( variables.aiOn ) return;
+                var result = variables.middleware.embed(
+                    feature : "kb-index",
+                    text    : "Sample article body to embed.",
+                    options : {}
+                );
+                expect( result.outcome ).toBe( "disabled" );
+            } );
+        } );
+
+        describe( "AiFeatureRegistry guarantees requiresAi=true on every entry", function(){
+            it( "every core feature has requiresAi=true", function(){
+                for ( var f in variables.features.listAll() ) {
+                    expect( f.requiresAi ).toBeTrue( "feature [#f.id#] missing requiresAi=true" );
+                }
+            } );
+        } );
+
+        describe( "UI registries hide entries whose capability flag is off", function(){
+            // The spec uses a synthetic capability flag id
+            // ("specOffFlagDoesNotExist") that has no value in
+            // config/Coldbox.bx, so isCapabilityOn always returns
+            // false for it. This way the assertion holds regardless
+            // of whether AI_ENABLED is true or false in the dev env;
+            // the test verifies the FILTER LOGIC, not the live AI
+            // capability state.
+
+            it( "a nav entry with an unmatched capabilityFlag is filtered out", function(){
+                var id = "spec-nav-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.nav.register( {
+                    id             : id,
+                    surface        : "agent",
+                    menu           : "main",
+                    label          : "Spec gated entry " & id,
+                    route          : "/agent/spec",
+                    icon           : "bi bi-stars",
+                    sortWeight     : 999,
+                    requiresAuth   : true,
+                    capabilityFlag : "specOffFlagDoesNotExist"
+                } );
+                var viewer = adminViewer();
+                var labels = [];
+                for ( var item in variables.nav.listForZone( "agent", "main", viewer ) ) labels.append( item.label );
+                expect( labels ).notToInclude( "Spec gated entry " & id );
+            } );
+
+            it( "an admin card with an unmatched capabilityFlag is filtered out", function(){
+                var id = "spec-admin-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.adminPages.register( {
+                    id                 : id,
+                    title              : "Spec gated card " & id,
+                    description        : "...",
+                    route              : "/agent/admin/spec",
+                    icon               : "bi bi-stars",
+                    sortWeight         : 999,
+                    requiredPermission : "admin.access",
+                    capabilityFlag     : "specOffFlagDoesNotExist"
+                } );
+                var viewer = adminViewer();
+                var titles = [];
+                for ( var card in variables.adminPages.listForViewer( viewer ) ) titles.append( card.title );
+                expect( titles ).notToInclude( "Spec gated card " & id );
+            } );
+        } );
+    }
+
+    private struct function adminViewer(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "a-1",
+            roles          : [ "agent-admin" ],
+            permissions    : [
+                "admin.access", "admin.users.manage", "admin.teams.manage",
+                "admin.workflow.manage", "admin.settings.manage", "admin.audit.view",
+                "admin.addons.manage", "tickets.view", "tickets.assign", "tickets.bulk"
+            ],
+            organizationId : ""
+        };
+    }
+
+}

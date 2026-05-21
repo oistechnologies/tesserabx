@@ -840,11 +840,98 @@ Existing automation rules in the database (`{ type : "setPriority", value : "hig
 
 ---
 
+## AI features, providers, and embeddings
+
+AI is strictly optional in TesseraBX. The `AI_ENABLED` env var gates every code path that would call an AI provider; when it is `"false"`, AiMiddleware short-circuits and feature handlers render their non-AI fallbacks. Phase 7 layers three add-on registries on top:
+
+| Registry                              | Purpose                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `AiFeatureRegistry@ai`                | Declared AI features (the strings passed as the `feature` arg to AiMiddleware).      |
+| `AiProviderRegistry@ai`               | Available provider backends (bx-ai today; add-ons can plug in Anthropic, Azure, etc.). |
+| `EmbeddingConsumerRegistry@ai`        | Content sources that get embedded into pgvector for semantic search.                  |
+
+### AI feature registry
+
+Core ships seven features: `triage`, `suggested-reply`, `thread-summary`, `reply-tone`, `kb-draft`, `kb-index`, `kb-suggest`. Add-on contribution:
+
+```boxlang
+settings.tesserabx.aiFeatures = [
+    {
+        id                  : "billing.invoice-summary",
+        label               : "Invoice summary",
+        description         : "Generate a one-line summary of a billing invoice.",
+        defaultSystemPrompt : "You write concise invoice summaries.",
+        defaultModel        : "",
+        kind                : "completion"
+    }
+];
+```
+
+`defaultSystemPrompt` is the prompt used when the `ai_system_prompts` table has no row for the feature; the admin Settings → AI prompts page (when built) writes overrides into that table that take precedence.
+
+Feature entries always carry `requiresAi : true`. UI registry entries that contribute an AI surface (a ticket panel, a navigation item, a dashboard widget) should set their own `requiresAi : true`; the Phase 4 UI registries hide them when `AI_ENABLED=false`. The feature registry itself does NOT auto-hide; callers gate on `AiCapability.isFeatureEnabled(featureId)` before each invocation.
+
+### AI provider registry
+
+Core ships the `bx-ai` provider (wraps the `aiChat` / `aiEmbed` BIFs). Add-ons declare additional providers:
+
+```boxlang
+settings.tesserabx.aiProviders = [
+    {
+        id      : "anthropic-direct",
+        label   : "Anthropic Claude (direct)",
+        mapping : "AnthropicProvider@my-addon"
+    }
+];
+```
+
+The `mapping` resolves through WireBox to a class that implements the `IAiProvider` contract: `getProviderId`, `getDisplayName`, `verifyConfig`, `listModels`, `complete`, `embed`. See `modules_app/ai/models/contracts/IAiProvider.bx` for full signatures.
+
+**Important caveat for Phase 7**: `AiMiddleware` currently calls `aiChat` and `aiEmbed` BIFs inline. The provider registry exists and `BxAiProvider` wraps both BIFs, but AiMiddleware is not yet refactored to resolve through the registry. Registering an add-on provider has NO runtime effect on the middleware today; it positions add-ons for a future middleware refactor.
+
+### Embedding consumer registry
+
+Core ships one consumer: `kb.article` (wraps the existing `KbIndexingService` flow that writes published-article vectors to `kb_articles.embedding`). Add-on consumers register additional content sources:
+
+```boxlang
+settings.tesserabx.embeddingConsumers = [
+    {
+        id          : "example.confluence-page",
+        label       : "Confluence pages",
+        description : "Indexes pages from the Confluence space the add-on syncs.",
+        feature     : "example.confluence-index",
+        mapping     : "ConfluenceEmbeddingConsumer@example-confluence",
+        dimension   : 1536
+    }
+];
+```
+
+The consumer class implements the embedding pipeline for its content type:
+
+- `getTextForEmbedding(entityId) → string`: assemble the text to embed.
+- `saveEmbedding(entityId, vector) → void`: persist the vector to whatever table/column the consumer owns.
+- `listEntitiesNeedingIndex() → array<id>`: return the entity ids that need (re)indexing on a scheduled sweep.
+
+A scheduled task that iterates `EmbeddingConsumerRegistry.listAll()` and re-embeds stale entries across every consumer is a follow-up; today the only path that triggers embedding is the existing `onKbArticlePublished` interceptor for KB articles.
+
+### The AI-off invariant
+
+When `AI_ENABLED=false`:
+
+1. `AiCapability.isEnabled()` returns false.
+2. `AiCapability.isFeatureEnabled(<any feature id>)` returns false.
+3. `AiMiddleware.complete(...)` returns `{ outcome : "disabled", ... }` without calling any provider.
+4. `AiMiddleware.embed(...)` returns `{ outcome : "disabled", ... }` without calling any provider.
+5. Every UI registry entry with `requiresAi : true` is filtered out by the registry's visibility check (Phase 4 contract).
+6. Add-on AI features inherit this gating automatically because the AI feature registry sets `requiresAi : true` on every entry.
+
+There is **no separate config flag for add-on AI features**: declaring an AI feature in the manifest is sufficient to inherit the gating, because every entry is `requiresAi : true` by construction.
+
+---
+
 ## What is not yet documented here
 
 Later phases of the extensibility plan add sections to this file as they land:
-- **Phase 7**: AI feature, provider, and embedding consumer registries.
-- **Phase 7**: AI feature, provider, and embedding consumer registries.
 - **Phase 8**: API resource registry, OpenAPI contribution, and webhook event registry.
 - **Phase 9**: custom fields generalization and the entity-extension table convention.
 - **Phase 10**: notification template registry and delivery channel plug-ins.

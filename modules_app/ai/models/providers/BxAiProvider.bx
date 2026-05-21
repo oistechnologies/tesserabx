@@ -1,0 +1,129 @@
+/**
+ * BxAiProvider: the IAiProvider implementation that wraps the bx-ai
+ * BIFs (aiChat, aiEmbed).
+ *
+ * This is the provider AiMiddleware uses today (although the
+ * middleware currently calls aiChat/aiEmbed directly rather than
+ * resolving through the provider registry; Phase 7 ships the
+ * provider contract and this implementation, and a follow-up will
+ * refactor the middleware to route everything through the
+ * registered provider).
+ *
+ * Add-on providers (e.g., AnthropicProvider, AzureOpenAiProvider)
+ * implement the same IAiProvider shape and register via the
+ * `settings.tesserabx.aiProviders = [...]` manifest path.
+ */
+class singleton=true {
+
+    property name="capability" inject="AiCapability@ai";
+
+    public string function getProviderId(){
+        return "bx-ai";
+    }
+
+    public string function getDisplayName(){
+        return "bx-ai (OpenRouter / OpenAI-compatible)";
+    }
+
+    public struct function verifyConfig( required struct config ){
+        if ( !capability.isEnabled() ) {
+            return { ok : false, error : "AI is disabled (AI_ENABLED is not true)." };
+        }
+        if ( !len( capability.getApiKey() ) ) {
+            return { ok : false, error : "AI_API_KEY is empty." };
+        }
+        if ( !len( capability.getModel() ) ) {
+            return { ok : false, error : "AI_MODEL is empty." };
+        }
+        // We do not test the credentials over the wire here. A full
+        // round-trip verifier would call aiChat with a no-op prompt;
+        // costs money and time on every config check. Future versions
+        // can wire that behind an explicit "Test connection" button.
+        return { ok : true, error : "" };
+    }
+
+    public array function listModels(){
+        // bx-ai does not expose a model-discovery endpoint; the
+        // provider model is configured via AI_MODEL. Returning the
+        // configured model lets the admin UI render it without
+        // hardcoding a list. Add-on providers can return a real
+        // catalog from their backend.
+        var current = capability.getModel();
+        if ( !len( current ) ) return [];
+        return [ current ];
+    }
+
+    /**
+     * Direct chat completion. AiMiddleware currently does not call
+     * this method; it calls aiChat() inline. When the middleware
+     * refactor lands, this becomes the canonical entry point and
+     * the inline aiChat call is removed.
+     */
+    public struct function complete( required array messages, required struct params, struct options = {} ){
+        var startMs = getTickCount();
+        try {
+            var raw = aiChat( arguments.messages, arguments.params, arguments.options );
+            var text = "";
+            var tokensIn = 0;
+            var tokensOut = 0;
+            if ( isStruct( raw ) ) {
+                if ( structKeyExists( raw, "choices" ) && isArray( raw.choices ) && arrayLen( raw.choices ) ) {
+                    var first = raw.choices[ 1 ];
+                    if ( isStruct( first ) && structKeyExists( first, "message" ) && isStruct( first.message ) ) {
+                        text = first.message.content ?: "";
+                    }
+                }
+                if ( structKeyExists( raw, "usage" ) && isStruct( raw.usage ) ) {
+                    tokensIn  = val( raw.usage.prompt_tokens ?: 0 );
+                    tokensOut = val( raw.usage.completion_tokens ?: 0 );
+                }
+            }
+            return {
+                outcome   : "ok",
+                text      : text,
+                tokensIn  : tokensIn,
+                tokensOut : tokensOut,
+                latencyMs : getTickCount() - startMs,
+                error     : ""
+            };
+        } catch ( any e ) {
+            return {
+                outcome   : "error",
+                text      : "",
+                tokensIn  : 0,
+                tokensOut : 0,
+                latencyMs : getTickCount() - startMs,
+                error     : e.message
+            };
+        }
+    }
+
+    /**
+     * Direct embedding. Same status as complete() — not currently
+     * called by AiMiddleware; the middleware calls aiEmbed() inline.
+     */
+    public struct function embed( required string text, required struct params, struct options = {} ){
+        var startMs = getTickCount();
+        try {
+            var raw = aiEmbed( arguments.text, arguments.params, arguments.options );
+            var vector = ( isArray( raw ) && arrayLen( raw ) ) ? raw[ 1 ] : raw;
+            if ( !isArray( vector ) ) vector = [];
+            return {
+                outcome   : "ok",
+                vector    : vector,
+                dimension : arrayLen( vector ),
+                latencyMs : getTickCount() - startMs,
+                error     : ""
+            };
+        } catch ( any e ) {
+            return {
+                outcome   : "error",
+                vector    : [],
+                dimension : 0,
+                latencyMs : getTickCount() - startMs,
+                error     : e.message
+            };
+        }
+    }
+
+}
