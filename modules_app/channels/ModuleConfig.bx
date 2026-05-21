@@ -62,6 +62,20 @@ class {
         binder.map( "OutboundEmailService@channels" )
               .to( "#moduleMapping#.models.OutboundEmailService" )
               .asSingleton();
+        binder.map( "EmailChannelAdapter@channels" )
+              .to( "#moduleMapping#.models.adapters.EmailChannelAdapter" )
+              .asSingleton();
+        binder.map( "ChannelAdapterRegistry@channels" )
+              .to( "#moduleMapping#.models.ChannelAdapterRegistry" )
+              .asSingleton();
+        // The registry seeds the core email adapter inside its own
+        // ensureLoaded(); see ChannelAdapterRegistry.bx. Add-on
+        // adapters declare via
+        //   settings.tesserabx.channelAdapters = [ { mapping : "..." } ]
+        // in their ModuleConfig.bx manifest, which the registry also
+        // reads at first-call. This pattern mirrors RoleRegistry and
+        // PermissionRegistry: core entries seeded in the registry,
+        // add-on entries declared in their own manifests.
     }
 
     function onUnload(){}

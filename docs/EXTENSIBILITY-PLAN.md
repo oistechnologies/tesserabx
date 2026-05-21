@@ -816,6 +816,22 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - No deviations.
 - No additional files touched beyond the four listed in the plan.
 
+### 2026-05-20 - Phase 5: Channel adapter registry
+- `IChannelAdapter` contract published at `modules_app/channels/models/contracts/IChannelAdapter.bx`. Documents the eight-method shape every adapter implements: `getChannelId`, `getDisplayName`, `getIcon`, `isPullBased`, `verifyConfig`, `pollOnce`, `normalizeInbound`, `sendOutbound`. The normalized inbound struct contract is documented in the class docblock and in `docs/EXTENSIONS.md`.
+- `ChannelAdapterRegistry@channels` ships. Reads add-on adapters from each module's `settings.tesserabx.channelAdapters = [ { mapping : "..." } ]` manifest declaration; seeds the core email adapter in its own `ensureLoaded()` (same pattern as `RoleRegistry` / `PermissionRegistry`). Public surface: `register`, `adapterFor`, `listAdapters`, `listChannelIds`, `pollAll`, `reload`.
+- `EmailChannelAdapter@channels` wraps the existing `InboundEmailProcessor`, `OutboundEmailService`, and `IMAPPoller`. The adapter is a thin facade that gives email the channel-adapter shape without disturbing the underlying mechanics. Channel id `"email"`, icon `"bi bi-envelope"`, pull-based.
+- `docs/EXTENSIONS.md` Channel adapters section published, covering the contract, both registration paths (manifest for add-ons, imperative for core), the normalized inbound struct shape, polling cadence semantics, and the outbound-dispatch follow-up.
+- Specs: `ChannelAdapterRegistrySpec` (10/10) covering core seed registration, lookup by channel id, return shape of `listAdapters`, idempotence of `register`, the `EmailChannelAdapter` contract conformance (verifyConfig shape, normalizeInbound envelope shape with all 13 documented keys present), and `pollAll` aggregation.
+- Full sweep: 429/4/9 (Phase 4 baseline + 10 new specs, identical pre-existing 4+9 CBFS/s3sdk failures).
+- Design choices worth flagging:
+  - Core registers the email adapter via a self-seed inside `ChannelAdapterRegistry.ensureLoaded()` rather than through the manifest path. Manifest declaration would make `channels` appear as a distinct add-on in the admin Add-ons page, which is wrong UX (`channels` is not separately installable). Add-ons use the manifest path; core uses the self-seed. Both paths arrive at the same in-memory cache.
+  - Initial attempt to register via `controller.getWireBox().getInstance(...)` from the ModuleConfig's `onLoad()` silently failed (no exception logged, but the adapter was missing from the cache). The self-seed inside `ensureLoaded()` sidesteps any ColdBox lifecycle timing issue.
+  - `EmailChannelAdapter.normalizeInbound()` is mostly pass-through today because the existing `IMAPPoller.normaliseRow` already produces a struct very close to the canonical envelope. Future channels (Slack DM, Twilio SMS) will do real translation here.
+- Deferrals:
+  - Outbound dispatch generalization: currently `OutboundEmailInterceptor` knows how to route through `OutboundEmailService` for email. A future generic `OutboundDispatchInterceptor` that resolves the right adapter by ticket source and calls `adapter.sendOutbound()` is documented in EXTENSIONS.md as a follow-up. Add-on adapters dispatch by registering their own listener on relevant `onTicket*` events for now.
+  - Scheduler migration from `IMAPPoller.poll()` direct invocation to `ChannelAdapterRegistry.pollAll()` deferred. Both paths are idempotent (de-duplicate by Message-ID) so running them simultaneously is safe; the scheduler can be migrated whenever convenient.
+  - Admin "Channels" page that lists installed adapters with verifyConfig buttons is not built. The registry surfaces the data; the UI is a small follow-up.
+
 ### 2026-05-20 - Phase 4: UI registries and RBAC
 - `PermissionRegistry@agent` and `RoleRegistry@agent` ship with core seeds (4 roles, 10 permissions). `RbacService.roleCatalog()` now delegates to `RoleRegistry.listForSurface("agent")` so add-on roles flow through.
 - `NavigationRegistry@core` plus six menu-zone migrations: Portal.bxm and Agent.bxm now iterate `tbxNavigation( surface, menu )` for `main` / `account` / `topbar`. Each surface's left sidebar, account dropdown, and top bar (top bar is currently sparse) is registry-driven.

@@ -1,0 +1,121 @@
+/**
+ * ChannelAdapterRegistrySpec: registration paths, lookup by channel id,
+ * and the EmailChannelAdapter wrapping.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.registry = getController().getWireBox().getInstance( "ChannelAdapterRegistry@channels" );
+        variables.registry.reload();
+    }
+
+    function run(){
+        describe( "ChannelAdapterRegistry seed", function(){
+            it( "registers the core email adapter imperatively from channels onLoad", function(){
+                expect( variables.registry.listChannelIds() ).toInclude( "email" );
+            } );
+
+            it( "adapterFor returns the EmailChannelAdapter for channel id 'email'", function(){
+                var adapter = variables.registry.adapterFor( "email" );
+                expect( adapter ).notToBeNull();
+                expect( adapter.getChannelId() ).toBe( "email" );
+                expect( adapter.getDisplayName() ).toBe( "Email" );
+                expect( adapter.isPullBased() ).toBeTrue();
+            } );
+
+            it( "returns null for an unknown channel id", function(){
+                expect( isNull( variables.registry.adapterFor( "does-not-exist" ) ) ).toBeTrue();
+            } );
+
+            it( "listAdapters returns a descriptor struct array", function(){
+                var all = variables.registry.listAdapters();
+                expect( arrayLen( all ) ).toBeGTE( 1 );
+                var email = "";
+                for ( var d in all ) {
+                    if ( d.channelId == "email" ) { email = d; break; }
+                }
+                expect( isStruct( email ) ).toBeTrue();
+                expect( email.displayName ).toBe( "Email" );
+                expect( email.icon ).toBe( "bi bi-envelope" );
+                expect( email.mapping ).toBe( "EmailChannelAdapter@channels" );
+                expect( email.isPullBased ).toBeTrue();
+            } );
+
+            it( "channel ids are returned sorted", function(){
+                var ids = variables.registry.listChannelIds();
+                for ( var i = 2; i <= arrayLen( ids ); i++ ) {
+                    expect( compareNoCase( ids[ i - 1 ], ids[ i ] ) ).toBeLTE( 0 );
+                }
+            } );
+        } );
+
+        describe( "EmailChannelAdapter contract conformance", function(){
+            it( "verifyConfig reports config status from the IMAP poller", function(){
+                var adapter = variables.registry.adapterFor( "email" );
+                var result = adapter.verifyConfig( {} );
+                expect( isStruct( result ) ).toBeTrue();
+                expect( structKeyExists( result, "ok" ) ).toBeTrue();
+                expect( structKeyExists( result, "error" ) ).toBeTrue();
+                // The dev environment typically runs with IMAP disabled
+                // so we expect ok=false with a helpful error message.
+                // The spec does not assert the boolean (env-dependent).
+                expect( isBoolean( result.ok ) ).toBeTrue();
+            } );
+
+            it( "normalizeInbound returns the canonical envelope shape", function(){
+                var adapter = variables.registry.adapterFor( "email" );
+                var raw = {
+                    messageId  : "abc@example.com",
+                    from       : "Alice <alice@example.com>",
+                    subject    : "Hello",
+                    body       : "Hi there",
+                    inReplyTo  : "",
+                    references : "",
+                    headers    : {},
+                    attachments: []
+                };
+                var normalized = adapter.normalizeInbound( raw );
+                expect( normalized.channelId ).toBe( "email" );
+                expect( normalized.messageId ).toBe( "abc@example.com" );
+                expect( normalized.subject ).toBe( "Hello" );
+                expect( normalized.body ).toBe( "Hi there" );
+                // Every documented key must be present, even when empty
+                for ( var k in [ "messageId", "channelId", "from", "senderEmail", "senderHandle", "subject", "body", "inReplyTo", "references", "loopGuardHeaders", "attachments", "receivedAt", "raw" ] ) {
+                    expect( structKeyExists( normalized, k ) ).toBeTrue( "missing key [#k#]" );
+                }
+            } );
+
+            it( "normalizeInbound on a non-struct payload returns an empty envelope", function(){
+                var adapter = variables.registry.adapterFor( "email" );
+                var normalized = adapter.normalizeInbound( "not a struct" );
+                expect( normalized.channelId ).toBe( "email" );
+                expect( normalized.messageId ).toBe( "" );
+            } );
+        } );
+
+        describe( "ChannelAdapterRegistry.pollAll", function(){
+            it( "returns aggregated counts without throwing", function(){
+                // The email adapter delegates to IMAPPoller.poll which
+                // short-circuits when IMAP is disabled. Either way the
+                // call must return a struct without throwing.
+                var result = variables.registry.pollAll();
+                expect( isStruct( result ) ).toBeTrue();
+                expect( structKeyExists( result, "total" ) ).toBeTrue();
+                expect( structKeyExists( result, "byChannel" ) ).toBeTrue();
+                expect( isNumeric( result.total ) ).toBeTrue();
+            } );
+        } );
+
+        describe( "ChannelAdapterRegistry.register imperative path", function(){
+            it( "is idempotent: re-registering email keeps the same entry", function(){
+                var before = arrayLen( variables.registry.listChannelIds() );
+                variables.registry.register( "EmailChannelAdapter@channels" );
+                var after = arrayLen( variables.registry.listChannelIds() );
+                expect( after ).toBe( before );
+            } );
+        } );
+    }
+
+}

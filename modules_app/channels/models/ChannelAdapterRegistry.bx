@@ -1,0 +1,175 @@
+/**
+ * ChannelAdapterRegistry: discovery and resolution for every channel
+ * adapter installed in the host.
+ *
+ * An add-on contributes a channel adapter by:
+ *   1. Implementing the IChannelAdapter contract.
+ *   2. Mapping the implementation in its module's onLoad():
+ *        binder.map( "MyChannelAdapter@my-addon" )
+ *              .to( "#moduleMapping#.models.MyChannelAdapter" )
+ *              .asSingleton();
+ *   3. Declaring the adapter in its manifest:
+ *        settings.tesserabx.channelAdapters = [
+ *            { mapping : "MyChannelAdapter@my-addon" }
+ *        ];
+ *
+ * At app boot this registry walks every loaded module's manifest,
+ * resolves each declared mapping through WireBox, queries the
+ * adapter for its channel id / display name / icon, and caches the
+ * (id -> mapping) lookup. Subsequent calls resolve adapters by
+ * channel id without re-introspecting the manifest.
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "ChannelAdapterRegistry@channels" );
+ *   var adapter  = registry.adapterFor( "email" );          // IChannelAdapter
+ *   var all      = registry.listAdapters();                  // [ { channelId, displayName, icon, mapping, isPullBased }, ... ]
+ *   var result   = adapter.sendOutbound( ticketMessage, ticket );
+ *
+ * --- Scheduler integration ---
+ *
+ * `pollAll()` iterates every pull-based adapter and invokes its
+ * pollOnce(). The existing channels:imap-poll scheduled task can
+ * be migrated to call pollAll() instead of resolving IMAPPoller
+ * directly; until then the email-channel poll continues to fire
+ * via its dedicated scheduled task (which the EmailChannelAdapter
+ * still backs).
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};   // channelId -> descriptor struct
+    variables.cacheLoaded = false;
+
+    /**
+     * Imperative registration. Add-ons can call this from their
+     * onLoad() instead of (or in addition to) the manifest path
+     * when they need to gate registration on runtime state.
+     */
+    public void function register( required string mapping ){
+        ensureLoaded();
+        addByMapping( arguments.mapping, "imperative" );
+    }
+
+    /**
+     * Resolve a channel adapter by its channel id. Returns null
+     * when no adapter is registered for the id.
+     */
+    public any function adapterFor( required string channelId ){
+        ensureLoaded();
+        if ( !structKeyExists( variables.cache, arguments.channelId ) ) return javaCast( "null", "" );
+        return wirebox.getInstance( variables.cache[ arguments.channelId ].mapping );
+    }
+
+    /**
+     * Every registered adapter as a struct array. Used by the admin
+     * Channels page to list installed adapters.
+     */
+    public array function listAdapters(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){ return compare( a.channelId, b.channelId ); } );
+        return out;
+    }
+
+    /**
+     * Just the channel ids, sorted. Convenience for tests + admin
+     * filter dropdowns.
+     */
+    public array function listChannelIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    /**
+     * Poll every pull-based adapter once. Returns { total, byChannel }
+     * with the aggregate count and per-channel counts. Exceptions in
+     * one adapter never short-circuit the iteration.
+     */
+    public struct function pollAll(){
+        ensureLoaded();
+        var byChannel = {};
+        var total = 0;
+        for ( var id in variables.cache ) {
+            var descriptor = variables.cache[ id ];
+            if ( !descriptor.isPullBased ) continue;
+            try {
+                var n = wirebox.getInstance( descriptor.mapping ).pollOnce();
+                byChannel[ id ] = n;
+                total += n;
+            } catch ( any e ) {
+                byChannel[ id ] = { error : e.message };
+                writeLog(
+                    text : "ChannelAdapterRegistry.pollAll: adapter [#id#] threw: #e.message# :: #e.detail#",
+                    log  : "tesserabx",
+                    type : "error"
+                );
+            }
+        }
+        return { total : total, byChannel : byChannel };
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // Set flag first to break re-entrancy from register() calls
+        // during seeding (see gotcha log in docs/EXTENSIBILITY-PLAN.md).
+        variables.cacheLoaded = true;
+
+        // Seed core adapters. Currently just the email adapter; future
+        // core channels (e.g., a contact-form channel adapter) would
+        // be added here.
+        addByMapping( "EmailChannelAdapter@channels", "core" );
+
+        // Add-on adapters from manifest declarations.
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.channelAdapters ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var entry in declared ) {
+                if ( !isStruct( entry ) || !structKeyExists( entry, "mapping" ) || !len( entry.mapping ?: "" ) ) continue;
+                addByMapping( entry.mapping, moduleName );
+            }
+        }
+    }
+
+    private void function addByMapping( required string mapping, required string source ){
+        var adapter = wirebox.getInstance( arguments.mapping );
+        try {
+            var id          = adapter.getChannelId();
+            var displayName = adapter.getDisplayName();
+            var icon        = adapter.getIcon();
+            var pull        = !!adapter.isPullBased();
+        } catch ( any e ) {
+            writeLog(
+                text : "ChannelAdapterRegistry rejected mapping [#arguments.mapping#] from [#arguments.source#]: #e.message#",
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return;
+        }
+        variables.cache[ id ] = {
+            channelId   : id,
+            displayName : displayName,
+            icon        : icon,
+            mapping     : arguments.mapping,
+            isPullBased : pull,
+            source      : arguments.source
+        };
+    }
+
+}

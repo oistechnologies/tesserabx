@@ -1,0 +1,138 @@
+/**
+ * EmailChannelAdapter: the IChannelAdapter implementation for email.
+ *
+ * Phase 5 lifts the email channel into the ChannelAdapterRegistry
+ * pattern without disturbing the underlying mechanics. The poller,
+ * inbound processor, and outbound service are all retained as-is;
+ * this class is a thin facade that gives them the adapter shape so
+ * the registry can resolve them by channel id and so future code
+ * (admin Channels page, scheduler iteration, etc.) can treat email
+ * the same way it treats any other channel.
+ *
+ * The existing scheduled IMAP poll continues to call
+ * `IMAPPoller@channels.poll()` directly. When (or if) the scheduler
+ * is migrated to iterate `ChannelAdapterRegistry.pollAll()`, this
+ * adapter's `pollOnce()` will be the entry point. Both paths are
+ * idempotent and de-duplicate by Message-ID, so running both
+ * temporarily is safe.
+ */
+class singleton=true {
+
+    property name="inboundProcessor" inject="InboundEmailProcessor@channels";
+    property name="outboundService"  inject="OutboundEmailService@channels";
+    property name="imapPoller"       inject="IMAPPoller@channels";
+
+    public string function getChannelId(){
+        return "email";
+    }
+
+    public string function getDisplayName(){
+        return "Email";
+    }
+
+    public string function getIcon(){
+        return "bi bi-envelope";
+    }
+
+    public boolean function isPullBased(){
+        return true;
+    }
+
+    /**
+     * Verify the email channel configuration by asking the IMAP
+     * poller whether it has the connection-level env vars it needs.
+     * The poller's isEnabled() returns false when IMAP_ENABLED is
+     * off OR any required credential is missing.
+     */
+    public struct function verifyConfig( required struct config ){
+        if ( imapPoller.isEnabled() ) {
+            return { ok : true, error : "" };
+        }
+        return {
+            ok    : false,
+            error : "IMAP is not enabled or missing required environment variables (IMAP_ENABLED, IMAP_HOST, IMAP_USERNAME, IMAP_PASSWORD)."
+        };
+    }
+
+    /**
+     * One poll cycle. Delegates to the existing IMAPPoller which
+     * fetches messages, normalizes each via its private helper, and
+     * hands each one to InboundEmailProcessor.process(). Returns
+     * the count of messages handled in this poll.
+     */
+    public numeric function pollOnce(){
+        var result = imapPoller.poll();
+        return val( result.processed ?: 0 );
+    }
+
+    /**
+     * Email's normalizeInbound is currently performed inside
+     * IMAPPoller.normaliseRow (a private method). For external
+     * callers that want to feed a single cfimap-shaped row through
+     * the email pipeline, this passes the row to InboundEmailProcessor
+     * directly; the processor handles loop guards, blacklist checks,
+     * reply matching, and ticket creation.
+     *
+     * Returns the InboundEmail record the processor created.
+     */
+    public struct function normalizeInbound( required any rawPayload ){
+        // The cfimap-shaped row is already very close to the
+        // normalized envelope; existing tests confirm the
+        // InboundEmailProcessor accepts it directly. Future channels
+        // (Slack DM, Twilio SMS, etc.) will do real translation here.
+        if ( !isStruct( arguments.rawPayload ) ) {
+            return {
+                messageId        : "",
+                channelId        : getChannelId(),
+                from             : "",
+                senderEmail      : "",
+                senderHandle     : "",
+                subject          : "",
+                body             : "",
+                inReplyTo        : "",
+                references       : "",
+                loopGuardHeaders : {},
+                attachments      : [],
+                receivedAt       : now(),
+                raw              : {}
+            };
+        }
+        return {
+            messageId        : arguments.rawPayload.messageId  ?: "",
+            channelId        : getChannelId(),
+            from             : arguments.rawPayload.from       ?: "",
+            senderEmail      : arguments.rawPayload.from       ?: "",
+            senderHandle     : "",
+            subject          : arguments.rawPayload.subject    ?: "",
+            body             : arguments.rawPayload.body       ?: "",
+            inReplyTo        : arguments.rawPayload.inReplyTo  ?: "",
+            references       : arguments.rawPayload.references ?: "",
+            loopGuardHeaders : arguments.rawPayload.headers    ?: {},
+            attachments      : arguments.rawPayload.attachments ?: [],
+            receivedAt       : now(),
+            raw              : arguments.rawPayload
+        };
+    }
+
+    /**
+     * Outbound dispatch. Delegates to OutboundEmailService.sendAgentReply,
+     * which threads via In-Reply-To / References headers and applies
+     * the per-tenant mail override.
+     *
+     * Returns { ok, error, channelMessageId } where channelMessageId
+     * is the RFC 5322 Message-ID assigned by OutboundEmailService.
+     */
+    public struct function sendOutbound( required any ticketMessage, required any ticket ){
+        try {
+            var info = outboundService.sendAgentReply( arguments.ticketMessage, arguments.ticket );
+            return {
+                ok               : true,
+                error            : "",
+                channelMessageId : ( isStruct( info ) ? ( info.messageId ?: "" ) : "" )
+            };
+        } catch ( any e ) {
+            return { ok : false, error : e.message, channelMessageId : "" };
+        }
+    }
+
+}

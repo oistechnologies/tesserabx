@@ -1,0 +1,135 @@
+/**
+ * IChannelAdapter: documented public contract for channel intake and
+ * outbound dispatch.
+ *
+ * Contract class. BoxLang has no `interface` keyword; this regular
+ * class's methods throw to make accidental instantiation obvious.
+ * Do NOT extend this class for real adapters; just implement the
+ * method shape it documents. WireBox resolves adapters by their
+ * registered mapping name (declared in the add-on's manifest via
+ * `settings.tesserabx.channelAdapters`).
+ *
+ * --- The adapter lifecycle ---
+ *
+ * 1. Boot: the add-on declares an adapter mapping via manifest.
+ *    `ChannelAdapterRegistry@channels` reads every loaded module's
+ *    `settings.tesserabx.channelAdapters` and caches the mapping
+ *    name + metadata.
+ *
+ * 2. Inbound (pull-based): the scheduler periodically calls
+ *    `pollOnce()` on each adapter. The adapter fetches new
+ *    messages from its source (IMAP, an API, etc.), normalizes
+ *    each one through `normalizeInbound`, and hands the
+ *    normalized struct to `TicketsService` for ticket creation
+ *    or message append.
+ *
+ * 3. Inbound (push-based): an HTTP endpoint owned by the add-on
+ *    receives the push (webhook, SSE, WebSocket), calls
+ *    `normalizeInbound` on the raw payload, and hands the
+ *    normalized struct to `TicketsService`. `pollOnce()` is a
+ *    no-op for push-based adapters.
+ *
+ * 4. Outbound: when an agent reply or system notification needs
+ *    to leave through this channel, callers resolve the adapter
+ *    by channel id and call `sendOutbound( message, ticket )`.
+ *
+ * --- Inbound normalized struct contract ---
+ *
+ * `normalizeInbound( rawPayload )` MUST return a struct shaped:
+ *
+ *   {
+ *       messageId         : string  // stable id from the source
+ *       channelId         : string  // the adapter's channel id
+ *       from              : string  // sender display (free-form)
+ *       senderEmail       : string  // canonicalized email or ""
+ *       senderHandle      : string  // platform-specific id ("U05..." for Slack), ""
+ *       subject           : string  // short title (may be derived from body)
+ *       body              : string  // plain-text body (HTML stripped by caller)
+ *       inReplyTo         : string  // upstream id of the message being replied to, ""
+ *       references        : string  // space-separated parent chain, ""
+ *       loopGuardHeaders  : struct  // headers/markers identifying auto-responders
+ *       attachments       : array<struct>  // [{ path, originalFilename, contentType, sizeBytes }]
+ *       receivedAt        : datetime  // when the source claimed the message arrived
+ *       raw               : struct  // pass-through of the source payload for audit
+ *   }
+ *
+ * Fields the host expects to be populated faithfully even when the
+ * source has no equivalent concept: leave them as empty strings,
+ * empty structs, or empty arrays. NEVER omit a key.
+ *
+ * --- Method contract ---
+ */
+class {
+
+    /** Stable identifier for this channel. Lowercase, no spaces. */
+    public string function getChannelId(){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /** Human-readable label for the admin UI. */
+    public string function getDisplayName(){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /** Bootstrap-icon class for admin UI lists. May return "". */
+    public string function getIcon(){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /** Whether the adapter pulls from a source via pollOnce() or relies on push. */
+    public boolean function isPullBased(){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /**
+     * Verify the adapter's configuration. Called from the admin
+     * Channels UI when an operator wants to confirm a credential
+     * change before persisting it.
+     *
+     * Returns: { ok : boolean, error : string }. `error` is populated
+     * only when ok is false.
+     */
+    public struct function verifyConfig( required struct config ){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /**
+     * Pull-based adapters only: fetch and process any messages
+     * waiting at the source. The scheduler invokes this on a fixed
+     * cadence (the ChannelAdapterRegistry orchestrates the cadence;
+     * adapters should NOT manage their own timers).
+     *
+     * Push-based adapters should implement this as a no-op that
+     * returns 0.
+     *
+     * Returns the number of messages processed in this poll.
+     */
+    public numeric function pollOnce(){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /**
+     * Translate one source-shaped payload into the normalized
+     * inbound struct documented above. The host then hands the
+     * normalized struct to TicketsService.
+     */
+    public struct function normalizeInbound( required any rawPayload ){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+    /**
+     * Send a TicketMessage out through this channel. The host calls
+     * this when an agent reply that originated through this channel
+     * is being dispatched.
+     *
+     * Returns: { ok : boolean, error : string, channelMessageId : string }.
+     * `channelMessageId` is the source-side id of the message that
+     * was sent (e.g., the RFC 5322 Message-ID for email, the Slack
+     * `ts` for Slack, etc.) so the host can correlate future
+     * inbound replies back to this conversation.
+     */
+    public struct function sendOutbound( required any ticketMessage, required any ticket ){
+        throw( type = "ContractClass.NotImplemented", message = "IChannelAdapter is a contract; resolve the concrete adapter via the ChannelAdapterRegistry" );
+    }
+
+}
