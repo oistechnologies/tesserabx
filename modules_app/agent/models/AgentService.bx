@@ -19,10 +19,12 @@
  */
 class singleton=true {
 
-    property name="wirebox"      inject="wirebox";
-    property name="auditService" inject="AuditService@audit";
-    property name="rbacService"  inject="RbacService@agent";
-    property name="bcrypt"       inject="@BCrypt";
+    property name="wirebox"             inject="wirebox";
+    property name="auditService"        inject="AuditService@audit";
+    property name="rbacService"         inject="RbacService@agent";
+    property name="bcrypt"              inject="@BCrypt";
+    property name="interceptorService"  inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
 
     // Whitelist for sortable columns on listAgents. Anything outside
     // this set falls back to email.
@@ -381,6 +383,23 @@ class singleton=true {
             "department" : optionalString.department
         } );
 
+        interceptorService.announce(
+            "onAgentCreated",
+            eventPayloadBuilder.build(
+                event     : "onAgentCreated",
+                actorType : len( arguments.actorAgentId ) ? "agent" : "system",
+                actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : "system",
+                entity    : { type : "Agent", id : newId },
+                metadata  : {
+                    email      : email,
+                    firstName  : optionalString.first_name,
+                    lastName   : optionalString.last_name,
+                    isAdmin    : !!( arguments.data.isAdmin ?: false )
+                }
+            ),
+            true
+        );
+
         return newId;
     }
 
@@ -517,8 +536,30 @@ class singleton=true {
                 arguments.actorAgentId,
                 { "diff" : diff }
             );
+            interceptorService.announce(
+                diff.isActive.new ? "onAgentActivated" : "onAgentDeactivated",
+                eventPayloadBuilder.build(
+                    event     : diff.isActive.new ? "onAgentActivated" : "onAgentDeactivated",
+                    actorType : len( arguments.actorAgentId ) ? "agent" : "system",
+                    actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : "system",
+                    entity    : { type : "Agent", id : arguments.id },
+                    metadata  : { diff : diff }
+                ),
+                true
+            );
         } else {
             recordAudit( "agent.updated", arguments.id, arguments.actorAgentId, { "diff" : diff } );
+            interceptorService.announce(
+                "onAgentUpdated",
+                eventPayloadBuilder.build(
+                    event     : "onAgentUpdated",
+                    actorType : len( arguments.actorAgentId ) ? "agent" : "system",
+                    actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : "system",
+                    entity    : { type : "Agent", id : arguments.id },
+                    metadata  : { diff : diff }
+                ),
+                true
+            );
         }
     }
 

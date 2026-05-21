@@ -816,6 +816,26 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - No deviations.
 - No additional files touched beyond the four listed in the plan.
 
+### 2026-05-20 - Phase 3: Event surface and audit contributions
+- `EventPayloadBuilder@core` produces the canonical envelope (event, occurredAt, organizationId, actorType, actorId, entity, before, after, metadata) used by every new event.
+- Seventeen new announcements added across tickets (5: assigned, tags-added, attachment-added, attachment-deleted, promoted-to-contact), contacts (7: org-created, contact-provisioned, contact-deactivated, role-granted, role-revoked, domain-mapped, merged), agent (4: created, updated, activated, deactivated), and RBAC (2: role-granted, role-revoked, scoped to agents). All new announcements use `announceAsync`.
+- All five pre-Phase-3 events left untouched (their entity-shaped payload is consumed by six active interceptors; switching to the canonical envelope would break working code). Documented in `docs/EXTENSIONS.md` Events section.
+- `customInterceptionPoints` updated in tickets, contacts, and agent ModuleConfigs. While there, fixed the Phase-1 scoping bug in `contacts/ModuleConfig.bx` and `agent/ModuleConfig.bx` (unscoped `interceptorSettings = ...` would have silently dropped the new events into function-local scope).
+- New migration `2026_05_20_000030_add_source_to_audit_events.cfc` adds the `source` column. `AuditService.record()` accepts a new optional `source` arg; `AuditService.search()` accepts a matching filter (sentinel `"core"` means "null only"); new `AuditService.listSources()` returns distinct sources for the admin UI dropdown.
+- `AuditService.listEventTypes()` now merges the distinct types in the log with every add-on's manifest-declared `auditEvents = [...]`, so add-on types appear in the admin filter dropdown before they have ever fired. The `auditEvents` array is captured automatically through the addons.metadata JSON column (no AddonRegistryService changes needed; the manifest is already serialized end-to-end).
+- Admin audit search UI at `/agent/admin/audit` got a Source filter dropdown.
+- `docs/EXTENSIONS.md` expanded with two new sections: Events (with sub-sections covering canonical payload, async policy, and the catalog of 17 new + 5 existing events) and Audit-event contributions (record() usage, manifest declaration, naming convention).
+- Specs: `EventPayloadBuilderSpec` (7/7) + `AuditSourceSpec` (8/8).
+- Deviations from plan:
+  - Phase 3.1 called for the full event catalog from the plan (~40 events). I shipped the 17 well-defined ones across tickets/contacts/agent/RBAC and deferred SLA / automation / channels / KB-beyond-publish / AI / API-webhook events. Those modules are touched directly by later phases (5, 6, 7, 8) and their announcement points are better added in context. The omission is intentional and documented; no add-on contract is silently missing because the canonical envelope shape and the announcement-naming convention are documented in EXTENSIONS.md.
+  - The five pre-Phase-3 events kept their original payload shape (entity-keyed) rather than being rewrapped in the canonical envelope. Mixing shapes is documented in EXTENSIONS.md; the cost of breaking six consumer interceptors outweighed the consistency gain. Future migration of these to the canonical envelope is a follow-up if it becomes load-bearing.
+- Files touched that the plan did not list:
+  - `modules_app/agent/models/AgentService.bx`, `modules_app/agent/models/RbacService.bx` (announcement additions; plan grouped these under "agent" without naming the specific files).
+  - `modules_app/contacts/ModuleConfig.bx` and `modules_app/agent/ModuleConfig.bx` (scoping-bug fixes adjacent to the new customInterceptionPoints declarations).
+- Follow-ups identified:
+  - The remaining ~25 events from the plan's catalog (SLA, automation, channels, KB, AI, API webhooks) belong in the phases that own those modules. Each Phase 5-8 build should add announcements for the state transitions it touches, using the same `EventPayloadBuilder@core` + `announceAsync` pattern.
+  - The five pre-Phase-3 events are an inconsistency. If a future phase forces a payload-shape rewrite (e.g., the reference add-on in Phase 12 needs the canonical envelope from these too), bundle the consumer migration with the rewrite.
+
 ### 2026-05-20 - Phase 2: Service contracts and tenancy safety
 - Five service contract classes published under `models/contracts/`: ITicketsService, IContactsService, IAuditService, INotificationsService, IAiMiddleware. They document the public surface add-ons may rely on; method bodies throw `ContractClass.NotImplemented` because BoxLang has no `interface` keyword.
 - Four DTO mapper services published under `models/dtos/`: TicketDto, ContactDto, AuditEventDto, NotificationDto. Each maps Quick entities to snake_case structs that match the JSON the API already returns.
@@ -889,6 +909,29 @@ BoxLang ships `jsonSerialize()` and `jsonDeserialize()`. The CFML names `seriali
 ### Phase 1 - To reach the ColdBox controller from a service, inject `coldbox` directly
 
 `wirebox.getController()` does not exist on the WireBox API surface in this BoxLang / ColdBox 8 environment ("Method 'getController' not found"). Use `property name="coldbox" inject="coldbox";` and call `coldbox.getSetting( "<name>" )` directly.
+
+### Phase 3 - ColdBox 8 has no `announceAsync` method; use `announce( state, data, true )` instead
+
+The Phase 3 plan calls events "async by default" and assumes a separate `announceAsync()` method on the interceptor service. **That method does not exist in ColdBox 8.** `InterceptorService.announce()` accepts an `async` boolean as its third positional arg (or named `async : true`):
+
+```boxlang
+// Wrong:
+interceptorService.announceAsync( "onContactCreated", payload );
+// throws "Method 'announceAsync' not found" and cascades through
+// every test path that touches a service announcing the event.
+
+// Right:
+interceptorService.announce( "onContactCreated", payload, true );
+
+// Also right (named args):
+interceptorService.announce(
+    state : "onContactCreated",
+    data  : payload,
+    async : true
+);
+```
+
+This bit Phase 3 hard: 17 call sites used `announceAsync()` and broke 95 specs (every spec path that exercised the affected services). The fix is mechanical (`announceAsync(` → `announce(` plus add `, true` as the third arg) but easy to miss because the plan document and many ColdBox tutorials still refer to "announceAsync" as the async convention. **Always check the actual method signature in `coldbox/system/web/services/InterceptorService.cfc` before writing new announce calls.**
 
 ### Phase 2 - qb stores where-clause column as a struct, not a string
 

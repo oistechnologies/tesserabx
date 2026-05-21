@@ -36,7 +36,12 @@ class {
         variables.interceptorSettings = { customInterceptionPoints : [
             "onTicketCreated",
             "onTicketMessageAdded",
-            "onTicketStatusChanged"
+            "onTicketStatusChanged",
+            "onTicketAssigned",
+            "onTicketTagsAdded",
+            "onTicketAttachmentAdded",
+            "onTicketAttachmentDeleted",
+            "onTicketPromotedToContact"
         ] };
         variables.interceptors = [];
     }

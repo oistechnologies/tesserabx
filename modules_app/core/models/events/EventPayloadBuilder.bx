@@ -1,0 +1,73 @@
+/**
+ * EventPayloadBuilder: assembles the canonical interceptor payload
+ * struct used for every NEW event TesseraBX announces.
+ *
+ * Canonical shape:
+ *
+ *   {
+ *       event          : "onContactCreated",
+ *       occurredAt     : <ISO-8601 UTC string>,
+ *       organizationId : "<uuid>" or "",
+ *       actorType      : "agent" | "contact" | "system",
+ *       actorId        : "<uuid>" or "system",
+ *       entity         : { type: "Contact", id: "<uuid>" },
+ *       before         : {} or null,
+ *       after          : {} or null,
+ *       metadata       : {}
+ *   }
+ *
+ * Five pre-Phase-3 events (onTicketCreated, onTicketMessageAdded,
+ * onTicketStatusChanged, onKbArticlePublished) keep their original
+ * payload shapes for backwards compatibility with the six consumer
+ * interceptors that already depend on them. New events ship with
+ * the canonical envelope.
+ *
+ * Async policy:
+ *   - Events that other modules might react to with network calls
+ *     or heavy work SHOULD be announced via `announceAsync`. They
+ *     cannot stall the request that triggered them.
+ *   - Events that need to influence the in-flight transaction
+ *     (e.g., automation rules that mutate the same ticket the user
+ *     just modified) MUST stay synchronous via `announce`. The
+ *     existing five events are sync for this reason.
+ *
+ * --- Public extension contract ---
+ *
+ *   var payload = wirebox.getInstance( "EventPayloadBuilder@core" )
+ *                        .build(
+ *                            event          : "onContactCreated",
+ *                            organizationId : contact.getOrganizationId(),
+ *                            actorType      : "agent",
+ *                            actorId        : agentId,
+ *                            entity         : { type: "Contact", id: contact.getId() },
+ *                            after          : contactDto.fromContact( contact )
+ *                        );
+ *
+ *   controller.getInterceptorService().announceAsync( "onContactCreated", payload );
+ */
+class singleton=true {
+
+    public struct function build(
+        required string event,
+        string organizationId = "",
+        string actorType      = "system",
+        string actorId        = "system",
+        any entity            = {},
+        any before            = javaCast( "null", "" ),
+        any after             = javaCast( "null", "" ),
+        any metadata          = {}
+    ){
+        return {
+            event          : arguments.event,
+            occurredAt     : dateTimeFormat( now(), "iso8601" ),
+            organizationId : arguments.organizationId,
+            actorType      : arguments.actorType,
+            actorId        : arguments.actorId,
+            entity         : arguments.entity,
+            before         : isNull( arguments.before ) ? javaCast( "null", "" ) : arguments.before,
+            after          : isNull( arguments.after )  ? javaCast( "null", "" ) : arguments.after,
+            metadata       : isStruct( arguments.metadata ) ? arguments.metadata : {}
+        };
+    }
+
+}

@@ -29,10 +29,23 @@ class {
     this.dependencies       = [ "audit" ];
 
     function configure(){
-        settings = {};
-        routes   = [];
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        // BoxLang scope-walker drops unscoped assignments into
+        // function-local scope; ColdBox reads from variables. The
+        // `variables.` prefix is REQUIRED for any setting ColdBox or
+        // a downstream consumer (e.g., AddonRegistryService discovery)
+        // needs to read back.
+        variables.settings = {};
+        variables.routes   = [];
+        variables.interceptorSettings = { customInterceptionPoints : [
+            "onOrganizationCreated",
+            "onContactProvisioned",
+            "onContactDeactivated",
+            "onContactRoleGranted",
+            "onContactRoleRevoked",
+            "onOrganizationDomainMapped",
+            "onContactMerged"
+        ] };
+        variables.interceptors = [];
     }
 
     function onLoad(){

@@ -20,7 +20,16 @@
                     </bx:loop>
                 </select>
             </div>
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-2">
+                <label class="form-label" for="source">Source</label>
+                <select class="form-select" id="source" name="source">
+                    <option value="">All sources</option>
+                    <bx:loop array="#prc.sources#" item="s">
+                        <option value="#encodeForHTMLAttribute( s )#"<bx:if ( prc.filters.source ?: "" ) eq s> selected</bx:if>>#encodeForHTML( s )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
                 <label class="form-label" for="entityId">Entity ID</label>
                 <input type="text" class="form-control" id="entityId" name="entityId" placeholder="Exact UUID" value="#encodeForHTMLAttribute( prc.filters.entityId ?: "" )#">
             </div>

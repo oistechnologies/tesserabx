@@ -13,8 +13,10 @@
  */
 class singleton=true {
 
-    property name="wirebox"      inject="wirebox";
-    property name="auditService" inject="AuditService@audit";
+    property name="wirebox"             inject="wirebox";
+    property name="auditService"        inject="AuditService@audit";
+    property name="interceptorService"  inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
 
     /**
      * The full set of role keys provider agents can hold, with a
@@ -94,6 +96,18 @@ class singleton=true {
         }
 
         recordAudit( "agent.role_granted", arguments.agentId, arguments.roleKey, arguments.actorAgentId );
+
+        interceptorService.announce(
+            "onAgentRoleGranted",
+            eventPayloadBuilder.build(
+                event     : "onAgentRoleGranted",
+                actorType : len( arguments.actorAgentId ) ? "agent" : "system",
+                actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : "system",
+                entity    : { type : "Agent", id : arguments.agentId },
+                metadata  : { roleKey : arguments.roleKey }
+            ),
+            true
+        );
         return true;
     }
 
@@ -135,6 +149,18 @@ class singleton=true {
         }
 
         recordAudit( "agent.role_revoked", arguments.agentId, arguments.roleKey, arguments.actorAgentId );
+
+        interceptorService.announce(
+            "onAgentRoleRevoked",
+            eventPayloadBuilder.build(
+                event     : "onAgentRoleRevoked",
+                actorType : len( arguments.actorAgentId ) ? "agent" : "system",
+                actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : "system",
+                entity    : { type : "Agent", id : arguments.agentId },
+                metadata  : { roleKey : arguments.roleKey }
+            ),
+            true
+        );
         return true;
     }
 

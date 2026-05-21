@@ -19,7 +19,8 @@ class singleton=true {
     property name="workflowService"    inject="WorkflowService@tickets";
     property name="cbfs"               inject="DiskService@cbfs";
     property name="imageProcessing"    inject="ImageProcessingService@core";
-    property name="interceptorService" inject="coldbox:interceptorService";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
 
     // ---------- Status workflow ----------
     //
@@ -290,6 +291,18 @@ class singleton=true {
                 actorType : arguments.actorType,
                 actorId   : arguments.actorId,
                 metadata  : { "tags" : addedNames }
+            );
+            interceptorService.announce(
+                "onTicketTagsAdded",
+                eventPayloadBuilder.build(
+                    event          : "onTicketTagsAdded",
+                    organizationId : t.getOrganizationId() ?: "",
+                    actorType      : arguments.actorType ?: "system",
+                    actorId        : arguments.actorId ?: "system",
+                    entity         : { type : "Ticket", id : t.getId() },
+                    metadata       : { tags : addedNames }
+                ),
+                true
             );
         }
         return listTagsForTicket( t.getId() );
@@ -596,6 +609,20 @@ class singleton=true {
             actorId        : arguments.data.actorId ?: "",
             metadata       : { "previousAgentId" : previous ?: "", "newAgentId" : next }
         );
+
+        interceptorService.announce(
+            "onTicketAssigned",
+            eventPayloadBuilder.build(
+                event          : "onTicketAssigned",
+                organizationId : t.getOrganizationId() ?: "",
+                actorType      : "agent",
+                actorId        : arguments.data.actorId ?: "system",
+                entity         : { type : "Ticket", id : t.getId() },
+                before         : { assignedToAgentId : previous ?: "" },
+                after          : { assignedToAgentId : next }
+            ),
+            true
+        );
         return t;
     }
 
@@ -648,6 +675,22 @@ class singleton=true {
             actorType      : "agent",
             actorId        : arguments.data.actorId ?: "",
             metadata       : { "contactId" : contact.getId(), "email" : t.getOriginatingEmail() }
+        );
+
+        interceptorService.announce(
+            "onTicketPromotedToContact",
+            eventPayloadBuilder.build(
+                event          : "onTicketPromotedToContact",
+                organizationId : contact.getOrganizationId(),
+                actorType      : "agent",
+                actorId        : arguments.data.actorId ?: "system",
+                entity         : { type : "Ticket", id : t.getId() },
+                metadata       : {
+                    contactId       : contact.getId(),
+                    promotedEmail   : t.getOriginatingEmail()
+                }
+            ),
+            true
         );
         return { "ticket" : t, "contact" : contact };
     }
@@ -788,6 +831,19 @@ class singleton=true {
             metadata       : metadata
         );
 
+        interceptorService.announce(
+            "onTicketAttachmentAdded",
+            eventPayloadBuilder.build(
+                event          : "onTicketAttachmentAdded",
+                organizationId : orgId ?: "",
+                actorType      : actorType,
+                actorId        : actorId,
+                entity         : { type : "Attachment", id : a.getId() },
+                metadata       : metadata
+            ),
+            true
+        );
+
         return a;
     }
 
@@ -888,6 +944,22 @@ class singleton=true {
                 "ticketId"       : a.getTicketId(),
                 "deletionReason" : trim( arguments.reason )
             }
+        );
+
+        interceptorService.announce(
+            "onTicketAttachmentDeleted",
+            eventPayloadBuilder.build(
+                event          : "onTicketAttachmentDeleted",
+                organizationId : a.getOrganizationId() ?: "",
+                actorType      : "agent",
+                actorId        : arguments.agentId,
+                entity         : { type : "Attachment", id : a.getId() },
+                metadata       : {
+                    ticketId       : a.getTicketId(),
+                    deletionReason : trim( arguments.reason )
+                }
+            ),
+            true
         );
         return a;
     }

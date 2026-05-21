@@ -1,0 +1,163 @@
+/**
+ * AuditSourceSpec: the new `source` column + listSources +
+ * manifest-aware listEventTypes.
+ *
+ * Inserts rows directly into audit_events and addons to exercise the
+ * read paths without driving the full announcement chain.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc = getController().getWireBox().getInstance( "AuditService@audit" );
+        variables.testEventIds = [];
+        variables.testAddonIds = [];
+    }
+
+    function afterAll(){
+        for ( var id in variables.testEventIds ) {
+            queryExecute( "DELETE FROM audit_events WHERE id = :id", { id : id } );
+        }
+        for ( var id in variables.testAddonIds ) {
+            queryExecute( "DELETE FROM addons WHERE addon_id = :a", { a : id } );
+        }
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "AuditService.record with source", function(){
+
+            it( "stores the source slug on the row", function(){
+                var slug = "spec-source-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                var ev = variables.svc.record(
+                    eventType : "exampleJira.issueCreated",
+                    source    : slug,
+                    metadata  : { jiraKey : "PROJ-1" }
+                );
+                variables.testEventIds.append( ev.getId() );
+
+                var row = queryExecute(
+                    "SELECT source FROM audit_events WHERE id = :id",
+                    { id : ev.getId() }
+                );
+                expect( row.source[ 1 ] ).toBe( slug );
+            } );
+
+            it( "stores null source when omitted (core event)", function(){
+                var ev = variables.svc.record( eventType : "ticket.something_for_spec_only" );
+                variables.testEventIds.append( ev.getId() );
+                var row = queryExecute(
+                    "SELECT source FROM audit_events WHERE id = :id",
+                    { id : ev.getId() }
+                );
+                expect( isNull( row.source[ 1 ] ) || !len( row.source[ 1 ] ?: "" ) ).toBeTrue();
+            } );
+
+        } );
+
+        describe( "AuditService.search by source", function(){
+
+            it( "filters by an add-on source slug", function(){
+                var slug = "spec-filter-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                var ev = variables.svc.record( eventType : "spec.scoped", source : slug );
+                variables.testEventIds.append( ev.getId() );
+
+                var hits = variables.svc.search( source : slug );
+                expect( hits.len() ).toBeGTE( 1 );
+                // Every hit must carry the slug.
+                for ( var h in hits ) {
+                    expect( h.getSource() ).toBe( slug );
+                }
+            } );
+
+            it( "treats source='core' as 'null only' (excludes add-on rows)", function(){
+                var slug = "spec-core-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                var coreEv = variables.svc.record( eventType : "spec.core_only" );
+                var addonEv = variables.svc.record( eventType : "spec.core_only", source : slug );
+                variables.testEventIds.append( coreEv.getId() );
+                variables.testEventIds.append( addonEv.getId() );
+
+                var hits = variables.svc.search( eventType : "spec.core_only", source : "core" );
+                var foundAddon = false;
+                var foundCore  = false;
+                for ( var h in hits ) {
+                    if ( !len( h.getSource() ?: "" ) ) foundCore = true;
+                    if ( ( h.getSource() ?: "" ) == slug ) foundAddon = true;
+                }
+                expect( foundCore ).toBeTrue();
+                expect( foundAddon ).toBeFalse();
+            } );
+
+        } );
+
+        describe( "AuditService.listEventTypes manifest merge", function(){
+
+            it( "includes event types declared in an add-on manifest even before any event of that type has fired", function(){
+                var addonId = installFixtureAddon( [
+                    { type : "specAddon.thingHappened", label : "Thing happened", severity : "info" }
+                ] );
+
+                var types = variables.svc.listEventTypes();
+                expect( types ).toInclude( "specAddon.thingHappened" );
+            } );
+
+            it( "deduplicates types that exist in both the log and a manifest", function(){
+                var addonId = installFixtureAddon( [
+                    { type : "specAddon.dupKey", label : "Dup key", severity : "info" }
+                ] );
+                var ev = variables.svc.record( eventType : "specAddon.dupKey", source : addonId );
+                variables.testEventIds.append( ev.getId() );
+
+                var types = variables.svc.listEventTypes();
+                var occurrences = 0;
+                for ( var t in types ) if ( t == "specAddon.dupKey" ) occurrences++;
+                expect( occurrences ).toBe( 1 );
+            } );
+
+        } );
+
+        describe( "AuditService.listSources", function(){
+
+            it( "returns the sentinel 'core' when only core events exist", function(){
+                var ev = variables.svc.record( eventType : "spec.core_sentinel" );
+                variables.testEventIds.append( ev.getId() );
+                var sources = variables.svc.listSources();
+                expect( sources ).toInclude( "core" );
+            } );
+
+            it( "lists an add-on slug after it has emitted at least one event", function(){
+                var slug = "spec-ls-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                var ev = variables.svc.record( eventType : "spec.ls", source : slug );
+                variables.testEventIds.append( ev.getId() );
+                expect( variables.svc.listSources() ).toInclude( slug );
+            } );
+
+        } );
+    }
+
+    private string function installFixtureAddon( required array auditEvents ){
+        var id = "spec-audit-" & lcase( replace( createUUID(), "-", "", "all" ) );
+        var manifest = {
+            addonId        : id,
+            displayName    : "Audit spec fixture",
+            version        : "0.0.1",
+            minCoreVersion : "0.0.1",
+            maxCoreVersion : "",
+            auditEvents    : arguments.auditEvents
+        };
+        queryExecute(
+            "INSERT INTO addons
+                ( addon_id, display_name, version, min_core_version, max_core_version,
+                  contributes_to, requires_ai, enabled, enablement_mode, compatible, metadata )
+             VALUES
+                ( :a, 'Audit Fixture', '0.0.1', '0.0.1', '',
+                  '', cast( 'false' as boolean ), cast( 'true' as boolean ), 'all',
+                  cast( 'true' as boolean ), :meta )",
+            { a : id, meta : jsonSerialize( manifest ) }
+        );
+        variables.testAddonIds.append( id );
+        return id;
+    }
+
+}

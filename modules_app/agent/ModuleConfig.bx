@@ -21,9 +21,14 @@ class {
     this.dependencies       = [ "contacts", "audit", "tickets", "channels", "knowledgebase", "reporting", "notifications" ];
 
     function configure(){
-        settings = {};
+        // `variables.` prefix is REQUIRED throughout configure(); see
+        // gotcha log in docs/EXTENSIBILITY-PLAN.md ("Unscoped
+        // assignments in ModuleConfig.bx configure() go to function-
+        // local"). Unscoped settings/routes/etc. are invisible to
+        // ColdBox.
+        variables.settings = {};
 
-        routes = [
+        variables.routes = [
             { pattern : "/",                handler : "Home",    action : "index" },
             { pattern : "/login",           handler : "Session", action : "new"   },
             { pattern : "/logout",          handler : "Session", action : "delete" },
@@ -34,7 +39,7 @@ class {
         // AgentAuthService backs cbauth, and the session storage key is
         // namespaced separately. The nested admin module overlays its own
         // /agent/admin rules so non-admin agents get 403 (not 404).
-        cbSecurity = {
+        variables.cbSecurity = {
             userService         : "AgentAuthService@agent",
             sessionStorageScope : "session",
             authStorage         : "tesserabx_agent_user",
@@ -48,8 +53,15 @@ class {
             }
         };
 
-        interceptorSettings = { customInterceptionPoints : [] };
-        interceptors = [];
+        variables.interceptorSettings = { customInterceptionPoints : [
+            "onAgentCreated",
+            "onAgentUpdated",
+            "onAgentActivated",
+            "onAgentDeactivated",
+            "onAgentRoleGranted",
+            "onAgentRoleRevoked"
+        ] };
+        variables.interceptors = [];
     }
 
     function onLoad(){

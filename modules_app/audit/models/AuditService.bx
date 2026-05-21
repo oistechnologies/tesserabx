@@ -16,7 +16,8 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
+    property name="wirebox"              inject="wirebox";
+    property name="addonRegistryService" inject="AddonRegistryService@core";
 
     /**
      * Record one audit event.
@@ -28,6 +29,10 @@ class singleton=true {
      * @actorType        Optional. "agent" | "contact" | "system".
      * @actorId          Optional. Identifier of the actor.
      * @metadata         Optional struct. Serialized to JSON on insert.
+     * @source           Optional. Add-on slug (addon_id) that
+     *                   originated the event, or empty for core.
+     *                   See docs/EXTENSIONS.md "Audit-event
+     *                   contributions" for the contribution path.
      */
     public any function record(
         required string eventType,
@@ -36,7 +41,8 @@ class singleton=true {
         string organizationId,
         string actorType,
         string actorId,
-        struct metadata
+        struct metadata,
+        string source
     ){
         var event = wirebox.getInstance( "AuditEvent@audit" );
         event.setId( newId() );
@@ -59,6 +65,9 @@ class singleton=true {
         if ( structKeyExists( arguments, "metadata" ) && !isNull( arguments.metadata ) ) {
             event.setMetadataJson( jsonSerialize( arguments.metadata ) );
         }
+        if ( structKeyExists( arguments, "source" ) && len( arguments.source ?: "" ) ) {
+            event.setSource( arguments.source );
+        }
         event.save();
         return event;
     }
@@ -76,6 +85,7 @@ class singleton=true {
         string actorId,
         any occurredAfter,
         any occurredBefore,
+        string source,
         numeric limit = 100,
         numeric offset = 0
     ){
@@ -98,6 +108,15 @@ class singleton=true {
         if ( structKeyExists( arguments, "actorId" ) && len( arguments.actorId ?: "" ) ) {
             q = q.where( "actor_id", arguments.actorId );
         }
+        if ( structKeyExists( arguments, "source" ) && len( arguments.source ?: "" ) ) {
+            // Sentinel "core" matches rows whose source is NULL
+            // (events the core modules emit without a source slug).
+            if ( arguments.source == "core" ) {
+                q = q.whereNull( "source" );
+            } else {
+                q = q.where( "source", arguments.source );
+            }
+        }
         if ( structKeyExists( arguments, "occurredAfter" ) && !isNull( arguments.occurredAfter ) ) {
             q = q.where( "occurred_at", ">=", arguments.occurredAfter );
         }
@@ -111,19 +130,80 @@ class singleton=true {
     }
 
     /**
-     * The distinct event_type values currently in the log. Used by the
-     * admin search UI to populate a filter dropdown without hardcoding
-     * the known event types.
+     * Distinct source values currently in the log. Used by the admin
+     * search UI to populate a "Source" filter dropdown. Returns each
+     * add-on slug that has ever emitted an audit event, plus the
+     * sentinel "core" representing rows where source IS NULL.
+     */
+    public array function listSources(){
+        var rows = queryExecute(
+            "SELECT DISTINCT source FROM audit_events ORDER BY source NULLS FIRST",
+            {},
+            { returntype : "array" }
+        );
+        var out = [];
+        var seenNull = false;
+        for ( var row in rows ) {
+            if ( isNull( row.source ) || !len( row.source ?: "" ) ) {
+                if ( !seenNull ) out.append( "core" );
+                seenNull = true;
+                continue;
+            }
+            out.append( row.source );
+        }
+        if ( !out.len() ) out.append( "core" );
+        return out;
+    }
+
+    /**
+     * The distinct event_type values currently in the log, merged with
+     * the event types declared by every installed add-on in its
+     * settings.tesserabx.auditEvents = [...] manifest block. The
+     * declared-but-never-fired entries appear in the dropdown so
+     * operators can filter for an add-on event the first time it
+     * happens, not only after it has happened.
+     *
+     * Returns a deduplicated, sorted array.
      */
     public array function listEventTypes(){
+        var seen = {};
         var rows = queryExecute(
             "SELECT DISTINCT event_type FROM audit_events ORDER BY event_type",
             {},
             { returntype: "array" }
         );
-        var out = [];
         for ( var row in rows ) {
-            out.append( row.event_type );
+            if ( len( row.event_type ?: "" ) ) seen[ row.event_type ] = true;
+        }
+        for ( var addon in addonRegistryService.listAll() ) {
+            for ( var declared in extractAuditEventTypes( addon ) ) {
+                if ( len( declared ) ) seen[ declared ] = true;
+            }
+        }
+        var out = structKeyArray( seen );
+        out.sort( "textnocase" );
+        return out;
+    }
+
+    private array function extractAuditEventTypes( required struct addonRow ){
+        // arguments.addonRow.metadata is the JSON-encoded manifest
+        // captured by AddonRegistryService.upsert. The auditEvents
+        // array (when present) is shaped like
+        //   [ { type: "...", label: "...", severity: "..." }, ... ]
+        var meta = arguments.addonRow.metadata ?: "";
+        if ( !len( meta ) ) return [];
+        try {
+            var manifest = jsonDeserialize( meta );
+        } catch ( any e ) {
+            return [];
+        }
+        var declared = manifest.auditEvents ?: [];
+        if ( !isArray( declared ) ) return [];
+        var out = [];
+        for ( var d in declared ) {
+            if ( isStruct( d ) && structKeyExists( d, "type" ) && len( d.type ?: "" ) ) {
+                out.append( d.type );
+            }
         }
         return out;
     }

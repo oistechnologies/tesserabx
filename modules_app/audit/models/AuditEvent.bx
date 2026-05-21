@@ -26,6 +26,9 @@ class
     // a bare `getMetadata()` collides with BoxLang's built-in
     // `getMetadata( obj )` BIF (which inspects component metadata).
     property name="metadataJson"    column="metadata_json";
+    // Add-on origin slug, or null for core events. See Phase 3 of
+    // docs/EXTENSIBILITY-PLAN.md for the contribution mechanism.
+    property name="source"          column="source";
     property name="occurredAt"      column="occurred_at" sqltype="timestamp";
 
     /**

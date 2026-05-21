@@ -19,6 +19,7 @@ class {
         param rc.eventType      = "";
         param rc.organizationId = "";
         param rc.entityId       = "";
+        param rc.source         = "";
         param rc.limit          = 100;
 
         prc.pageTitle      = "Audit log";
@@ -26,9 +27,11 @@ class {
             eventType      : rc.eventType,
             organizationId : rc.organizationId,
             entityId       : rc.entityId,
+            source         : rc.source,
             limit          : int( rc.limit )
         );
         prc.eventTypes     = auditService.listEventTypes();
+        prc.sources        = auditService.listSources();
         prc.organizations  = contactsService.listOrganizations();
 
         // Preload an agent directory keyed by id for every agent
@@ -46,6 +49,7 @@ class {
             eventType      : rc.eventType,
             organizationId : rc.organizationId,
             entityId       : rc.entityId,
+            source         : rc.source,
             limit          : rc.limit
         };
         event.setView( "audit/index" );

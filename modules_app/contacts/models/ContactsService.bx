@@ -23,9 +23,11 @@
  */
 class singleton=true {
 
-    property name="wirebox"      inject="wirebox";
-    property name="bcrypt"       inject="@BCrypt";
-    property name="auditService" inject="AuditService@audit";
+    property name="wirebox"             inject="wirebox";
+    property name="bcrypt"              inject="@BCrypt";
+    property name="auditService"        inject="AuditService@audit";
+    property name="interceptorService"  inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
 
     // ---------------- Organizations ----------------
 
@@ -64,6 +66,19 @@ class singleton=true {
             entityId       : org.getId(),
             organizationId : org.getId(),
             metadata       : { "name" : org.getName(), "slug" : org.getSlug(), "tier" : org.getTier() ?: "" }
+        );
+
+        interceptorService.announce(
+            "onOrganizationCreated",
+            eventPayloadBuilder.build(
+                event          : "onOrganizationCreated",
+                organizationId : org.getId(),
+                actorType      : arguments.data.actorType ?: "system",
+                actorId        : arguments.data.actorId ?: "system",
+                entity         : { type : "Organization", id : org.getId() },
+                metadata       : { name : org.getName(), slug : org.getSlug(), tier : org.getTier() ?: "" }
+            ),
+            true
         );
         return org;
     }
@@ -149,6 +164,19 @@ class singleton=true {
             organizationId : contact.getOrganizationId(),
             metadata       : { "email" : contact.getEmail() }
         );
+
+        interceptorService.announce(
+            "onContactProvisioned",
+            eventPayloadBuilder.build(
+                event          : "onContactProvisioned",
+                organizationId : contact.getOrganizationId(),
+                actorType      : arguments.data.actorType ?: "system",
+                actorId        : arguments.data.actorId ?: "system",
+                entity         : { type : "Contact", id : contact.getId() },
+                metadata       : { email : contact.getEmail() }
+            ),
+            true
+        );
         return contact;
     }
 
@@ -162,6 +190,16 @@ class singleton=true {
             entityType     : "Contact",
             entityId       : contact.getId(),
             organizationId : contact.getOrganizationId()
+        );
+
+        interceptorService.announce(
+            "onContactDeactivated",
+            eventPayloadBuilder.build(
+                event          : "onContactDeactivated",
+                organizationId : contact.getOrganizationId(),
+                entity         : { type : "Contact", id : contact.getId() }
+            ),
+            true
         );
         return contact;
     }
@@ -204,6 +242,19 @@ class singleton=true {
             actorId        : arguments.grantedByAgentId ?: "",
             metadata       : { "roleKey" : arguments.roleKey }
         );
+
+        interceptorService.announce(
+            "onContactRoleGranted",
+            eventPayloadBuilder.build(
+                event          : "onContactRoleGranted",
+                organizationId : isNull( contact ) ? "" : contact.getOrganizationId(),
+                actorType      : "agent",
+                actorId        : arguments.grantedByAgentId ?: "system",
+                entity         : { type : "Contact", id : arguments.contactId },
+                metadata       : { roleKey : arguments.roleKey }
+            ),
+            true
+        );
         return assignment;
     }
 
@@ -222,6 +273,17 @@ class singleton=true {
             entityId       : arguments.contactId,
             organizationId : isNull( contact ) ? "" : contact.getOrganizationId(),
             metadata       : { "roleKey" : arguments.roleKey }
+        );
+
+        interceptorService.announce(
+            "onContactRoleRevoked",
+            eventPayloadBuilder.build(
+                event          : "onContactRoleRevoked",
+                organizationId : isNull( contact ) ? "" : contact.getOrganizationId(),
+                entity         : { type : "Contact", id : arguments.contactId },
+                metadata       : { roleKey : arguments.roleKey }
+            ),
+            true
         );
     }
 
@@ -261,6 +323,17 @@ class singleton=true {
             entityId       : arguments.organizationId,
             organizationId : arguments.organizationId,
             metadata       : { "domain" : mapping.getDomain(), "isVerified" : arguments.isVerified }
+        );
+
+        interceptorService.announce(
+            "onOrganizationDomainMapped",
+            eventPayloadBuilder.build(
+                event          : "onOrganizationDomainMapped",
+                organizationId : arguments.organizationId,
+                entity         : { type : "Organization", id : arguments.organizationId },
+                metadata       : { domain : mapping.getDomain(), isVerified : arguments.isVerified }
+            ),
+            true
         );
         return mapping;
     }
@@ -325,6 +398,21 @@ class singleton=true {
                 "targetContactId" : target.getId(),
                 "rolesMoved"      : moved
             }
+        );
+
+        interceptorService.announce(
+            "onContactMerged",
+            eventPayloadBuilder.build(
+                event          : "onContactMerged",
+                organizationId : target.getOrganizationId(),
+                entity         : { type : "Contact", id : target.getId() },
+                metadata       : {
+                    sourceContactId : source.getId(),
+                    targetContactId : target.getId(),
+                    rolesMoved      : moved
+                }
+            ),
+            true
         );
 
         return {

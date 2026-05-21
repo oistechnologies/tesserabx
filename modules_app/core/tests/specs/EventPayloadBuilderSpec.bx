@@ -1,0 +1,83 @@
+/**
+ * EventPayloadBuilderSpec: the canonical event envelope contract.
+ *
+ * The builder must always produce the same shape regardless of which
+ * optional args are passed, must default actor to "system", and must
+ * accept null before/after explicitly.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.builder = getController().getWireBox().getInstance( "EventPayloadBuilder@core" );
+    }
+
+    function run(){
+        describe( "EventPayloadBuilder.build", function(){
+
+            it( "produces the full canonical envelope when every arg is provided", function(){
+                var p = variables.builder.build(
+                    event          : "onContactCreated",
+                    organizationId : "org-1",
+                    actorType      : "agent",
+                    actorId        : "agent-1",
+                    entity         : { type : "Contact", id : "c-1" },
+                    before         : { isActive : false },
+                    after          : { isActive : true },
+                    metadata       : { foo : "bar" }
+                );
+                expect( p.event ).toBe( "onContactCreated" );
+                expect( p.organizationId ).toBe( "org-1" );
+                expect( p.actorType ).toBe( "agent" );
+                expect( p.actorId ).toBe( "agent-1" );
+                expect( p.entity.type ).toBe( "Contact" );
+                expect( p.entity.id ).toBe( "c-1" );
+                expect( p.before.isActive ).toBeFalse();
+                expect( p.after.isActive ).toBeTrue();
+                expect( p.metadata.foo ).toBe( "bar" );
+                // occurredAt is always set; ISO-8601 format starts with YYYY-
+                expect( p.occurredAt.left( 4 ) ).toMatch( "^[0-9]{4}$" );
+            } );
+
+            it( "defaults actorType and actorId to system when not provided", function(){
+                var p = variables.builder.build( event : "onSomething" );
+                expect( p.actorType ).toBe( "system" );
+                expect( p.actorId ).toBe( "system" );
+            } );
+
+            it( "defaults organizationId to empty string", function(){
+                var p = variables.builder.build( event : "onSomething" );
+                expect( p.organizationId ).toBe( "" );
+            } );
+
+            it( "defaults entity and metadata to empty structs", function(){
+                var p = variables.builder.build( event : "onSomething" );
+                expect( isStruct( p.entity ) ).toBeTrue();
+                expect( structIsEmpty( p.entity ) ).toBeTrue();
+                expect( isStruct( p.metadata ) ).toBeTrue();
+                expect( structIsEmpty( p.metadata ) ).toBeTrue();
+            } );
+
+            it( "leaves before and after null when not provided", function(){
+                var p = variables.builder.build( event : "onSomething" );
+                expect( isNull( p.before ) ).toBeTrue();
+                expect( isNull( p.after ) ).toBeTrue();
+            } );
+
+            it( "always sets the event name verbatim", function(){
+                var p = variables.builder.build( event : "onTicketAssigned" );
+                expect( p.event ).toBe( "onTicketAssigned" );
+            } );
+
+            it( "always includes occurredAt as a non-empty ISO-8601 timestamp", function(){
+                var p = variables.builder.build( event : "onSomething" );
+                expect( len( p.occurredAt ) ).toBeGT( 10 );
+                // Crude format check: contains a date and a T separator
+                expect( p.occurredAt ).toMatch( "^[0-9]{4}-[0-9]{2}-[0-9]{2}T" );
+            } );
+
+        } );
+    }
+
+}
