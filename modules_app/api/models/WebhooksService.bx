@@ -14,22 +14,26 @@
  */
 class singleton=true {
 
-    property name="wirebox"      inject="wirebox";
-    property name="auditService" inject="AuditService@audit";
+    property name="wirebox"        inject="wirebox";
+    property name="auditService"   inject="AuditService@audit";
+    property name="eventRegistry"  inject="WebhookEventRegistry@api";
 
     /**
-     * The catalog of event keys other modules can fire here. The
-     * admin UI uses this to render multi-select; the dispatcher
-     * accepts any string but rejects unknown keys from new
+     * The catalog of event keys other modules can fire here. Sourced
+     * from WebhookEventRegistry as of Phase 8; the admin UI uses
+     * this to render multi-select. The dispatcher accepts any
+     * string at runtime but rejects unknown keys from new
      * subscriptions to keep typos out of production config.
+     *
+     * Returned shape matches the historical contract:
+     *   [ { key : "...", label : "..." }, ... ]
      */
     public array function eventCatalog(){
-        return [
-            { key : "ticket.created",         label : "Ticket created" },
-            { key : "ticket.status_changed",  label : "Ticket status changed" },
-            { key : "ticket.message_added",   label : "Message added to ticket" },
-            { key : "ticket.assigned",        label : "Ticket assigned to agent" }
-        ];
+        var out = [];
+        for ( var entry in eventRegistry.listAll() ) {
+            out.append( { key : entry.key, label : entry.label } );
+        }
+        return out;
     }
 
     // ---------------- Subscription CRUD ----------------
@@ -323,15 +327,14 @@ class singleton=true {
         if ( !len( trim( arguments.eventKeys ) ) ) {
             throw( type : "WebhooksService.InvalidEventKeys", message : "At least one event_key is required." );
         }
-        var allowed = [ "*" ];
-        for ( var entry in eventCatalog() ) allowed.append( entry.key );
         for ( var k in listToArray( arguments.eventKeys, "," ) ) {
             var t = trim( k );
             if ( !len( t ) ) continue;
-            if ( !arrayFindNoCase( allowed, t ) ) {
+            if ( t == "*" ) continue;
+            if ( !eventRegistry.isRegistered( t ) ) {
                 throw(
                     type    : "WebhooksService.UnknownEventKey",
-                    message : "Unknown event_key: " & t & ". Allowed: *, " & eventCatalog().map( ( e ) => e.key ).toList( ", " )
+                    message : "Unknown event_key: " & t & ". Allowed: *, " & eventRegistry.listKeys().toList( ", " )
                 );
             }
         }

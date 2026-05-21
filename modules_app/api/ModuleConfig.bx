@@ -43,6 +43,12 @@ class {
               .to( "#moduleMapping#.models.WebhookSubscription" );
         binder.map( "WebhookDelivery@api" )
               .to( "#moduleMapping#.models.WebhookDelivery" );
+        binder.map( "WebhookEventRegistry@api" )
+              .to( "#moduleMapping#.models.WebhookEventRegistry" )
+              .asSingleton();
+        binder.map( "ApiResourceRegistry@api" )
+              .to( "#moduleMapping#.models.ApiResourceRegistry" )
+              .asSingleton();
         binder.map( "WebhooksService@api" )
               .to( "#moduleMapping#.models.WebhooksService" )
               .asSingleton();

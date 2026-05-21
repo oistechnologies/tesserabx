@@ -1,0 +1,202 @@
+/**
+ * ApiResourceRegistry: metadata catalog of REST endpoints the
+ * application exposes under /api.
+ *
+ * The registry does NOT emit ColdBox routes (those live in
+ * modules_app/api/config/Router.bx for core, and in each add-on's
+ * own Router.bx or `routes` block for add-ons). The registry is a
+ * machine-readable description of what is exposed, used by:
+ *
+ *   - cbswagger and any future OpenAPI tooling that wants a
+ *     module-aware route inventory.
+ *   - the admin diagnostics surface (which add-on contributed which
+ *     route, at what version, behind which permission).
+ *   - third-party tooling that needs a programmatic list of the
+ *     surfaces it can hit.
+ *
+ * Each entry declares:
+ *
+ *   id                  stable string, conventionally
+ *                       "<module>.<verb>.<short-path>", e.g.
+ *                       "tickets.get.show" or "exampleJira.post.sync"
+ *   method              HTTP verb (GET, POST, PUT, PATCH, DELETE)
+ *   path                full path including /api prefix, e.g.
+ *                       "/api/v1/tickets/:id". Always start with
+ *                       "/api"; the registry does not auto-prefix.
+ *   version             version slug ("v1", "v2", ...). Used for
+ *                       grouping in the admin diagnostics view; not
+ *                       used for routing itself.
+ *   handler             ColdBox handler reference, e.g. "Tickets"
+ *                       (relative to the contributing module).
+ *   action              handler action method, e.g. "show".
+ *   summary             one-line human description.
+ *   requiresAuth        boolean; true for endpoints that require a
+ *                       valid JWT (the default), false for login,
+ *                       refresh, and public docs.
+ *   requiredPermission  optional permission id from
+ *                       PermissionRegistry. Empty string means
+ *                       authenticated-agent is sufficient.
+ *   mementifierIncludes optional array of mementifier `includes`
+ *                       this route emits (for documentation only).
+ *   source              auto-populated: "core" for the api module's
+ *                       own routes; the contributing module name
+ *                       for add-on declarations.
+ *
+ * Add-ons contribute via:
+ *
+ *   settings.tesserabx.apiResources = [
+ *       {
+ *           id      : "exampleJira.get.status",
+ *           method  : "GET",
+ *           path    : "/api/v1/example-jira/status",
+ *           version : "v1",
+ *           handler : "JiraStatus",
+ *           action  : "show",
+ *           summary : "Current Jira sync status.",
+ *           requiresAuth       : true,
+ *           requiredPermission : "exampleJira.view"
+ *       }
+ *   ];
+ *
+ * Add-ons that mount routes under /api/v1/<addon>/... will be picked
+ * up by cbswagger automatically (cbswagger config scans the "api/v1"
+ * prefix). Routes outside that prefix work too but will not appear
+ * in the OpenAPI document unless cbswagger is reconfigured.
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "ApiResourceRegistry@api" );
+ *   var all      = registry.listAll();
+ *   var v1       = registry.listForVersion( "v1" );
+ *   var byMod    = registry.listByModule( "tickets" );
+ *   var single   = registry.findById( "tickets.get.show" );
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){
+            var av = compare( a.version, b.version );
+            if ( av != 0 ) return av;
+            return compare( a.path, b.path );
+        } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public array function listForVersion( required string version ){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) {
+            var e = variables.cache[ id ];
+            if ( e.version == arguments.version ) out.append( e );
+        }
+        out.sort( function( a, b ){ return compare( a.path, b.path ); } );
+        return out;
+    }
+
+    public array function listByModule( required string moduleName ){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) {
+            var e = variables.cache[ id ];
+            if ( e.source == arguments.moduleName ) out.append( e );
+        }
+        out.sort( function( a, b ){ return compare( a.path, b.path ); } );
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        // Set the flag first; seedCoreResources() calls addEntry which
+        // does NOT re-enter ensureLoaded(), but keeping the same idiom
+        // as the other registries avoids future-foot-guns when the
+        // seeder grows. See gotchas log: cacheLoaded must be set
+        // BEFORE seeding to prevent infinite recursion.
+        variables.cacheLoaded = true;
+
+        seedCoreResources();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.apiResources ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var r in declared ) addEntry( r, moduleName );
+        }
+    }
+
+    private void function seedCoreResources(){
+        // Mirror the eight routes wired in modules_app/api/config/Router.bx
+        // as of Phase 8. These are NOT how the routes get registered with
+        // ColdBox; they are the descriptive catalog used by diagnostics,
+        // docs, and add-on tooling.
+        var seeds = [
+            { id : "api.tickets.show",          method : "GET",  path : "/api/v1/tickets/:id",            version : "v1", handler : "Tickets", action : "show",         summary : "Fetch a single ticket as a memento.",                   requiresAuth : true,  requiredPermission : "tickets.view"      },
+            { id : "api.tickets.index",         method : "GET",  path : "/api/v1/tickets",                version : "v1", handler : "Tickets", action : "index",        summary : "List tickets, paged, filtered, sorted.",                requiresAuth : true,  requiredPermission : "tickets.view"      },
+            { id : "api.tickets.create",        method : "POST", path : "/api/v1/tickets",                version : "v1", handler : "Tickets", action : "create",       summary : "Create a ticket. Body is the ticket payload.",          requiresAuth : true,  requiredPermission : "tickets.view"      },
+            { id : "api.tickets.reply",         method : "POST", path : "/api/v1/tickets/:id/messages",   version : "v1", handler : "Tickets", action : "reply",        summary : "Append a message to a ticket.",                          requiresAuth : true,  requiredPermission : "tickets.view"      },
+            { id : "api.tickets.change-status", method : "POST", path : "/api/v1/tickets/:id/status",     version : "v1", handler : "Tickets", action : "changeStatus", summary : "Transition a ticket to a new status.",                  requiresAuth : true,  requiredPermission : "tickets.view"      },
+            { id : "api.tickets.assign",        method : "POST", path : "/api/v1/tickets/:id/assign",     version : "v1", handler : "Tickets", action : "assign",       summary : "Assign a ticket to an agent.",                          requiresAuth : true,  requiredPermission : "tickets.assign"    },
+            { id : "api.auth.login",            method : "POST", path : "/api/v1/auth/login",             version : "v1", handler : "Auth",    action : "login",        summary : "Exchange agent credentials for a JWT.",                 requiresAuth : false, requiredPermission : ""                  },
+            { id : "api.auth.refresh",          method : "POST", path : "/api/v1/auth/refresh",           version : "v1", handler : "Auth",    action : "refresh",      summary : "Refresh an expiring JWT.",                              requiresAuth : false, requiredPermission : ""                  },
+            { id : "api.swagger.ui",            method : "GET",  path : "/api/swagger",                   version : "v1", handler : "Swagger", action : "index",        summary : "Swagger UI client. The OpenAPI spec lives at /cbswagger.", requiresAuth : false, requiredPermission : ""                }
+        ];
+        for ( var s in seeds ) addEntry( s, "core" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        var includes = structKeyExists( arguments.raw, "mementifierIncludes" ) && isArray( arguments.raw.mementifierIncludes )
+            ? arguments.raw.mementifierIncludes
+            : [];
+        variables.cache[ arguments.raw.id ] = {
+            id                  : arguments.raw.id,
+            method              : ucase( structKeyExists( arguments.raw, "method" )  ? arguments.raw.method  : "GET" ),
+            path                : structKeyExists( arguments.raw, "path" )     ? arguments.raw.path     : "",
+            version             : structKeyExists( arguments.raw, "version" )  ? arguments.raw.version  : "v1",
+            handler             : structKeyExists( arguments.raw, "handler" )  ? arguments.raw.handler  : "",
+            action              : structKeyExists( arguments.raw, "action" )   ? arguments.raw.action   : "",
+            summary             : structKeyExists( arguments.raw, "summary" )  ? arguments.raw.summary  : "",
+            requiresAuth        : structKeyExists( arguments.raw, "requiresAuth" )       ? !!arguments.raw.requiresAuth : true,
+            requiredPermission  : structKeyExists( arguments.raw, "requiredPermission" ) ? arguments.raw.requiredPermission : "",
+            mementifierIncludes : includes,
+            source              : arguments.source
+        };
+    }
+
+}

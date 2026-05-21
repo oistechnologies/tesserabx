@@ -1,0 +1,183 @@
+/**
+ * ApiRegistriesSpec: Phase 8 contracts for the api module.
+ *
+ *   - ApiResourceRegistry seeds the eight core routes and exposes
+ *     the expected lookup surface (listAll, listForVersion,
+ *     listByModule, findById).
+ *   - WebhookEventRegistry seeds the four core event keys, accepts
+ *     imperative registration, and powers WebhooksService's
+ *     validation (so back-compat with eventCatalog() holds).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.apiResources  = wb.getInstance( "ApiResourceRegistry@api" );
+        variables.webhookEvents = wb.getInstance( "WebhookEventRegistry@api" );
+        variables.webhooks      = wb.getInstance( "WebhooksService@api" );
+    }
+
+    function run(){
+
+        describe( "ApiResourceRegistry", function(){
+
+            it( "seeds the eight core routes plus the swagger endpoint", function(){
+                var all = variables.apiResources.listAll();
+                expect( all.len() ).toBeGTE( 9 );
+                var ids = [];
+                for ( var e in all ) ids.append( e.id );
+                expect( ids ).toInclude( "api.tickets.show" );
+                expect( ids ).toInclude( "api.tickets.index" );
+                expect( ids ).toInclude( "api.tickets.create" );
+                expect( ids ).toInclude( "api.tickets.reply" );
+                expect( ids ).toInclude( "api.tickets.change-status" );
+                expect( ids ).toInclude( "api.tickets.assign" );
+                expect( ids ).toInclude( "api.auth.login" );
+                expect( ids ).toInclude( "api.auth.refresh" );
+                expect( ids ).toInclude( "api.swagger.ui" );
+            } );
+
+            it( "findById returns the full entry shape", function(){
+                var e = variables.apiResources.findById( "api.tickets.show" );
+                expect( e ).notToBeNull();
+                expect( e.method ).toBe( "GET" );
+                expect( e.path ).toBe( "/api/v1/tickets/:id" );
+                expect( e.version ).toBe( "v1" );
+                expect( e.handler ).toBe( "Tickets" );
+                expect( e.action ).toBe( "show" );
+                expect( e.requiresAuth ).toBeTrue();
+                expect( e.requiredPermission ).toBe( "tickets.view" );
+                expect( e.source ).toBe( "core" );
+            } );
+
+            it( "auth.login is flagged requiresAuth=false", function(){
+                var e = variables.apiResources.findById( "api.auth.login" );
+                expect( e ).notToBeNull();
+                expect( e.requiresAuth ).toBeFalse();
+            } );
+
+            it( "listForVersion filters by version slug", function(){
+                var v1 = variables.apiResources.listForVersion( "v1" );
+                expect( v1.len() ).toBeGTE( 9 );
+                for ( var e in v1 ) expect( e.version ).toBe( "v1" );
+                expect( variables.apiResources.listForVersion( "v999" ).len() ).toBe( 0 );
+            } );
+
+            it( "listByModule returns only that module's entries", function(){
+                var coreEntries = variables.apiResources.listByModule( "core" );
+                expect( coreEntries.len() ).toBeGTE( 9 );
+                for ( var e in coreEntries ) expect( e.source ).toBe( "core" );
+            } );
+
+            it( "imperative register adds an entry tagged 'imperative'", function(){
+                var probeId = "spec.imperative." & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.apiResources.register( {
+                    id      : probeId,
+                    method  : "post",
+                    path    : "/api/v1/spec/probe",
+                    version : "v1",
+                    handler : "Spec",
+                    action  : "probe",
+                    summary : "Spec probe."
+                } );
+                var entry = variables.apiResources.findById( probeId );
+                expect( entry ).notToBeNull();
+                expect( entry.method ).toBe( "POST" );
+                expect( entry.source ).toBe( "imperative" );
+                // Default coercions.
+                expect( entry.requiresAuth ).toBeTrue();
+                expect( entry.requiredPermission ).toBe( "" );
+                expect( entry.mementifierIncludes ).toBeArray();
+            } );
+
+        } );
+
+        describe( "WebhookEventRegistry", function(){
+
+            it( "seeds the four core ticket event keys", function(){
+                var keys = variables.webhookEvents.listKeys();
+                expect( keys ).toInclude( "ticket.created" );
+                expect( keys ).toInclude( "ticket.status_changed" );
+                expect( keys ).toInclude( "ticket.message_added" );
+                expect( keys ).toInclude( "ticket.assigned" );
+            } );
+
+            it( "isRegistered is true for seeded keys and false otherwise", function(){
+                expect( variables.webhookEvents.isRegistered( "ticket.created" ) ).toBeTrue();
+                expect( variables.webhookEvents.isRegistered( "made.up.never" ) ).toBeFalse();
+            } );
+
+            it( "findByKey returns the full entry shape", function(){
+                var e = variables.webhookEvents.findByKey( "ticket.created" );
+                expect( e ).notToBeNull();
+                expect( e.label ).toBe( "Ticket created" );
+                expect( e.module ).toBe( "api" );
+                expect( len( e.description ) ).toBeGT( 0 );
+            } );
+
+            it( "imperative register adds and isRegistered picks it up", function(){
+                var probeKey = "spec.probe." & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.webhookEvents.register( {
+                    key         : probeKey,
+                    label       : "Spec probe event",
+                    description : "Test event."
+                } );
+                expect( variables.webhookEvents.isRegistered( probeKey ) ).toBeTrue();
+                expect( variables.webhookEvents.findByKey( probeKey ).label ).toBe( "Spec probe event" );
+            } );
+
+        } );
+
+        describe( "WebhooksService back-compat against WebhookEventRegistry", function(){
+
+            it( "eventCatalog still returns the historical [ { key, label } ] shape", function(){
+                var catalog = variables.webhooks.eventCatalog();
+                expect( catalog.len() ).toBeGTE( 4 );
+                for ( var entry in catalog ) {
+                    expect( entry ).toHaveKey( "key" );
+                    expect( entry ).toHaveKey( "label" );
+                }
+            } );
+
+            it( "validateEventKeys accepts a seeded key", function(){
+                var id = variables.webhooks.createSubscription(
+                    name      : "spec-validate-" & createUUID(),
+                    targetUrl : "https://example.test/hook",
+                    eventKeys : "ticket.status_changed"
+                );
+                expect( variables.webhooks.findSubscription( id ) ).notToBeNull();
+                queryExecute( "DELETE FROM webhook_subscriptions WHERE id = :id", { id : id } );
+            } );
+
+            it( "validateEventKeys still accepts a newly-registered key", function(){
+                var probeKey = "spec.acceptance." & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.webhookEvents.register( {
+                    key   : probeKey,
+                    label : "Spec acceptance event"
+                } );
+                var id = variables.webhooks.createSubscription(
+                    name      : "spec-acceptance-" & createUUID(),
+                    targetUrl : "https://example.test/hook",
+                    eventKeys : probeKey
+                );
+                expect( variables.webhooks.findSubscription( id ) ).notToBeNull();
+                queryExecute( "DELETE FROM webhook_subscriptions WHERE id = :id", { id : id } );
+            } );
+
+            it( "validateEventKeys rejects an unregistered key", function(){
+                expect( function(){
+                    variables.webhooks.createSubscription(
+                        name      : "spec-reject-" & createUUID(),
+                        targetUrl : "https://example.test/hook",
+                        eventKeys : "totally.made.up." & createUUID()
+                    );
+                } ).toThrow();
+            } );
+
+        } );
+
+    }
+
+}

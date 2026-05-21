@@ -1,0 +1,136 @@
+/**
+ * WebhookEventRegistry: the catalog of event keys to which webhook
+ * subscriptions may bind.
+ *
+ * Replaces the previously hard-coded list in
+ * WebhooksService.eventCatalog(). The set of selectable event keys
+ * now grows by manifest contribution rather than by editing the
+ * service.
+ *
+ * Each entry declares:
+ *   key         the stable event key, e.g. "ticket.created" or
+ *               "exampleJira.issue_linked". Conventionally:
+ *               "<module-or-addon>.<noun>_<verb>". No spaces; lower
+ *               snake_case after the dot.
+ *   label       human label for the admin multi-select.
+ *   description optional one-line explanation of when the event
+ *               fires, surfaced in the admin UI.
+ *   module      auto-populated: which module declared the event.
+ *               For core seeds: "api" (since the api module owns the
+ *               webhook surface even though the events themselves
+ *               originate in tickets). For add-on declarations: the
+ *               contributing module name.
+ *
+ * Add-ons contribute via:
+ *
+ *   settings.tesserabx.webhookEvents = [
+ *       {
+ *           key         : "exampleJira.issue_linked",
+ *           label       : "Jira issue linked to ticket",
+ *           description : "Fires when an agent links a ticket to a Jira issue."
+ *       }
+ *   ];
+ *
+ * The "*" wildcard subscription is honored at dispatch time by
+ * WebhooksService.subscriptionMatches() and is NOT a registry
+ * entry. Validation of subscription event_keys accepts "*" plus any
+ * registered key.
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "WebhookEventRegistry@api" );
+ *   var all      = registry.listAll();           // catalog for admin UI
+ *   var ok       = registry.isRegistered( key ); // validates a key
+ *   var keys     = registry.listKeys();          // bare ids only
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var key in variables.cache ) out.append( variables.cache[ key ] );
+        out.sort( function( a, b ){ return compare( a.key, b.key ); } );
+        return out;
+    }
+
+    public array function listKeys(){
+        ensureLoaded();
+        var keys = structKeyArray( variables.cache );
+        keys.sort( "textnocase" );
+        return keys;
+    }
+
+    public boolean function isRegistered( required string key ){
+        ensureLoaded();
+        return structKeyExists( variables.cache, arguments.key );
+    }
+
+    public any function findByKey( required string key ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.key ) ) return variables.cache[ arguments.key ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreEvents();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.webhookEvents ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var e in declared ) addEntry( e, moduleName );
+        }
+    }
+
+    private void function seedCoreEvents(){
+        // Mirror the four events previously hard-coded into
+        // WebhooksService.eventCatalog(). Only three of them are
+        // emitted today (the WebhookDispatchInterceptor binds to
+        // ticket.created, ticket.message_added, ticket.status_changed);
+        // ticket.assigned was reserved for future use and remains
+        // selectable so the catalog and the interceptor can grow
+        // independently.
+        var seeds = [
+            { key : "ticket.created",        label : "Ticket created",            description : "Fires when a new ticket is created on any channel."         },
+            { key : "ticket.status_changed", label : "Ticket status changed",     description : "Fires when a ticket transitions to a new workflow status."  },
+            { key : "ticket.message_added",  label : "Message added to ticket",   description : "Fires when an agent or contact appends a message."          },
+            { key : "ticket.assigned",       label : "Ticket assigned to agent",  description : "Reserved for ticket assignment events."                     }
+        ];
+        for ( var s in seeds ) addEntry( s, "api" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "key" ) || !len( arguments.raw.key ?: "" ) ) return;
+        variables.cache[ arguments.raw.key ] = {
+            key         : arguments.raw.key,
+            label       : structKeyExists( arguments.raw, "label" )       ? arguments.raw.label       : arguments.raw.key,
+            description : structKeyExists( arguments.raw, "description" ) ? arguments.raw.description : "",
+            module      : arguments.source
+        };
+    }
+
+}

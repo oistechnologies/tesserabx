@@ -810,6 +810,16 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - Follow-ups identified.
 ```
 
+### 2026-05-20 - Phase 8: API extensibility
+
+- `ApiResourceRegistry@api` is a metadata catalog of REST endpoints exposed under `/api`. Seeds the eight core routes from `modules_app/api/config/Router.bx` plus `/api/swagger`. Add-ons contribute via `settings.tesserabx.apiResources = [...]`. The registry does NOT emit ColdBox routes; it is consumed by cbswagger, admin diagnostics, and third-party tooling that needs a programmatic route inventory. Add-on routes are still registered through standard ColdBox `routes` blocks or a per-add-on router.
+- `WebhookEventRegistry@api` replaces the hard-coded list in `WebhooksService.eventCatalog()`. Seeds the four core ticket events (`ticket.created`, `ticket.status_changed`, `ticket.message_added`, `ticket.assigned`). `WebhooksService.eventCatalog()` now reads from the registry while preserving its historical `[ { key, label } ]` shape. `validateEventKeys()` consults `eventRegistry.isRegistered( key )` for non-wildcard entries.
+- cbswagger config unchanged: it scans the `api/v1` prefix, so any add-on handler whose route resolves under `/api/v1/<addon>/...` is picked up automatically, provided the handler uses the documented JSON-inline annotation style (per the BoxLang docblock-hyphen gotcha).
+- `docs/EXTENSIONS.md`: new "API resources" and "Webhook events" sections cover manifest declaration, the cbswagger contract, validation behavior, and the public extension contract.
+- Specs: `ApiRegistriesSpec` (14/14) covers the eight core route ids, `findById` shape, `requiresAuth` flag handling, `listForVersion`/`listByModule` filters, imperative registration, the four seed webhook events, `isRegistered`/`findByKey`, `register()` round-trips, and the WebhooksService back-compat path (catalog shape preserved, registry-driven validation accepts seeded and newly-registered keys, rejects unknown). The existing `WebhooksServiceSpec` (9/9) passes unchanged.
+- Full sweep: 482/4/9 (+14 from Phase 7 baseline, identical pre-existing CBFS/s3sdk failures).
+- One new gotcha logged: ColdBox module `onLoad()` is one-shot per app boot. Adding a new `binder.map()` call in an existing module's `onLoad()` requires a container restart, not a `?fwreinit`. The dev `fwreinit` URL reloads handler/event state but does NOT re-run module `onLoad()`. Confirmed via `docker restart tesserabx-app`; the new `ApiResourceRegistry@api` and `WebhookEventRegistry@api` mappings appeared only after the restart.
+
 ### 2026-05-20 - Phase 0: Plan persistence and progress tracking
 - Saved this plan as `docs/EXTENSIBILITY-PLAN.md` (em dashes stripped on the way in, external memory link rewritten in prose).
 - Cross-linked from `docs/BUILD-PLAN.md` and `docs/FUTURE-WORK.md`, added a pointer paragraph to `CLAUDE.md`.
@@ -944,6 +954,16 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 ## Gotchas and workarounds log
 
 _Append BoxLang / ColdBox / cbSecurity / cbq / cbfs surprises encountered during build, with the workaround applied. Future phases (and future contributors) read this before working in the same area._
+
+### Phase 8 - Adding a new `binder.map()` to an existing module's `onLoad()` requires a container restart
+
+ColdBox module `onLoad()` runs once per app boot, at module load time. After that, the module's WireBox mappings are fixed for the lifetime of the running app. Hitting the dev `?fwreinit` URL reloads handler/event/interceptor state but does **not** re-run module `onLoad()`, so new `binder.map()` calls added to an existing module's `ModuleConfig.bx` remain invisible to the running ColdBox controller.
+
+Symptom in Phase 8: after adding `binder.map( "ApiResourceRegistry@api" ).to(...).asSingleton()` to `modules_app/api/ModuleConfig.bx onLoad()`, the new `ApiRegistriesSpec` spec failed with `Injector.InstanceNotFoundException: Instance not found: 'ApiResourceRegistry@api'`. The source mount inside the container showed the updated file, but the running WireBox binder had no record of the mapping. `?fwreinit` had no effect. The testbox runner page caches the ColdBox app in `application` scope.
+
+Fix: `docker restart tesserabx-app`, wait for the health check, then re-run specs. After restart the spec passed 14/14.
+
+This only matters when adding new `binder.map()` calls to an **existing** module's `onLoad()`. New modules don't have this problem (the whole module loads fresh on next boot), and edits to model files themselves are picked up without restart (BoxLang reads them per-request).
 
 ### Phase 1 - Unscoped assignments in `ModuleConfig.bx configure()` go to function-local
 
