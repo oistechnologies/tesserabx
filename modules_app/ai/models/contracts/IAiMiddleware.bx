@@ -1,0 +1,69 @@
+/**
+ * IAiMiddleware: documented public surface of AiMiddleware@ai plus
+ * the related AiCapability@ai facade.
+ *
+ * Contract class. See `tickets/models/contracts/ITicketsService.bx` for
+ * the contract-class convention.
+ *
+ * AI is strictly optional in TesseraBX. Add-ons that contribute AI
+ * features MUST gate every call site on AiCapability.isEnabled(); when
+ * AI is disabled, the AI feature registry (Phase 7) automatically hides
+ * the UI those features contribute, but the runtime gate is still the
+ * add-on's responsibility.
+ *
+ * Add-ons resolve the live services via:
+ *
+ *   var ai  = wirebox.getInstance( "AiMiddleware@ai" );
+ *   var cap = wirebox.getInstance( "AiCapability@ai" );
+ *
+ * The `complete` and `embed` methods always return an outcome struct.
+ * `outcome` is one of: "ok", "disabled", "redacted_only", "error",
+ * "not_implemented". Callers MUST switch on outcome before reading
+ * `text` or `vector`.
+ */
+class {
+
+    /**
+     * Run a completion against the configured model. PII redaction is
+     * applied automatically before the prompt leaves the process.
+     * Returns:
+     *   {
+     *     outcome     : "ok" | "disabled" | "redacted_only" | "error" | "not_implemented",
+     *     text        : string,        // empty unless outcome is "ok"
+     *     tokensIn    : numeric,
+     *     tokensOut   : numeric,
+     *     latencyMs   : numeric,
+     *     error       : string         // populated when outcome is "error"
+     *   }
+     */
+    public struct function complete(
+        required string feature,
+        required string prompt,
+        struct options
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IAiMiddleware is a contract; resolve AiMiddleware@ai" );
+    }
+
+    /**
+     * Compute an embedding vector. Same outcome envelope as `complete`,
+     * with `vector` (array<float>) and `dimension` (numeric) in place
+     * of `text`.
+     */
+    public struct function embed(
+        required string feature,
+        required string text,
+        struct options
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IAiMiddleware is a contract; resolve AiMiddleware@ai" );
+    }
+
+    /**
+     * Capability check. Equivalent to:
+     *   wirebox.getInstance( "AiCapability@ai" ).isEnabled()
+     * Exposed here so add-ons have a single resolution path.
+     */
+    public boolean function isEnabled(){
+        throw( type = "ContractClass.NotImplemented", message = "IAiMiddleware is a contract; resolve AiCapability@ai" );
+    }
+
+}

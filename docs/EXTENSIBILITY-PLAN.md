@@ -816,6 +816,27 @@ _Append a dated, one-paragraph note here at the end of every completed phase. Fo
 - No deviations.
 - No additional files touched beyond the four listed in the plan.
 
+### 2026-05-20 - Phase 2: Service contracts and tenancy safety
+- Five service contract classes published under `models/contracts/`: ITicketsService, IContactsService, IAuditService, INotificationsService, IAiMiddleware. They document the public surface add-ons may rely on; method bodies throw `ContractClass.NotImplemented` because BoxLang has no `interface` keyword.
+- Four DTO mapper services published under `models/dtos/`: TicketDto, ContactDto, AuditEventDto, NotificationDto. Each maps Quick entities to snake_case structs that match the JSON the API already returns.
+- TenantScope and TesseraBXEntity got "Public extension contract" docblock additions; no behavior change. Tenant-scope publication is documentation-only.
+- TenancyGuard@contacts shipped with `applyScope` (the convenience helper) and `assertHasOrgPredicate` (the runtime safety net). The dev-only TenancyAuditInterceptor was intentionally NOT shipped — see deviation below.
+- New migration `2026_05_20_000020_create_addon_settings.cfc` adds the per-tenant override table.
+- SettingsRegistry@core resolves descriptor + override; rejects unknown keys and writes to perTenant=false descriptors; provides `listDescriptors`, `listOverridesForOrganization`, `set`, `clear`.
+- Per-module migration namespacing documented (slug-prefix convention) in `docs/EXTENSIONS.md`. No runner change needed.
+- Specs: `TenancyGuardSpec` (7/7) + `SettingsRegistrySpec` (12/12).
+- Wiring: SettingsRegistry@core, TenancyGuard@contacts, and the four DTO mappers all bound in their respective ModuleConfigs.
+- Deviations from plan:
+  - The dev-only `TenancyAuditInterceptor` (Phase 2.4) was NOT shipped. The plan called for an interceptor that "applies the guard to incoming requests for known sensitive routes as a backstop," but the definition of "sensitive routes" and the integration between request-scoped preProcess and per-query tenancy checking were too squishy to make load-bearing. `TenancyGuard` itself ships and is the substantive piece; the interceptor would be a no-op placeholder. If a future phase needs a request-scoped backstop, it can be added then with a concrete use case driving the design.
+  - The contract classes are advisory documentation, not enforceable interfaces. BoxLang has no `interface` keyword (confirmed: `grep "interface {"` returns nothing in the codebase). Add-ons code against the live service via WireBox, and the contract files serve as the canonical reference for the method surface.
+  - Two qb introspection details surfaced in the TenancyGuard implementation; see gotcha log.
+- Files touched that the plan did not list:
+  - `modules_app/audit/models/dtos/AuditEventDto.bx` (new)
+  - `modules_app/notifications/models/dtos/NotificationDto.bx` (new)
+  - `modules_app/audit/ModuleConfig.bx`, `modules_app/notifications/ModuleConfig.bx` (DTO bindings)
+- Follow-ups identified:
+  - Several existing ModuleConfigs across `tickets`, `contacts`, `audit`, `notifications`, etc. use unscoped `settings = {...}` assignments in `configure()` (same scoping bug discovered in Phase 1's gotcha log). They get away with it today because nothing reads those settings, but the Phase 7 / Phase 11 work will start reading them. A sweep to add `variables.` prefixes belongs in whatever phase first touches each module.
+
 ### 2026-05-20 - Phase 1: Add-on foundation
 - Migration `2026_05_20_000010_create_addon_tables.cfc` creates `addons` and `addon_organization_enablement`.
 - `appVersion` setting added to `config/Coldbox.bx` as single source of truth (read via `getSetting("appVersion")`).
@@ -868,6 +889,24 @@ BoxLang ships `jsonSerialize()` and `jsonDeserialize()`. The CFML names `seriali
 ### Phase 1 - To reach the ColdBox controller from a service, inject `coldbox` directly
 
 `wirebox.getController()` does not exist on the WireBox API surface in this BoxLang / ColdBox 8 environment ("Method 'getController' not found"). Use `property name="coldbox" inject="coldbox";` and call `coldbox.getSetting( "<name>" )` directly.
+
+### Phase 2 - qb stores where-clause column as a struct, not a string
+
+When you inspect a qb builder's `getWheres()` array, each where-clause struct's `column` field is itself a struct shaped like `{ type: "simple", value: "<column_name>" }` (see `mapToColumnType` in `modules/qb/models/Query/QueryBuilder.cfc`). Code that does `w.column == "organization_id"` will silently fail to match (BoxLang errors with `In function [equals], argument [struct2] with a type of [String] does not match the declared type of [structloose]` when the comparison is exercised through `toBe()`).
+
+The correct introspection is:
+
+```boxlang
+if ( isStruct( w.column ) && ( w.column.type ?: "" ) == "simple" ) {
+    if ( ( w.column.value ?: "" ) == "organization_id" ) { ... }
+}
+```
+
+Bit `TenancyGuard.assertHasOrgPredicate` directly; future code that introspects qb builders for any reason must follow the same pattern.
+
+### Phase 2 - Raw where clauses are not introspectable
+
+`whereRaw( "organization_id = ?", [ orgId ] )` lands in the wheres array with `type="raw"` and **no `column` field at all**. There is no way to know which columns a raw fragment constrains without parsing the SQL string. `TenancyGuard.assertHasOrgPredicate` accepts a boolean `acceptRaw` flag that opts into "I have hand-verified this raw clause" semantics; if you have to use raw, set the flag explicitly and never let it default.
 
 ### Phase 1 - `?fwreinit=1` does not recompile BoxLang `.bx` source
 

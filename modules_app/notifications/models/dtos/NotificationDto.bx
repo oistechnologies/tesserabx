@@ -1,0 +1,36 @@
+/**
+ * NotificationDto: stable cross-boundary struct shape for Notification.
+ *
+ * See `tickets/models/dtos/TicketDto.bx` for the DTO mapper convention.
+ *
+ *   var dto = wirebox.getInstance( "NotificationDto@notifications" );
+ *   var record = dto.fromNotification( notificationEntity );
+ */
+class singleton=true {
+
+    public struct function fromNotification( required any entity ){
+        var n = arguments.entity;
+        return {
+            id              : n.getId(),
+            recipient_type  : n.getRecipientType(),
+            recipient_id    : n.getRecipientId(),
+            event_key       : n.getEventKey(),
+            channel         : n.getChannel(),
+            title           : n.getTitle() ?: "",
+            body            : n.getBody()  ?: "",
+            link            : n.getLink()  ?: "",
+            status          : n.getStatus(),
+            error_message   : n.getErrorMessage()   ?: "",
+            ticket_id       : n.getTicketId()       ?: "",
+            organization_id : n.getOrganizationId() ?: "",
+            created_at      : toString( n.getCreatedAt() ?: "" ),
+            sent_at         : toString( n.getSentAt()    ?: "" ),
+            read_at         : toString( n.getReadAt()    ?: "" )
+        };
+    }
+
+    public array function fromNotificationArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromNotification( e ) );
+    }
+
+}

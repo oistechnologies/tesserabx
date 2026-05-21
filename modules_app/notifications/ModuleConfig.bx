@@ -47,6 +47,9 @@ class {
         binder.map( "NotificationsService@notifications" )
               .to( "#moduleMapping#.models.NotificationsService" )
               .asSingleton();
+        binder.map( "NotificationDto@notifications" )
+              .to( "#moduleMapping#.models.dtos.NotificationDto" )
+              .asSingleton();
     }
 
     function onUnload(){}

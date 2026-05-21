@@ -13,6 +13,20 @@
  *
  * Future phases extend this with shared timestamp hooks and audit
  * announcements; for now it only owns the key strategy.
+ *
+ * --- Public extension contract ---
+ *
+ * Add-ons that ship their own Quick entities SHOULD extend this base
+ * class. Doing so guarantees:
+ *   - UUID id strings (no surprise AUTO_INCREMENT integer keys).
+ *   - A consistent place for future TesseraBX-wide entity behaviors
+ *     (audit announcements, soft-delete hooks, etc.) to land without
+ *     each add-on having to opt in.
+ *
+ * Tenant-scoped add-on entities must additionally apply the
+ * `TenantScope@contacts` in their `applyGlobalScopes` hook. See
+ * `modules_app/contacts/models/scopes/TenantScope.bx` and the
+ * "Tenant scope" section of `docs/EXTENSIONS.md`.
  */
 class
     extends="quick.models.BaseEntity"

@@ -40,6 +40,9 @@ class {
         binder.map( "AuditService@audit" )
               .to( "#moduleMapping#.models.AuditService" )
               .asSingleton();
+        binder.map( "AuditEventDto@audit" )
+              .to( "#moduleMapping#.models.dtos.AuditEventDto" )
+              .asSingleton();
     }
 
     function onUnload(){}

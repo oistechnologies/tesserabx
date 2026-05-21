@@ -1,0 +1,90 @@
+/**
+ * TenancyGuardSpec: applyScope adds the predicate; assertHasOrgPredicate
+ * passes when present and throws when absent.
+ *
+ * The guard reads `getWheres()` off the qb builder. We construct minimal
+ * builders by going through WireBox so the qb defaults (grammar,
+ * datasource) match production.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.guard = getController().getWireBox().getInstance( "TenancyGuard@contacts" );
+    }
+
+    function run(){
+        describe( "TenancyGuard.applyScope", function(){
+
+            it( "adds an organization_id where clause to a fresh builder", function(){
+                var q = newQuery();
+                variables.guard.applyScope( q, "org-123" );
+                var wheres = q.getWheres();
+                expect( wheres.len() ).toBe( 1 );
+                // qb stores column as { type: "simple", value: "<name>" }
+                // not as a bare string; see mapToColumnType in qb internals.
+                expect( wheres[ 1 ].column.value ).toBe( "organization_id" );
+            } );
+
+            it( "is a no-op when organizationId is empty", function(){
+                var q = newQuery();
+                variables.guard.applyScope( q, "" );
+                expect( q.getWheres().len() ).toBe( 0 );
+            } );
+
+            it( "is fluent (returns the builder)", function(){
+                var q = newQuery();
+                var ret = variables.guard.applyScope( q, "org-123" );
+                expect( ret ).toBe( q );
+            } );
+
+        } );
+
+        describe( "TenancyGuard.assertHasOrgPredicate", function(){
+
+            it( "passes when a structured where on organization_id is present", function(){
+                var q = newQuery();
+                q.where( "organization_id", "org-123" );
+                expect( function(){
+                    variables.guard.assertHasOrgPredicate( q );
+                } ).notToThrow();
+            } );
+
+            it( "throws TenancyGuard.MissingOrgPredicate when no org clause is present", function(){
+                var q = newQuery();
+                q.where( "subject", "hello" );
+                expect( function(){
+                    variables.guard.assertHasOrgPredicate( q );
+                } ).toThrow( type = "TenancyGuard.MissingOrgPredicate" );
+            } );
+
+            it( "throws on a fully unconstrained builder", function(){
+                var q = newQuery();
+                expect( function(){
+                    variables.guard.assertHasOrgPredicate( q );
+                } ).toThrow( type = "TenancyGuard.MissingOrgPredicate" );
+            } );
+
+            it( "passes on raw where clauses only when acceptRaw=true", function(){
+                var q1 = newQuery();
+                q1.whereRaw( "organization_id = ?", [ "org-123" ] );
+                expect( function(){
+                    variables.guard.assertHasOrgPredicate( q1 );
+                } ).toThrow( type = "TenancyGuard.MissingOrgPredicate" );
+
+                var q2 = newQuery();
+                q2.whereRaw( "organization_id = ?", [ "org-123" ] );
+                expect( function(){
+                    variables.guard.assertHasOrgPredicate( q2, true );
+                } ).notToThrow();
+            } );
+
+        } );
+    }
+
+    private any function newQuery(){
+        return getController().getWireBox().getInstance( "QueryBuilder@qb" ).from( "tickets" );
+    }
+
+}

@@ -1,0 +1,81 @@
+/**
+ * TenancyGuard: best-effort runtime check that a qb query against a
+ * tenant-scoped table includes an `organization_id` predicate, plus a
+ * convenience helper that applies one for the caller.
+ *
+ * Add-ons that hand-write qb queries against any tenant-scoped table
+ * (their own or core's) SHOULD call `applyScope` to add the predicate
+ * automatically, OR call `assertHasOrgPredicate` immediately before
+ * executing the query to fail loudly when the predicate is missing.
+ *
+ * --- Public extension contract ---
+ *
+ *   var guard = wirebox.getInstance( "TenancyGuard@contacts" );
+ *
+ *   // Option A: let the guard apply the predicate for you.
+ *   guard.applyScope( q, organizationId );
+ *
+ *   // Option B: assert the predicate is present already (e.g. you
+ *   // added it manually upstream and want a runtime safety net).
+ *   guard.assertHasOrgPredicate( q );
+ *
+ * Limitations: the assert can only see structured where clauses. A
+ * raw fragment like `whereRaw( "organization_id = ?", [ orgId ] )`
+ * is NOT detected (it lands in the wheres array with type="raw" and
+ * no `column` field). Use `applyScope` whenever feasible, or pass
+ * the explicit column name to `assertHasOrgPredicate` along with the
+ * `acceptRaw=true` flag to skip the check.
+ *
+ * Lives in `contacts` because `TenantScope` and the tenant entities
+ * also live here; the guard is the imperative cousin of the global
+ * scope.
+ */
+class singleton=true {
+
+    variables.ORG_COLUMN = "organization_id";
+
+    /**
+     * Add a `where organization_id = :orgId` predicate to the builder.
+     * Returns the builder for chaining. No-op when orgId is empty.
+     */
+    public any function applyScope( required any builder, required string organizationId ){
+        if ( !len( arguments.organizationId ) ) return arguments.builder;
+        arguments.builder.where( variables.ORG_COLUMN, arguments.organizationId );
+        return arguments.builder;
+    }
+
+    /**
+     * Throw if the builder does not appear to constrain on
+     * organization_id. Returns the builder when the check passes.
+     *
+     * @acceptRaw When true, the check passes if ANY raw where clause
+     *            is present (we cannot inspect raw SQL). Use only
+     *            when you have hand-verified the raw fragment.
+     */
+    public any function assertHasOrgPredicate( required any builder, boolean acceptRaw = false ){
+        // qb stores `column` in each where as a struct shaped like
+        // { type: "simple", value: "<column_name>" } via
+        // mapToColumnType(). We pull `.value` from the simple form
+        // to compare against the expected column name. Raw where
+        // clauses appear with type="raw" at the where-struct level
+        // (no column field) and are not introspectable.
+        var wheres = arguments.builder.getWheres();
+        for ( var w in wheres ) {
+            if ( structKeyExists( w, "column" ) && isStruct( w.column ) && ( w.column.type ?: "" ) == "simple" ) {
+                if ( ( w.column.value ?: "" ) == variables.ORG_COLUMN ) {
+                    return arguments.builder;
+                }
+            }
+            if ( arguments.acceptRaw && ( w.type ?: "" ) == "raw" ) {
+                return arguments.builder;
+            }
+        }
+        throw(
+            type    = "TenancyGuard.MissingOrgPredicate",
+            message = "Query is missing an organization_id predicate. " &
+                      "Call TenancyGuard.applyScope( builder, orgId ) or " &
+                      "add `.where( ""organization_id"", orgId )` before executing."
+        );
+    }
+
+}

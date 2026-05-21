@@ -1,0 +1,62 @@
+/**
+ * IAuditService: documented public surface of AuditService@audit.
+ *
+ * Contract class. See `tickets/models/contracts/ITicketsService.bx` for
+ * the contract-class convention.
+ *
+ * The audit service is the central cross-cutting log for significant
+ * operations (SLA policy changes, contact merges, role assignments,
+ * article deletions). Distinct from `tickets`'s own TicketEvent timeline
+ * which is the agent-facing ticket history.
+ *
+ * Add-ons resolve the live service via:
+ *
+ *   var svc = wirebox.getInstance( "AuditService@audit" );
+ *
+ * Add-ons may register their own event types in their `ModuleConfig.bx`
+ * via `settings.tesserabx.auditEvents` (mechanism shipped in Phase 3,
+ * documented in `docs/EXTENSIONS.md`). Today, callers pass whatever
+ * eventType slug they like; the admin search UI lists distinct types
+ * dynamically.
+ */
+class {
+
+    /**
+     * Record an audit event. eventType is the only required field;
+     * the rest contextualize. Metadata is an arbitrary struct that
+     * is JSON-serialized on insert.
+     */
+    public any function record(
+        required string eventType,
+        string entityType,
+        string entityId,
+        string organizationId,
+        string actorType,
+        string actorId,
+        struct metadata
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IAuditService is a contract; resolve AuditService@audit" );
+    }
+
+    /** Search the audit log; all filters optional, newest-first. */
+    public array function search(
+        string eventType,
+        string entityType,
+        string entityId,
+        string organizationId,
+        string actorType,
+        string actorId,
+        any occurredAfter,
+        any occurredBefore,
+        numeric limit = 100,
+        numeric offset = 0
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IAuditService is a contract; resolve AuditService@audit" );
+    }
+
+    /** Distinct event types currently in the log (for filter dropdowns). */
+    public array function listEventTypes(){
+        throw( type = "ContractClass.NotImplemented", message = "IAuditService is a contract; resolve AuditService@audit" );
+    }
+
+}

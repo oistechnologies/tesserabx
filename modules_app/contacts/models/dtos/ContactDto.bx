@@ -1,0 +1,64 @@
+/**
+ * ContactDto: stable cross-boundary struct shapes for contacts module
+ * entities (Contact, Organization, Office).
+ *
+ * See `tickets/models/dtos/TicketDto.bx` for the DTO mapper convention.
+ *
+ *   var dto = wirebox.getInstance( "ContactDto@contacts" );
+ *   var record = dto.fromContact( contactEntity );
+ *
+ * Sensitive fields (password_hash, mfa_secret, mfa_recovery_codes) are
+ * intentionally excluded from the DTO; they are NEVER part of a stable
+ * cross-boundary shape.
+ */
+class singleton=true {
+
+    public struct function fromContact( required any entity ){
+        var c = arguments.entity;
+        return {
+            id              : c.getId(),
+            organization_id : c.getOrganizationId() ?: "",
+            office_id       : c.getOfficeId()       ?: "",
+            email           : c.getEmail(),
+            first_name      : c.getFirstName() ?: "",
+            last_name       : c.getLastName()  ?: "",
+            is_active       : !!c.getIsActive(),
+            mfa_enabled     : !!( c.getMfaEnabled() ?: false ),
+            last_login_at   : toString( c.getLastLoginAt() ?: "" ),
+            created_at      : toString( c.getCreatedAt() ?: "" ),
+            updated_at      : toString( c.getUpdatedAt() ?: "" )
+        };
+    }
+
+    public struct function fromOrganization( required any entity ){
+        var o = arguments.entity;
+        return {
+            id         : o.getId(),
+            name       : o.getName(),
+            slug       : o.getSlug(),
+            tier       : o.getTier() ?: "",
+            is_active  : !!o.getIsActive(),
+            created_at : toString( o.getCreatedAt() ?: "" ),
+            updated_at : toString( o.getUpdatedAt() ?: "" )
+        };
+    }
+
+    public struct function fromOffice( required any entity ){
+        var o = arguments.entity;
+        return {
+            id              : o.getId(),
+            organization_id : o.getOrganizationId() ?: "",
+            name            : o.getName(),
+            created_at      : toString( o.getCreatedAt() ?: "" )
+        };
+    }
+
+    public array function fromContactArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromContact( e ) );
+    }
+
+    public array function fromOrganizationArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromOrganization( e ) );
+    }
+
+}

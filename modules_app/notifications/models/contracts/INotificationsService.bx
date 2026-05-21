@@ -1,0 +1,67 @@
+/**
+ * INotificationsService: documented public surface of NotificationsService@notifications.
+ *
+ * Contract class. See `tickets/models/contracts/ITicketsService.bx` for
+ * the contract-class convention.
+ *
+ * The notifications module is an event consumer; other modules announce
+ * events and notifications fans out to email, Slack/Teams, and in-app.
+ * Add-ons that want to send notifications call `dispatchForEvent` with
+ * a stable event key and a recipients array.
+ *
+ * Add-ons resolve the live service via:
+ *
+ *   var svc = wirebox.getInstance( "NotificationsService@notifications" );
+ */
+class {
+
+    /**
+     * Dispatch a notification for a known event key. Recipients are
+     * struct array entries shaped like:
+     *   { recipientType: "agent"|"contact", recipientId: "<uuid>", email: "..." }
+     * Per-recipient channel preferences and template overrides are
+     * applied automatically; callers do not pick channels directly.
+     */
+    public array function dispatchForEvent(
+        required string eventKey,
+        required array recipients,
+        struct context
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "INotificationsService is a contract; resolve NotificationsService@notifications" );
+    }
+
+    /** Per-recipient channel toggle. */
+    public boolean function isChannelEnabled(
+        required string recipientType,
+        required string recipientId,
+        required string eventKey,
+        required string channel
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "INotificationsService is a contract; resolve NotificationsService@notifications" );
+    }
+
+    public void function setPreference(
+        required string recipientType,
+        required string recipientId,
+        required string eventKey,
+        required string channel,
+        required boolean enabled
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "INotificationsService is a contract; resolve NotificationsService@notifications" );
+    }
+
+    /** Reads for the recipient's notification center. */
+    public array function listForRecipient(
+        required string recipientType,
+        required string recipientId,
+        boolean unreadOnly,
+        numeric limit = 50
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "INotificationsService is a contract; resolve NotificationsService@notifications" );
+    }
+
+    public numeric function unreadCount( required string recipientType, required string recipientId ){
+        throw( type = "ContractClass.NotImplemented", message = "INotificationsService is a contract; resolve NotificationsService@notifications" );
+    }
+
+}

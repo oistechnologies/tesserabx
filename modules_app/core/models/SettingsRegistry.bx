@@ -1,0 +1,192 @@
+/**
+ * SettingsRegistry: declared add-on settings + per-tenant overrides.
+ *
+ * An add-on declares its settings in its `ModuleConfig.bx` manifest:
+ *
+ *   settings.tesserabx.settings = [
+ *       {
+ *           key         : "exampleJira.baseUrl",
+ *           type        : "string",
+ *           label       : "Jira Base URL",
+ *           description : "...",
+ *           default     : "",
+ *           secret      : false,
+ *           perTenant   : true
+ *       }
+ *   ];
+ *
+ * At app boot (AddonRegistryService.syncFromLoadedModules) the manifest
+ * is captured into the addons.metadata JSON column. This service reads
+ * that to know each setting's declared shape.
+ *
+ * Per-tenant overrides live in addon_settings. Resolution:
+ *
+ *   1. Override row for (addon_id, organization_id, setting_key) wins.
+ *   2. Otherwise the manifest's declared default wins.
+ *   3. Otherwise return null.
+ *
+ * --- Public extension contract ---
+ *
+ *   var settings = wirebox.getInstance( "SettingsRegistry@core" );
+ *   var url = settings.resolve( "example-jira", "jira.baseUrl", organizationId );
+ *   settings.set( "example-jira", "jira.baseUrl", "https://jira.example.com", organizationId );
+ *
+ * Setting writes ALWAYS go through `set()`. Direct INSERTs into
+ * addon_settings bypass the perTenant=false guard and the type check.
+ */
+class singleton=true {
+
+    property name="wirebox"               inject="wirebox";
+    property name="addonRegistryService"  inject="AddonRegistryService@core";
+
+    /**
+     * Return the resolved value for (addon, key, org). orgId is
+     * required because all add-on settings are scoped to a tenant
+     * (the global default is in the manifest itself, not the DB).
+     *
+     * Returns the manifest-declared default when no override row exists.
+     * Returns null when no descriptor for the key exists either.
+     */
+    public any function resolve(
+        required string addonId,
+        required string key,
+        required string organizationId
+    ){
+        var descriptor = findDescriptor( arguments.addonId, arguments.key );
+        var override = findOverride( arguments.addonId, arguments.organizationId, arguments.key );
+        if ( !isNull( override ) ) return override;
+        if ( !isNull( descriptor ) && structKeyExists( descriptor, "default" ) ) return descriptor.default;
+        return javaCast( "null", "" );
+    }
+
+    /**
+     * Persist a per-tenant override. The descriptor must declare
+     * perTenant=true (defaults true) or this throws.
+     */
+    public void function set(
+        required string addonId,
+        required string key,
+        required any value,
+        required string organizationId,
+        string actorAgentId = ""
+    ){
+        var descriptor = findDescriptor( arguments.addonId, arguments.key );
+        if ( isNull( descriptor ) ) {
+            throw(
+                type    = "SettingsRegistry.UnknownKey",
+                message = "Add-on [#arguments.addonId#] does not declare setting key [#arguments.key#]."
+            );
+        }
+        var perTenant = descriptor.perTenant ?: true;
+        if ( !perTenant ) {
+            throw(
+                type    = "SettingsRegistry.NotPerTenant",
+                message = "Setting [#arguments.addonId#.#arguments.key#] is declared perTenant=false; per-tenant overrides are not allowed."
+            );
+        }
+
+        queryExecute(
+            "INSERT INTO addon_settings
+                ( addon_id, organization_id, setting_key, value, updated_at, updated_by_agent_id )
+             VALUES
+                ( :a, :o, :k, :v, NOW(), NULLIF( :actor, '' ) )
+             ON CONFLICT ( addon_id, organization_id, setting_key ) DO UPDATE
+             SET    value = :v,
+                    updated_at = NOW(),
+                    updated_by_agent_id = NULLIF( :actor, '' )",
+            {
+                a     : arguments.addonId,
+                o     : arguments.organizationId,
+                k     : arguments.key,
+                v     : toString( arguments.value ),
+                actor : arguments.actorAgentId
+            }
+        );
+    }
+
+    /**
+     * Remove a per-tenant override. Resolution then falls through to
+     * the manifest default for that org.
+     */
+    public void function clear(
+        required string addonId,
+        required string key,
+        required string organizationId
+    ){
+        queryExecute(
+            "DELETE FROM addon_settings
+             WHERE  addon_id = :a
+             AND    organization_id = :o
+             AND    setting_key = :k",
+            { a : arguments.addonId, o : arguments.organizationId, k : arguments.key }
+        );
+    }
+
+    /**
+     * Every override the org currently has for an add-on.
+     * Useful for the admin "Add-on Settings" page (Phase 4).
+     */
+    public struct function listOverridesForOrganization(
+        required string addonId,
+        required string organizationId
+    ){
+        var rows = queryExecute(
+            "SELECT setting_key, value
+             FROM   addon_settings
+             WHERE  addon_id = :a
+             AND    organization_id = :o",
+            { a : arguments.addonId, o : arguments.organizationId }
+        );
+        var out = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out[ rows.setting_key[ i ] ] = rows.value[ i ] ?: "";
+        }
+        return out;
+    }
+
+    /**
+     * Every setting an add-on has declared in its manifest.
+     * Returns an array of descriptors. Empty array if the add-on is
+     * unknown or declares no settings.
+     */
+    public array function listDescriptors( required string addonId ){
+        var row = addonRegistryService.findById( arguments.addonId );
+        if ( isNull( row ) ) return [];
+        var meta = row.metadata ?: "";
+        if ( !len( meta ) ) return [];
+        try {
+            var manifest = jsonDeserialize( meta );
+            var descriptors = manifest.settings ?: [];
+            return isArray( descriptors ) ? descriptors : [];
+        } catch ( any e ) {
+            return [];
+        }
+    }
+
+    // ---------- internals ----------
+
+    private any function findDescriptor( required string addonId, required string key ){
+        for ( var d in listDescriptors( arguments.addonId ) ) {
+            if ( ( d.key ?: "" ) == arguments.key ) return d;
+        }
+        return javaCast( "null", "" );
+    }
+
+    private any function findOverride(
+        required string addonId,
+        required string organizationId,
+        required string key
+    ){
+        var rows = queryExecute(
+            "SELECT value
+             FROM   addon_settings
+             WHERE  addon_id = :a
+             AND    organization_id = :o
+             AND    setting_key = :k",
+            { a : arguments.addonId, o : arguments.organizationId, k : arguments.key }
+        );
+        if ( !rows.recordCount ) return javaCast( "null", "" );
+        return rows.value[ 1 ] ?: "";
+    }
+
+}

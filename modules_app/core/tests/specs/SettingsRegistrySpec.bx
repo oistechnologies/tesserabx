@@ -1,0 +1,204 @@
+/**
+ * SettingsRegistrySpec: resolve falls through to declared default;
+ * set/clear round-trips; unknown keys and perTenant=false rejected.
+ *
+ * Fixtures: each spec installs a synthetic add-on record with a
+ * settings descriptor in metadata, then cleans up. The `addons` row
+ * is created directly (rather than via discovery) so we can craft a
+ * specific descriptor shape.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.settings = getController().getWireBox().getInstance( "SettingsRegistry@core" );
+        variables.testAddonIds = [];
+        variables.testOrgIds = [];
+    }
+
+    function afterAll(){
+        for ( var id in variables.testAddonIds ) {
+            queryExecute( "DELETE FROM addons WHERE addon_id = :a", { a : id } );
+        }
+        for ( var id in variables.testOrgIds ) {
+            queryExecute( "DELETE FROM organizations WHERE id = :o", { o : id } );
+        }
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "SettingsRegistry.listDescriptors", function(){
+
+            it( "returns descriptors declared in the manifest metadata", function(){
+                var addonId = installFixture( [
+                    { key : "api.url",   type : "string",  default : "https://default.example", perTenant : true },
+                    { key : "api.token", type : "string",  default : "",                         secret : true, perTenant : true }
+                ] );
+                var d = variables.settings.listDescriptors( addonId );
+                expect( d.len() ).toBe( 2 );
+                expect( d[ 1 ].key ).toBe( "api.url" );
+            } );
+
+            it( "returns an empty array for an unknown add-on", function(){
+                expect( variables.settings.listDescriptors( "does-not-exist-" & createUUID() ) ).toBe( [] );
+            } );
+
+            it( "returns an empty array when the manifest declares no settings", function(){
+                var addonId = installFixture( [] );
+                expect( variables.settings.listDescriptors( addonId ) ).toBe( [] );
+            } );
+
+        } );
+
+        describe( "SettingsRegistry.resolve", function(){
+
+            it( "returns the manifest default when no override is set", function(){
+                var addonId = installFixture( [
+                    { key : "api.url", type : "string", default : "https://default.example", perTenant : true }
+                ] );
+                var org = createFixtureOrg();
+                expect( variables.settings.resolve( addonId, "api.url", org ) ).toBe( "https://default.example" );
+            } );
+
+            it( "returns the override when present", function(){
+                var addonId = installFixture( [
+                    { key : "api.url", type : "string", default : "https://default.example", perTenant : true }
+                ] );
+                var org = createFixtureOrg();
+                variables.settings.set( addonId, "api.url", "https://tenant.example", org );
+                expect( variables.settings.resolve( addonId, "api.url", org ) ).toBe( "https://tenant.example" );
+            } );
+
+            it( "returns null for an unknown key with no default", function(){
+                var addonId = installFixture( [] );
+                var org = createFixtureOrg();
+                expect( isNull( variables.settings.resolve( addonId, "no.such.key", org ) ) ).toBeTrue();
+            } );
+
+            it( "scopes overrides per organization", function(){
+                var addonId = installFixture( [
+                    { key : "api.url", type : "string", default : "https://default.example", perTenant : true }
+                ] );
+                var orgA = createFixtureOrg();
+                var orgB = createFixtureOrg();
+                variables.settings.set( addonId, "api.url", "https://a.example", orgA );
+                expect( variables.settings.resolve( addonId, "api.url", orgA ) ).toBe( "https://a.example" );
+                expect( variables.settings.resolve( addonId, "api.url", orgB ) ).toBe( "https://default.example" );
+            } );
+
+        } );
+
+        describe( "SettingsRegistry.set", function(){
+
+            it( "rejects an unknown key", function(){
+                var addonId = installFixture( [] );
+                var org = createFixtureOrg();
+                expect( function(){
+                    variables.settings.set( addonId, "no.such.key", "x", org );
+                } ).toThrow( type = "SettingsRegistry.UnknownKey" );
+            } );
+
+            it( "rejects setting a perTenant=false key", function(){
+                var addonId = installFixture( [
+                    { key : "global.only", type : "string", default : "x", perTenant : false }
+                ] );
+                var org = createFixtureOrg();
+                expect( function(){
+                    variables.settings.set( addonId, "global.only", "y", org );
+                } ).toThrow( type = "SettingsRegistry.NotPerTenant" );
+            } );
+
+            it( "upserts when the same (addon, org, key) is set twice", function(){
+                var addonId = installFixture( [
+                    { key : "api.url", type : "string", default : "", perTenant : true }
+                ] );
+                var org = createFixtureOrg();
+                variables.settings.set( addonId, "api.url", "first", org );
+                variables.settings.set( addonId, "api.url", "second", org );
+                expect( variables.settings.resolve( addonId, "api.url", org ) ).toBe( "second" );
+            } );
+
+        } );
+
+        describe( "SettingsRegistry.clear", function(){
+
+            it( "removes the override and resolution falls back to the default", function(){
+                var addonId = installFixture( [
+                    { key : "api.url", type : "string", default : "https://default.example", perTenant : true }
+                ] );
+                var org = createFixtureOrg();
+                variables.settings.set( addonId, "api.url", "https://override.example", org );
+                variables.settings.clear( addonId, "api.url", org );
+                expect( variables.settings.resolve( addonId, "api.url", org ) ).toBe( "https://default.example" );
+            } );
+
+        } );
+
+        describe( "SettingsRegistry.listOverridesForOrganization", function(){
+
+            it( "returns only this org's overrides", function(){
+                var addonId = installFixture( [
+                    { key : "a", type : "string", default : "", perTenant : true },
+                    { key : "b", type : "string", default : "", perTenant : true }
+                ] );
+                var orgA = createFixtureOrg();
+                var orgB = createFixtureOrg();
+                variables.settings.set( addonId, "a", "x", orgA );
+                variables.settings.set( addonId, "b", "y", orgA );
+                variables.settings.set( addonId, "a", "z", orgB );
+
+                var listA = variables.settings.listOverridesForOrganization( addonId, orgA );
+                expect( listA.a ).toBe( "x" );
+                expect( listA.b ).toBe( "y" );
+
+                var listB = variables.settings.listOverridesForOrganization( addonId, orgB );
+                expect( listB.a ).toBe( "z" );
+                expect( structKeyExists( listB, "b" ) ).toBeFalse();
+            } );
+
+        } );
+    }
+
+    /**
+     * Install a synthetic addons row with the given settings array
+     * embedded in its metadata JSON. Mirrors what
+     * AddonRegistryService.upsert produces during discovery.
+     */
+    private string function installFixture( required array settingsDescriptors ){
+        var id = "spec-" & lcase( replace( createUUID(), "-", "", "all" ) );
+        var manifest = {
+            addonId        : id,
+            displayName    : "Settings spec fixture",
+            version        : "0.0.1",
+            minCoreVersion : "0.0.1",
+            maxCoreVersion : "",
+            settings       : arguments.settingsDescriptors
+        };
+        queryExecute(
+            "INSERT INTO addons
+                ( addon_id, display_name, version, min_core_version, max_core_version,
+                  contributes_to, requires_ai, enabled, enablement_mode, compatible, metadata )
+             VALUES
+                ( :a, 'Fixture', '0.0.1', '0.0.1', '',
+                  '', cast( 'false' as boolean ), cast( 'true' as boolean ), 'all',
+                  cast( 'true' as boolean ), :meta )",
+            { a : id, meta : jsonSerialize( manifest ) }
+        );
+        variables.testAddonIds.append( id );
+        return id;
+    }
+
+    private string function createFixtureOrg(){
+        var id = createUUID();
+        var slug = "spec-" & lcase( replace( id, "-", "", "all" ) );
+        queryExecute(
+            "INSERT INTO organizations ( id, name, slug, created_at, updated_at )
+             VALUES ( :id, :n, :s, NOW(), NOW() )",
+            { id : id, n : "Spec Org " & id, s : slug }
+        );
+        variables.testOrgIds.append( id );
+        return id;
+    }
+
+}

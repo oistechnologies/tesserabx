@@ -1,0 +1,44 @@
+/**
+ * AuditEventDto: stable cross-boundary struct shape for AuditEvent.
+ *
+ * See `tickets/models/dtos/TicketDto.bx` for the DTO mapper convention.
+ *
+ *   var dto = wirebox.getInstance( "AuditEventDto@audit" );
+ *   var record = dto.fromAuditEvent( eventEntity );
+ *
+ * `metadata` is parsed from the entity's JSON column so callers receive
+ * a struct, not a serialized string. Empty or invalid JSON resolves to
+ * an empty struct rather than throwing.
+ */
+class singleton=true {
+
+    public struct function fromAuditEvent( required any entity ){
+        var e = arguments.entity;
+        var rawMeta = e.getMetadataJson() ?: "";
+        var meta = {};
+        if ( len( rawMeta ) ) {
+            try {
+                meta = jsonDeserialize( rawMeta );
+                if ( !isStruct( meta ) ) meta = {};
+            } catch ( any err ) {
+                meta = {};
+            }
+        }
+        return {
+            id              : e.getId(),
+            event_type      : e.getEventType(),
+            entity_type     : e.getEntityType() ?: "",
+            entity_id       : e.getEntityId()   ?: "",
+            organization_id : e.getOrganizationId() ?: "",
+            actor_type      : e.getActorType() ?: "",
+            actor_id        : e.getActorId()   ?: "",
+            metadata        : meta,
+            occurred_at     : toString( e.getOccurredAt() ?: "" )
+        };
+    }
+
+    public array function fromAuditEventArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromAuditEvent( e ) );
+    }
+
+}

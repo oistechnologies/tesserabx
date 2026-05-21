@@ -61,6 +61,12 @@ class {
         binder.map( "TenantScope@contacts" )
               .to( "#moduleMapping#.models.scopes.TenantScope" )
               .asSingleton();
+        binder.map( "TenancyGuard@contacts" )
+              .to( "#moduleMapping#.models.tenancy.TenancyGuard" )
+              .asSingleton();
+        binder.map( "ContactDto@contacts" )
+              .to( "#moduleMapping#.models.dtos.ContactDto" )
+              .asSingleton();
         binder.map( "GdprService@contacts" )
               .to( "#moduleMapping#.models.GdprService" )
               .asSingleton();

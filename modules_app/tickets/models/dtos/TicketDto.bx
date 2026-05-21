@@ -1,0 +1,89 @@
+/**
+ * TicketDto: stable cross-boundary struct shapes for tickets module
+ * entities.
+ *
+ * The methods on this singleton convert a Quick entity into a struct
+ * whose key names and value types form a published contract. Add-ons
+ * that need a stable shape (because the underlying Quick entity may
+ * gain or lose properties across phases) call these mappers rather
+ * than the entity getters directly.
+ *
+ *   var dto = wirebox.getInstance( "TicketDto@tickets" );
+ *   var record = dto.fromTicket( ticketEntity );
+ *
+ * Naming convention: keys are snake_case to match the JSON the API
+ * already returns; this lets handlers serialize a DTO struct as JSON
+ * without further transformation.
+ *
+ * Null handling: any getter that may return null is coalesced to an
+ * empty string for scalars or to the unix epoch for timestamps. This
+ * keeps the DTO shape stable for serializers that struggle with null.
+ */
+class singleton=true {
+
+    public struct function fromTicket( required any entity ){
+        var t = arguments.entity;
+        return {
+            id                   : t.getId(),
+            ticket_number        : t.getTicketNumber(),
+            subject              : t.getSubject(),
+            status               : t.getStatus(),
+            priority             : t.getPriority(),
+            ticket_type          : t.getTicketType()         ?: "",
+            source               : t.getSource()             ?: "",
+            organization_id      : t.getOrganizationId()     ?: "",
+            requester_contact_id : t.getRequesterContactId() ?: "",
+            originating_email    : t.getOriginatingEmail()   ?: "",
+            assigned_to_agent_id : t.getAssignedToAgentId()  ?: "",
+            created_at           : toString( t.getCreatedAt()  ?: "" ),
+            updated_at           : toString( t.getUpdatedAt()  ?: "" ),
+            resolved_at          : toString( t.getResolvedAt() ?: "" ),
+            closed_at            : toString( t.getClosedAt()   ?: "" )
+        };
+    }
+
+    public struct function fromTicketMessage( required any entity ){
+        var m = arguments.entity;
+        var authorAgentId   = m.getAuthorAgentId()   ?: "";
+        var authorContactId = m.getAuthorContactId() ?: "";
+        return {
+            id                : m.getId(),
+            ticket_id         : m.getTicketId(),
+            author_type       : len( authorAgentId ) ? "agent" : ( len( authorContactId ) ? "contact" : "system" ),
+            author_agent_id   : authorAgentId,
+            author_contact_id : authorContactId,
+            author_email      : m.getAuthorEmail() ?: "",
+            body              : m.getBody() ?: "",
+            is_internal       : !!m.getIsInternal(),
+            created_at        : toString( m.getCreatedAt() ?: "" )
+        };
+    }
+
+    public struct function fromAttachment( required any entity ){
+        var a = arguments.entity;
+        return {
+            id                : a.getId(),
+            ticket_id         : a.getTicketId()       ?: "",
+            organization_id   : a.getOrganizationId() ?: "",
+            filename          : a.getFilename(),
+            content_type      : a.getContentType()    ?: "",
+            size_bytes        : a.getSizeBytes()      ?: 0,
+            storage_provider  : a.getStorageProvider() ?: "",
+            storage_path      : a.getStoragePath()     ?: "",
+            thumbnail_status  : a.getThumbnailStatus() ?: "",
+            uploaded_by_type  : a.getUploadedByType()  ?: "",
+            uploaded_by_id    : a.getUploadedById()    ?: "",
+            uploaded_at       : toString( a.getCreatedAt() ?: "" )
+        };
+    }
+
+    /**
+     * Map an array of ticket entities to an array of DTO structs.
+     * Convenience wrapper to avoid `arr.map( e => dto.fromTicket( e ) )`
+     * boilerplate in callers.
+     */
+    public array function fromTicketArray( required array entities ){
+        return arguments.entities.map( ( e ) => fromTicket( e ) );
+    }
+
+}

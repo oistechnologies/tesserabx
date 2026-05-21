@@ -1,0 +1,130 @@
+/**
+ * ITicketsService: documented public surface of TicketsService@tickets.
+ *
+ * This file is a CONTRACT, not an interface. BoxLang has no `interface`
+ * keyword, so the public method signatures add-ons may rely on are
+ * captured here as a regular class whose method bodies throw. Do NOT
+ * instantiate this class. Add-ons that need to reach the tickets
+ * service resolve the live implementation through WireBox:
+ *
+ *   var svc = wirebox.getInstance( "TicketsService@tickets" );
+ *
+ * and may assume the method signatures documented here are stable
+ * within a TesseraBX major version.
+ *
+ * Return shapes today: methods that return entities return Quick
+ * entities directly. For cross-boundary serialization, use the
+ * matching DTO mapper in `modules_app/tickets/models/dtos/` (for
+ * example, `wirebox.getInstance("TicketDto@tickets").fromEntity(t)`).
+ * The DTO surface is the stable shape; the entity surface may change
+ * across phases as Quick relationships and casts evolve.
+ *
+ * Methods NOT listed below (SLA scans, internal triage helpers,
+ * thumbnail orchestration) are intentionally excluded from the
+ * contract because they are internal to the tickets module.
+ */
+class {
+
+    /** Get a ticket entity by id. Returns null when not found. */
+    public any function getTicket( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** List tickets matching the optional filters. Returns array of Ticket entities. */
+    public array function listTickets(
+        string status,
+        string priority,
+        string organizationId,
+        string assignedToAgentId,
+        string search,
+        boolean accountlessOnly,
+        numeric limit = 50,
+        numeric offset = 0
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Tickets opened by a specific contact. */
+    public array function listTicketsForContact( required string contactId ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Tickets belonging to a specific organization (tenant). */
+    public array function listTicketsForOrganization( required string organizationId ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Messages on a ticket. When `includeInternal` is false, internal-only messages are filtered out (client-side surfaces must always pass false). */
+    public array function listMessagesForTicket( required string ticketId, boolean includeInternal = false ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Attachments on a ticket, filtered by viewer scope. */
+    public array function listAttachmentsForTicket( required string ticketId, struct viewer ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Create a ticket. Required keys in data: subject, body, requesterContactId (or use createAccountlessTicket). */
+    public any function createTicket( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Create a ticket without a known Contact. Required keys in data: subject, body, requesterEmail. */
+    public any function createAccountlessTicket( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Add a message (reply or internal note) to an existing ticket. */
+    public any function addMessage( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Transition ticket status. Validates the transition against the workflow. */
+    public any function changeStatus( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Assign a ticket to a specific agent. */
+    public any function assignToAgent( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Apply tags by name (creating tags if needed). */
+    public array function applyTagsByName(
+        required string ticketId,
+        required array tagNames,
+        string actorType,
+        string actorId
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Attach a file to a ticket via CBFS. Returns the Attachment entity. */
+    public any function addAttachment( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Validate an upload before persistence. Returns { ok: boolean, error: string }. */
+    public struct function validateUpload(
+        required string filename,
+        required numeric sizeBytes,
+        string sourcePath,
+        string contentType
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    /** Static lookups (read-only). */
+    public array function listStatuses(){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    public array function listPriorities(){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+    public array function listTypes(){
+        throw( type = "ContractClass.NotImplemented", message = "ITicketsService is a contract; resolve TicketsService@tickets" );
+    }
+
+}

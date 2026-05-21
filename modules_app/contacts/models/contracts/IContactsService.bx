@@ -1,0 +1,62 @@
+/**
+ * IContactsService: documented public surface of ContactsService@contacts.
+ *
+ * Contract class. See `tickets/models/contracts/ITicketsService.bx` for
+ * the contract-class convention.
+ *
+ * Add-ons resolve the live service via:
+ *
+ *   var svc = wirebox.getInstance( "ContactsService@contacts" );
+ *
+ * For stable cross-boundary shapes use the matching DTO mappers
+ * (ContactDto, OrganizationDto, OfficeDto) under
+ * `modules_app/contacts/models/dtos/`.
+ */
+class {
+
+    /** Organizations are the tenant boundary. */
+    public any function getOrganizationById( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    public any function getOrganizationBySlug( required string slug ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    public array function listOrganizations(){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    public any function createOrganization( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    /** Resolve the organization for an email address using domain mappings. */
+    public any function resolveOrganizationForEmail( required string email ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    /** Offices are physical or logical groupings of contacts within an organization. */
+    public array function listOfficesForOrganization( required string organizationId ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    /** Contact lookup. */
+    public any function getContactById( required string id ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    public any function getContactByEmail( required string email ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    public array function listContactsForOrganization( required string organizationId ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+    /** Provision a new contact account. Required keys in data: email, organizationId. */
+    public any function provisionContact( required struct data ){
+        throw( type = "ContractClass.NotImplemented", message = "IContactsService is a contract; resolve ContactsService@contacts" );
+    }
+
+}

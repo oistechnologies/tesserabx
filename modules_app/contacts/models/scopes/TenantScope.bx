@@ -9,11 +9,34 @@
  * Lives in `contacts` because contacts owns the tenant entities and
  * defines "who is the current tenant" through TenantContextProbe.
  *
+ * --- Public extension contract ---
+ *
+ * This class is part of the documented TesseraBX extension surface.
+ * Add-ons that ship tenant-scoped entities MUST apply this scope from
+ * their entity's `applyGlobalScopes` hook. Doing so guarantees the
+ * entity participates in the same client-side vs agent-side visibility
+ * asymmetry as core entities (clients see only their organization;
+ * agents see everything), without each add-on having to re-implement
+ * the rule.
+ *
  * Usage on a tenant-scoped entity:
  *   function applyGlobalScopes( builder ){
  *       getInstance( "TenantScope@contacts" ).apply( arguments.builder );
  *       return this;
  *   }
+ *
+ * Add-on entities should also extend `TesseraBXEntity@contacts` (the
+ * shared base class), which standardizes id generation, timestamps,
+ * and the global-scope invocation pattern. See
+ * `modules_app/contacts/models/TesseraBXEntity.bx`.
+ *
+ * Add-on tables MUST carry an `organization_id` column in their very
+ * first migration, never retrofitted. The `TenancyGuard@contacts`
+ * service is available to assert at runtime that a qb query against
+ * a tenant-scoped table includes the predicate. See
+ * `modules_app/contacts/models/tenancy/TenancyGuard.bx`.
+ *
+ * See `docs/EXTENSIONS.md` "Tenant scope" section for full guidance.
  */
 class singleton=true {
 
