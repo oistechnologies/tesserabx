@@ -1,0 +1,123 @@
+/**
+ * help module: TesseraBX's extendable in-app help system.
+ *
+ * Phase 11 of the extensibility plan. Mounts at /help (portal) and
+ * /agent/help (agent surface). Every core module and every add-on
+ * contributes pages through HelpSectionRegistry@help +
+ * HelpPageRegistry@help via the standard manifest pattern:
+ *
+ *   settings.tesserabx.helpSections = [
+ *       { id, title, audience, sortWeight, icon }
+ *   ];
+ *   settings.tesserabx.helpPages = [
+ *       { id, section, title, audience, sortWeight, source, searchable, keywords }
+ *   ];
+ *
+ * Audience values: public | client | agent | developer.
+ *   - public    : anonymous portal visitors can read
+ *   - client    : signed-in contacts (portal)
+ *   - agent     : signed-in agents (provider dashboard)
+ *   - developer : agents with the help.developer permission
+ *
+ * Server-side audience enforcement happens in HelpAudienceResolver.
+ * The /help/download/extensions.md endpoint streams the live
+ * docs/EXTENSIONS.md file, gated to developer audience.
+ *
+ * Search is wired through Phase 7's EmbeddingConsumerRegistry. When
+ * AI_ENABLED=true it uses vector similarity against the help embedding
+ * store; when off it falls back to a substring/keyword match over
+ * titles, declared keywords, and rendered body text. Audience filtering
+ * happens AFTER ranking either way.
+ */
+class {
+
+    this.title              = "help";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Extendable in-app help system. Markdown pages contributed by every module, audience-gated, with AI-on semantic search and text-match fallback.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "help";
+    this.modelNamespace     = "help";
+    this.cfmapping          = "tesserabx.modules.help";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "core", "agent" ];
+
+    function configure(){
+        // `variables.` prefix is REQUIRED on every assignment inside
+        // configure(); BoxLang scope-walker drops unscoped names into
+        // function-local. See gotcha log in docs/EXTENSIBILITY-PLAN.md.
+        variables.settings = {};
+        // Routes live in modules_app/help/config/Router.bx so the
+        // agent module can forward /agent/help/* in via withModule.
+        // The inline variables.routes array would not satisfy that
+        // cross-module reference.
+        variables.routes = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors        = [];
+
+        // Help pages this module ships. The development section
+        // mirrors docs/EXTENSIONS.md chapter-by-chapter; the welcome
+        // page is the public landing intro.
+        variables.settings.tesserabx = {
+            helpSections : [
+                { id : "general",     title : "Getting Started",      audience : "public",    sortWeight : 100, icon : "bi bi-house-door" },
+                { id : "development", title : "Module Development",   audience : "developer", sortWeight : 900, icon : "bi bi-code-slash" }
+            ],
+            helpPages : [
+                { id : "general.welcome",           section : "general",     title : "Welcome to TesseraBX",          audience : "public",    sortWeight : 10, source : "resources/help/welcome.md",                   searchable : true,  keywords : [ "welcome", "introduction", "getting started" ] },
+
+                { id : "development.overview",      section : "development", title : "Building an add-on",            audience : "developer", sortWeight : 10, source : "resources/help/development/01-overview.md",    searchable : true,  keywords : [ "add-on", "module", "extensibility", "boxlang", "coldbox" ] },
+                { id : "development.manifest",      section : "development", title : "Manifest fields",               audience : "developer", sortWeight : 20, source : "resources/help/development/02-manifest.md",    searchable : true,  keywords : [ "manifest", "ModuleConfig", "settings.tesserabx" ] },
+                { id : "development.enablement",    section : "development", title : "Enablement + per-org control",  audience : "developer", sortWeight : 30, source : "resources/help/development/03-enablement.md",  searchable : true,  keywords : [ "enable", "disable", "per-organization", "tenancy" ] },
+                { id : "development.contracts",     section : "development", title : "Service contracts + DTOs",      audience : "developer", sortWeight : 40, source : "resources/help/development/04-contracts.md",   searchable : true,  keywords : [ "service", "contract", "interface", "DTO", "tenancy" ] },
+                { id : "development.events",        section : "development", title : "Events + audit",                audience : "developer", sortWeight : 50, source : "resources/help/development/05-events.md",      searchable : true,  keywords : [ "event", "announce", "interceptor", "audit" ] },
+                { id : "development.ui-registries", section : "development", title : "UI registries",                 audience : "developer", sortWeight : 60, source : "resources/help/development/06-ui-registries.md", searchable: true, keywords : [ "navigation", "admin", "ticket panel", "dashboard widget" ] },
+                { id : "development.channels",      section : "development", title : "Channel adapters",              audience : "developer", sortWeight : 70, source : "resources/help/development/07-channels.md",    searchable : true,  keywords : [ "channel", "inbound", "outbound", "email" ] },
+                { id : "development.automation",    section : "development", title : "Automation triggers + actions", audience : "developer", sortWeight : 80, source : "resources/help/development/08-automation.md",  searchable : true,  keywords : [ "automation", "trigger", "condition", "action" ] },
+                { id : "development.ai",            section : "development", title : "AI features + providers",       audience : "developer", sortWeight : 90, source : "resources/help/development/09-ai.md",          searchable : true,  keywords : [ "AI", "feature", "provider", "embedding" ] },
+                { id : "development.api",           section : "development", title : "API resources + webhooks",      audience : "developer", sortWeight : 100, source : "resources/help/development/10-api.md",        searchable : true,  keywords : [ "API", "REST", "webhook", "OpenAPI" ] },
+                { id : "development.custom-fields", section : "development", title : "Custom fields + entity extension", audience : "developer", sortWeight : 110, source : "resources/help/development/11-custom-fields.md", searchable : true, keywords : [ "custom field", "entity extension" ] },
+                { id : "development.notifications", section : "development", title : "Notifications + channels",      audience : "developer", sortWeight : 120, source : "resources/help/development/12-notifications.md", searchable : true,  keywords : [ "notification", "template", "channel" ] },
+                { id : "development.help",          section : "development", title : "Help pages + sections",         audience : "developer", sortWeight : 130, source : "resources/help/development/13-help.md",         searchable : true,  keywords : [ "help", "page", "section", "audience" ] }
+            ]
+        };
+
+        // The "Help" main-menu nav entry on both surfaces. Both
+        // entries point at /help; the help handlers pick the layout
+        // by viewer identity. Routing the agent surface separately
+        // ran into ColdBox's inconsistent parsing of the
+        // module:Handler.action syntax from a module router.
+        variables.settings.tesserabx.navigation = [
+            { id : "help.portal.main", surface : "portal", menu : "main", label : "Help", route : "/help", icon : "bi bi-question-circle", sortWeight : 900, requiresAuth : false },
+            { id : "help.agent.main",  surface : "agent",  menu : "main", label : "Help", route : "/help", icon : "bi bi-question-circle", sortWeight : 900, requiresAuth : true,  requiredPermission : "" }
+        ];
+
+        // The help.developer permission gates the in-app developer
+        // section. Auto-granted to agent-admin in RoleRegistry below.
+        variables.settings.tesserabx.permissions = [
+            { id : "help.developer", label : "View developer help section" }
+        ];
+    }
+
+    function onLoad(){
+        binder.map( "HelpSectionRegistry@help" )
+              .to( "#moduleMapping#.models.HelpSectionRegistry" )
+              .asSingleton();
+        binder.map( "HelpPageRegistry@help" )
+              .to( "#moduleMapping#.models.HelpPageRegistry" )
+              .asSingleton();
+        binder.map( "HelpAudienceResolver@help" )
+              .to( "#moduleMapping#.models.HelpAudienceResolver" )
+              .asSingleton();
+        binder.map( "HelpEmbeddingConsumer@help" )
+              .to( "#moduleMapping#.models.HelpEmbeddingConsumer" )
+              .asSingleton();
+        binder.map( "HelpSearchService@help" )
+              .to( "#moduleMapping#.models.HelpSearchService" )
+              .asSingleton();
+    }
+    function onUnload(){}
+
+}

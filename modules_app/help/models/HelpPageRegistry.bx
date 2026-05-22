@@ -1,0 +1,140 @@
+/**
+ * HelpPageRegistry: individual help pages contributed by every
+ * module and by add-ons.
+ *
+ * Each entry declares:
+ *   id          stable string, conventionally "<section>.<slug>"
+ *   section     id of the parent HelpSectionRegistry entry
+ *   title       page title
+ *   audience    "public" | "client" | "agent" | "developer"
+ *   sortWeight  integer; lower sorts first within the section
+ *   source      module-relative path to the markdown file
+ *               (e.g. "resources/help/welcome.md"). Resolved
+ *               against the contributing module's root at render
+ *               time so the file lives in the same repo + version
+ *               as its declaration.
+ *   searchable  boolean; whether the page is indexed for search
+ *   keywords    optional array of extra search terms
+ *   module      auto-populated: the contributing module name (used
+ *               to resolve `source` to an absolute path)
+ *
+ * Add-ons contribute via `settings.tesserabx.helpPages = [...]`.
+ * Audience enforcement happens at render time via
+ * HelpAudienceResolver; the registry itself never filters.
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        sortByWeight( out );
+        return out;
+    }
+
+    public array function listForSection( required string sectionId ){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) {
+            var p = variables.cache[ id ];
+            if ( p.section == arguments.sectionId ) out.append( p );
+        }
+        sortByWeight( out );
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public any function findBySectionAndPage( required string sectionId, required string pageId ){
+        ensureLoaded();
+        // Accept either a fully-qualified id ("section.page") or the
+        // bare page slug. The bare-slug lookup loops once but the
+        // cache is small.
+        var full = arguments.sectionId & "." & arguments.pageId;
+        if ( structKeyExists( variables.cache, full ) ) return variables.cache[ full ];
+        if ( structKeyExists( variables.cache, arguments.pageId ) ) {
+            var maybe = variables.cache[ arguments.pageId ];
+            if ( maybe.section == arguments.sectionId ) return maybe;
+        }
+        for ( var id in variables.cache ) {
+            var p = variables.cache[ id ];
+            if ( p.section == arguments.sectionId && id == full ) return p;
+        }
+        return javaCast( "null", "" );
+    }
+
+    public array function listSearchable(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) {
+            var p = variables.cache[ id ];
+            if ( p.searchable ) out.append( p );
+        }
+        return out;
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "module" ) ? arguments.entry.module : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.helpPages ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var p in declared ) addEntry( p, moduleName );
+        }
+    }
+
+    private void function addEntry( required any raw, required string moduleName ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" )      || !len( arguments.raw.id      ?: "" ) ) return;
+        if ( !structKeyExists( arguments.raw, "section" ) || !len( arguments.raw.section ?: "" ) ) return;
+        var keywords = structKeyExists( arguments.raw, "keywords" ) && isArray( arguments.raw.keywords )
+            ? arguments.raw.keywords
+            : [];
+        variables.cache[ arguments.raw.id ] = {
+            id         : arguments.raw.id,
+            section    : arguments.raw.section,
+            title      : structKeyExists( arguments.raw, "title" )      ? arguments.raw.title      : arguments.raw.id,
+            audience   : structKeyExists( arguments.raw, "audience" )   ? arguments.raw.audience   : "agent",
+            sortWeight : isNumeric( arguments.raw.sortWeight ?: "" )    ? arguments.raw.sortWeight : 500,
+            source     : structKeyExists( arguments.raw, "source" )     ? arguments.raw.source     : "",
+            searchable : structKeyExists( arguments.raw, "searchable" ) ? !!arguments.raw.searchable : true,
+            keywords   : keywords,
+            module     : arguments.moduleName
+        };
+    }
+
+    private void function sortByWeight( required array entries ){
+        arguments.entries.sort( function( a, b ){
+            var sw = val( a.sortWeight ) - val( b.sortWeight );
+            if ( sw != 0 ) return sw;
+            return compare( a.title, b.title );
+        } );
+    }
+
+}

@@ -1,0 +1,74 @@
+/**
+ * HelpSearchSpec: text-match path of HelpSearchService and the
+ * audience post-filter contract.
+ *
+ * The AI semantic path needs a live embedding provider, which the
+ * test app intentionally disables (application._tesserabx_test_mode
+ * forces AiCapability.isEnabled() to return false). So this spec
+ * exercises the text-match fallback path that runs when AI is off.
+ * That's also the path the dev container hits 100% of the time, so
+ * the coverage matches the deployed reality.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.search   = getController().getWireBox().getInstance( "HelpSearchService@help" );
+        variables.resolver = getController().getWireBox().getInstance( "HelpAudienceResolver@help" );
+    }
+
+    function run(){
+
+        describe( "HelpSearchService (text-match path)", function(){
+
+            it( "returns an empty array for an empty query", function(){
+                expect( variables.search.search( "", { signedIn : true, userType : "agent", permissions : [] } ) ).toBeArray();
+                expect( variables.search.search( "", { signedIn : true, userType : "agent", permissions : [] } ).len() ).toBe( 0 );
+            } );
+
+            it( "returns hits for a query that matches the welcome page", function(){
+                var hits = variables.search.search( "welcome", { signedIn : false }, 10 );
+                expect( hits ).toBeArray();
+                expect( hits.len() ).toBeGT( 0 );
+                var ids = hits.map( ( h ) => h.page.id );
+                expect( ids ).toInclude( "general.welcome" );
+            } );
+
+            it( "respects audience filtering on developer-only pages", function(){
+                // 'manifest' is heavily referenced in the development.manifest
+                // page but should NOT surface for a viewer without
+                // help.developer.
+                var nonDev = variables.search.search( "manifest", { signedIn : true, userType : "agent", permissions : [] }, 10 );
+                for ( var h in nonDev ) expect( h.page.audience ).notToBe( "developer" );
+
+                var dev = variables.search.search( "manifest", { signedIn : true, userType : "agent", permissions : [ "help.developer" ] }, 10 );
+                var devIds = dev.map( ( h ) => h.page.id );
+                expect( devIds ).toInclude( "development.manifest" );
+            } );
+
+            it( "ranks title hits above body hits", function(){
+                var hits = variables.search.search( "welcome", { signedIn : false }, 10 );
+                // The welcome page should rank first because its title
+                // and keywords both hit; any other page that mentions
+                // 'welcome' in body would have a lower score.
+                expect( hits.len() ).toBeGT( 0 );
+                expect( hits[ 1 ].page.id ).toBe( "general.welcome" );
+            } );
+
+            it( "ignores anonymous viewer's developer-page matches entirely", function(){
+                var hits = variables.search.search( "manifest extension boxlang", { signedIn : false }, 20 );
+                for ( var h in hits ) expect( h.page.audience ).toBe( "public" );
+            } );
+
+            it( "snippet is non-empty when the body contains a query token", function(){
+                var hits = variables.search.search( "TesseraBX", { signedIn : false }, 5 );
+                expect( hits.len() ).toBeGT( 0 );
+                expect( len( hits[ 1 ].snippet ) ).toBeGT( 0 );
+            } );
+
+        } );
+
+    }
+
+}

@@ -25,7 +25,17 @@ class {
     this.dependencies       = [ "contacts", "audit" ];
 
     function configure(){
-        variables.settings              = {};
+        variables.settings = {
+            tesserabx : {
+                helpSections : [
+                    { id : "kb", title : "Knowledge base", audience : "public", sortWeight : 400, icon : "bi bi-book" }
+                ],
+                helpPages : [
+                    { id : "kb.finding-articles", section : "kb", title : "Finding articles",       audience : "public", sortWeight : 10, source : "resources/help/finding-articles.md", searchable : true, keywords : [ "search", "knowledge base", "article", "categories", "visibility" ] },
+                    { id : "kb.authoring",        section : "kb", title : "Authoring an article",   audience : "agent",  sortWeight : 20, source : "resources/help/authoring.md",        searchable : true, keywords : [ "draft", "publish", "version", "knowledge base" ] }
+                ]
+            }
+        };
         variables.routes                = [];
         variables.interceptorSettings   = { customInterceptionPoints : [
             "onKbArticlePublished"

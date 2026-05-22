@@ -1,0 +1,32 @@
+/**
+ * help.Search: search box endpoint.
+ *
+ * Behaviorally identical to the user whether AI is on or off:
+ *   AI-on  -> semantic ranking via embeddings
+ *   AI-off -> substring/keyword match
+ * The UI does NOT advertise which mode is active.
+ */
+class {
+
+    property name="searchService" inject="HelpSearchService@help";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        var viewer = tbxViewer();
+        if ( ( viewer.signedIn ?: false ) && ( viewer.userType ?: "" ) == "agent" ) {
+            arguments.event.setLayout( name = "Agent",  module = "core" );
+        } else {
+            arguments.event.setLayout( name = "Portal", module = "core" );
+        }
+    }
+
+    function index( event, rc, prc ){
+        param rc.q = "";
+
+        prc.viewer    = tbxViewer();
+        prc.query     = trim( rc.q );
+        prc.results   = len( prc.query ) ? searchService.search( prc.query, prc.viewer, 20 ) : [];
+        prc.pageTitle = len( prc.query ) ? "Help search: " & prc.query : "Help search";
+        event.setView( "search/index" );
+    }
+
+}

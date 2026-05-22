@@ -1,0 +1,50 @@
+/**
+ * help.Home: the landing page for /help (portal) and /agent/help.
+ *
+ * Renders the audience-filtered list of sections and a top-of-page
+ * search box. The same handler serves both surfaces; the layout
+ * choice and the displayed nav come from whichever surface the
+ * request landed on.
+ */
+class {
+
+    property name="sectionRegistry"  inject="HelpSectionRegistry@help";
+    property name="pageRegistry"     inject="HelpPageRegistry@help";
+    property name="audienceResolver" inject="HelpAudienceResolver@help";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        applyLayout( event );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Help";
+        prc.viewer    = tbxViewer();
+        prc.allowed   = audienceResolver.allowedAudiencesForViewer( prc.viewer );
+        prc.sections  = audienceResolver.filterEntries( prc.viewer, sectionRegistry.listAll() );
+        prc.pagesBySection = {};
+        for ( var s in prc.sections ) {
+            prc.pagesBySection[ s.id ] = audienceResolver.filterEntries(
+                prc.viewer,
+                pageRegistry.listForSection( s.id )
+            );
+        }
+        event.setView( "home/index" );
+    }
+
+    /**
+     * Pick the right surface layout. A signed-in agent gets the
+     * Agent layout (left nav, top bar). Everyone else (anonymous
+     * visitor or signed-in contact) gets the Portal layout. The
+     * /help URL is the same on both surfaces; only the chrome
+     * around it changes.
+     */
+    private void function applyLayout( required any event ){
+        var viewer = tbxViewer();
+        if ( ( viewer.signedIn ?: false ) && ( viewer.userType ?: "" ) == "agent" ) {
+            arguments.event.setLayout( name = "Agent",  module = "core" );
+        } else {
+            arguments.event.setLayout( name = "Portal", module = "core" );
+        }
+    }
+
+}

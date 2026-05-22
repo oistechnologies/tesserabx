@@ -22,7 +22,13 @@ class {
     function configure(){
         // `variables.` prefix is REQUIRED. See gotcha log in
         // docs/EXTENSIBILITY-PLAN.md.
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                helpPages : [
+                    { id : "portal.account-and-mfa", section : "general", title : "Your portal account", audience : "public", sortWeight : 20, source : "resources/help/account-and-mfa.md", searchable : true, keywords : [ "portal", "account", "sign up", "password reset", "mfa" ] }
+                ]
+            }
+        };
 
         // Portal routes (verb-aware versions of /login, /logout, /tickets,
         // /contact, /unsubscribe, etc.) live in the top-level config/Router.bx.

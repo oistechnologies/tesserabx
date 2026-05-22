@@ -1,0 +1,146 @@
+/**
+ * HelpRegistriesSpec: Phase 11 contracts for the help module.
+ *
+ *   - HelpSectionRegistry seeds the core sections (general, development)
+ *     and accepts add-on contributions through the manifest path.
+ *   - HelpPageRegistry seeds the welcome page + the 13 development
+ *     chapters + the per-core-module starter pages, exposes the
+ *     lookup surface (listAll, listForSection, findById,
+ *     findBySectionAndPage, listSearchable, register).
+ *   - HelpAudienceResolver maps the standard viewer struct to a set
+ *     of allowed audiences and filters entries correctly.
+ *   - The development chapter pages are flagged audience='developer';
+ *     the welcome page is audience='public'.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.sections = wb.getInstance( "HelpSectionRegistry@help" );
+        variables.pages    = wb.getInstance( "HelpPageRegistry@help" );
+        variables.resolver = wb.getInstance( "HelpAudienceResolver@help" );
+    }
+
+    function run(){
+
+        describe( "HelpSectionRegistry", function(){
+
+            it( "seeds the general and development sections", function(){
+                var ids = variables.sections.listAll().map( ( s ) => s.id );
+                expect( ids ).toInclude( "general" );
+                expect( ids ).toInclude( "development" );
+            } );
+
+            it( "tickets module contributed its own section via manifest", function(){
+                expect( variables.sections.findById( "tickets" ) ).notToBeNull();
+            } );
+
+            it( "the development section is audience=developer", function(){
+                var dev = variables.sections.findById( "development" );
+                expect( dev ).notToBeNull();
+                expect( dev.audience ).toBe( "developer" );
+            } );
+
+            it( "imperative register adds and findById returns it", function(){
+                var probeId = "spec-section-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.sections.register( {
+                    id : probeId, title : "Spec section", audience : "agent", sortWeight : 999, icon : "bi bi-bug"
+                } );
+                expect( variables.sections.findById( probeId ) ).notToBeNull();
+                expect( variables.sections.findById( probeId ).title ).toBe( "Spec section" );
+            } );
+
+        } );
+
+        describe( "HelpPageRegistry", function(){
+
+            it( "seeds the welcome page (audience=public)", function(){
+                var welcome = variables.pages.findById( "general.welcome" );
+                expect( welcome ).notToBeNull();
+                expect( welcome.audience ).toBe( "public" );
+            } );
+
+            it( "seeds all 13 development chapters", function(){
+                var devPages = variables.pages.listForSection( "development" );
+                expect( devPages.len() ).toBeGTE( 13 );
+                for ( var p in devPages ) expect( p.audience ).toBe( "developer" );
+            } );
+
+            it( "findBySectionAndPage accepts the bare page slug", function(){
+                var p = variables.pages.findBySectionAndPage( "general", "welcome" );
+                expect( p ).notToBeNull();
+                expect( p.id ).toBe( "general.welcome" );
+            } );
+
+            it( "listForSection returns pages sorted by sortWeight", function(){
+                var devPages = variables.pages.listForSection( "development" );
+                for ( var i = 2; i <= devPages.len(); i++ ) {
+                    expect( val( devPages[ i ].sortWeight ) ).toBeGTE( val( devPages[ i - 1 ].sortWeight ) );
+                }
+            } );
+
+            it( "listSearchable returns only entries with searchable=true", function(){
+                var s = variables.pages.listSearchable();
+                expect( s.len() ).toBeGT( 0 );
+                for ( var p in s ) expect( p.searchable ).toBeTrue();
+            } );
+
+            it( "every page has a module attribution", function(){
+                for ( var p in variables.pages.listAll() ) {
+                    expect( len( p.module ) ).toBeGT( 0 );
+                }
+            } );
+
+        } );
+
+        describe( "HelpAudienceResolver", function(){
+
+            it( "anonymous viewer allowed=[public]", function(){
+                var a = variables.resolver.allowedAudiencesForViewer( { signedIn : false } );
+                expect( a ).toBe( [ "public" ] );
+            } );
+
+            it( "signed-in contact allowed=[public, client]", function(){
+                var a = variables.resolver.allowedAudiencesForViewer( { signedIn : true, userType : "contact", permissions : [] } );
+                expect( a ).toBe( [ "public", "client" ] );
+            } );
+
+            it( "signed-in agent without developer perm allowed=[public, client, agent]", function(){
+                var a = variables.resolver.allowedAudiencesForViewer( { signedIn : true, userType : "agent", permissions : [ "tickets.view" ] } );
+                expect( a ).toBe( [ "public", "client", "agent" ] );
+            } );
+
+            it( "signed-in agent WITH help.developer allowed=[public, client, agent, developer]", function(){
+                var a = variables.resolver.allowedAudiencesForViewer( { signedIn : true, userType : "agent", permissions : [ "help.developer" ] } );
+                expect( a ).toBe( [ "public", "client", "agent", "developer" ] );
+            } );
+
+            it( "canSeePage returns false on a developer page for a non-developer agent", function(){
+                var devPage = variables.pages.findById( "development.overview" );
+                expect( devPage ).notToBeNull();
+                var viewer = { signedIn : true, userType : "agent", permissions : [] };
+                expect( variables.resolver.canSeePage( viewer, devPage ) ).toBeFalse();
+            } );
+
+            it( "canSeePage returns true for the welcome page across every viewer", function(){
+                var welcome = variables.pages.findById( "general.welcome" );
+                expect( variables.resolver.canSeePage( { signedIn : false }, welcome ) ).toBeTrue();
+                expect( variables.resolver.canSeePage( { signedIn : true, userType : "contact", permissions : [] }, welcome ) ).toBeTrue();
+                expect( variables.resolver.canSeePage( { signedIn : true, userType : "agent",   permissions : [] }, welcome ) ).toBeTrue();
+            } );
+
+            it( "filterEntries strips pages above the viewer's audience", function(){
+                var all = variables.pages.listAll();
+                var anon = variables.resolver.filterEntries( { signedIn : false }, all );
+                for ( var p in anon ) expect( p.audience ).toBe( "public" );
+                var allowedAud = [ "public" ];
+                expect( anon.len() ).toBeGT( 0 );
+            } );
+
+        } );
+
+    }
+
+}

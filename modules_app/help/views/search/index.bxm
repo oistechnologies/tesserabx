@@ -1,0 +1,46 @@
+<bx:output>
+<bx:set basePath = "/help" >
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <h2 class="h5 mb-0">Help search</h2>
+    <a class="btn btn-outline-secondary btn-sm" href="#basePath#"><i class="bi bi-arrow-left"></i> All help</a>
+</div>
+
+<form method="get" action="#basePath#/search" class="d-flex gap-2 mb-3" role="search">
+    <input type="search" name="q" class="form-control" placeholder="Search help..." value="#encodeForHTMLAttribute( prc.query )#" aria-label="Search help">
+    <button class="btn btn-primary" type="submit">Search</button>
+</form>
+
+<bx:if len( prc.query )>
+    <bx:if !arrayLen( prc.results )>
+        <div class="card">
+            <div class="card-body text-body-secondary">
+                No results for <strong>#encodeForHTML( prc.query )#</strong>.
+            </div>
+        </div>
+    <bx:else>
+        <p class="text-body-secondary small">
+            #arrayLen( prc.results )# result<bx:if arrayLen( prc.results ) neq 1 >s</bx:if> for <strong>#encodeForHTML( prc.query )#</strong>.
+        </p>
+        <div class="card">
+            <div class="list-group list-group-flush">
+                <bx:loop array="#prc.results#" item="hit">
+                    <bx:set pageSlug = replace( hit.page.id, hit.page.section & '.', '' ) >
+                    <a class="list-group-item list-group-item-action"
+                       href="#basePath#/#encodeForHTMLAttribute( hit.page.section )#/#encodeForHTMLAttribute( pageSlug )#">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong>#encodeForHTML( hit.page.title )#</strong>
+                            <bx:if hit.page.audience eq "developer">
+                                <span class="badge text-bg-light text-black">developer</span>
+                            </bx:if>
+                        </div>
+                        <bx:if len( hit.snippet )>
+                            <div class="small text-body-secondary mt-1">#encodeForHTML( hit.snippet )#</div>
+                        </bx:if>
+                    </a>
+                </bx:loop>
+            </div>
+        </div>
+    </bx:if>
+</bx:if>
+</bx:output>

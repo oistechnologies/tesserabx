@@ -26,7 +26,17 @@ class {
     this.dependencies       = [ "contacts", "audit", "sla" ];
 
     function configure(){
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                helpSections : [
+                    { id : "tickets", title : "Tickets", audience : "agent", sortWeight : 200, icon : "bi bi-ticket-detailed" }
+                ],
+                helpPages : [
+                    { id : "tickets.working-the-queue", section : "tickets", title : "Working the ticket queue", audience : "agent",  sortWeight : 10, source : "resources/help/working-the-queue.md", searchable : true, keywords : [ "queue", "ticket", "assign", "claim" ] },
+                    { id : "tickets.submitting",        section : "tickets", title : "Submitting a ticket",     audience : "client", sortWeight : 20, source : "resources/help/submitting.md",        searchable : true, keywords : [ "submit", "open", "request", "ticket" ] }
+                ]
+            }
+        };
         variables.routes   = [];
         // Custom interception points the tickets service fires. Other
         // modules (notably channels) register listeners on these to

@@ -1,0 +1,55 @@
+<bx:output>
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title float-none mb-2">Help</h2>
+                <p class="card-text text-body-secondary">
+                    Browse help by topic or search across every page you can read. The sections you see depend on whether you are signed in and your role.
+                </p>
+                <form method="get" action="/help/search" class="d-flex gap-2 mt-2" role="search">
+                    <input type="search" name="q" class="form-control" placeholder="Search help..." aria-label="Search help">
+                    <button class="btn btn-primary" type="submit">Search</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <bx:if !arrayLen( prc.sections )>
+        <div class="col-12 text-body-secondary">No help sections are available with your current access.</div>
+    </bx:if>
+
+    <bx:loop array="#prc.sections#" item="section">
+        <bx:set pages = prc.pagesBySection[ section.id ] ?: [] >
+        <bx:if arrayLen( pages )>
+            <div class="col-12 col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h5 class="card-title float-none mb-0">
+                                <i class="#encodeForHTMLAttribute( section.icon )#"></i>
+                                <a class="text-decoration-none" href="/help/#encodeForHTMLAttribute( section.id )#">#encodeForHTML( section.title )#</a>
+                            </h5>
+                            <bx:if section.id eq "development">
+                                <a class="btn btn-outline-secondary btn-sm" href="/help/download/extensions.md" title="Download the live EXTENSIONS.md"><i class="bi bi-download"></i> EXTENSIONS.md</a>
+                            </bx:if>
+                        </div>
+                        <ul class="list-unstyled mb-0">
+                            <bx:loop array="#pages#" item="p">
+                                <li class="py-1">
+                                    <a href="/help/#encodeForHTMLAttribute( section.id )#/#encodeForHTMLAttribute( replace( p.id, section.id & '.', '' ) )#">
+                                        #encodeForHTML( p.title )#
+                                    </a>
+                                    <bx:if p.audience eq "developer">
+                                        <span class="badge text-bg-light text-black ms-1">developer</span>
+                                    </bx:if>
+                                </li>
+                            </bx:loop>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </bx:if>
+    </bx:loop>
+</div>
+</bx:output>

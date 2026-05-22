@@ -1,0 +1,26 @@
+/**
+ * help module router.
+ *
+ * Two entry paths land here:
+ *   - /help/*       served via this module's own entryPoint
+ *   - /agent/help/* forwarded in from modules_app/agent/config/Router.bx
+ *                   via withModule("help"). Both surfaces share the
+ *                   same handlers; the handler chooses the layout
+ *                   from the current routed URL.
+ *
+ * Most-specific patterns first; the trailing /:sectionId/:pageId
+ * pair must come before the bare /:sectionId so the two-segment
+ * URL routes to Page.show rather than Section.show with a stray
+ * second segment.
+ */
+class {
+
+    function configure(){
+        route( "/download/extensions.md" ).withVerbs( "GET" ).to( "Download.extensions" );
+        route( "/search" )                .withVerbs( "GET" ).to( "Search.index" );
+        route( "/:sectionId/:pageId" )    .withVerbs( "GET" ).to( "Page.show" );
+        route( "/:sectionId" )            .withVerbs( "GET" ).to( "Section.show" );
+        route( "/" )                      .withVerbs( "GET" ).to( "Home.index" );
+    }
+
+}

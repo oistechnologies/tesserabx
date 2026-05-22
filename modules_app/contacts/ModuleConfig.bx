@@ -34,7 +34,16 @@ class {
         // `variables.` prefix is REQUIRED for any setting ColdBox or
         // a downstream consumer (e.g., AddonRegistryService discovery)
         // needs to read back.
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                helpSections : [
+                    { id : "contacts", title : "Contacts and organizations", audience : "agent", sortWeight : 300, icon : "bi bi-people" }
+                ],
+                helpPages : [
+                    { id : "contacts.managing-contacts", section : "contacts", title : "Managing contacts", audience : "agent", sortWeight : 10, source : "resources/help/managing-contacts.md", searchable : true, keywords : [ "contact", "organization", "merge", "promote" ] }
+                ]
+            }
+        };
         variables.routes   = [];
         variables.interceptorSettings = { customInterceptionPoints : [
             "onOrganizationCreated",

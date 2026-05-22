@@ -1,0 +1,85 @@
+/**
+ * HelpSectionRegistry: top-level groupings for in-app help pages.
+ *
+ * Each entry declares:
+ *   id          stable string, conventionally one word ("tickets",
+ *               "development", "billing-add-on")
+ *   title       human label for the section landing
+ *   audience    "public" | "client" | "agent" | "developer". The
+ *               minimum audience that can SEE the section in the
+ *               browse index. Individual pages inside the section
+ *               can be MORE restricted but never broader.
+ *   sortWeight  integer; lower sorts first
+ *   icon        Bootstrap-icon class (e.g. "bi bi-ticket")
+ *   source      auto-populated: "core" or the contributing module
+ *
+ * Add-ons contribute via `settings.tesserabx.helpSections = [...]`
+ * in `ModuleConfig.bx`. Audience enforcement happens at render time
+ * via HelpAudienceResolver; the registry itself never filters.
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) out.append( variables.cache[ id ] );
+        out.sort( function( a, b ){
+            var sw = val( a.sortWeight ) - val( b.sortWeight );
+            if ( sw != 0 ) return sw;
+            return compare( a.title, b.title );
+        } );
+        return out;
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.id ) ) return variables.cache[ arguments.id ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.helpSections ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var s in declared ) addEntry( s, moduleName );
+        }
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id         : arguments.raw.id,
+            title      : structKeyExists( arguments.raw, "title" )      ? arguments.raw.title      : arguments.raw.id,
+            audience   : structKeyExists( arguments.raw, "audience" )   ? arguments.raw.audience   : "agent",
+            sortWeight : isNumeric( arguments.raw.sortWeight ?: "" )    ? arguments.raw.sortWeight : 500,
+            icon       : structKeyExists( arguments.raw, "icon" )       ? arguments.raw.icon       : "bi bi-bookmark",
+            source     : arguments.source
+        };
+    }
+
+}

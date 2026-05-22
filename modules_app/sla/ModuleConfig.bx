@@ -20,7 +20,16 @@ class {
     this.dependencies       = [ "contacts" ];
 
     function configure(){
-        variables.settings              = {};
+        variables.settings = {
+            tesserabx : {
+                helpSections : [
+                    { id : "sla", title : "Service-level agreements", audience : "agent", sortWeight : 600, icon : "bi bi-clock-history" }
+                ],
+                helpPages : [
+                    { id : "sla.policy-overview", section : "sla", title : "SLA policy overview", audience : "agent", sortWeight : 10, source : "resources/help/policy-overview.md", searchable : true, keywords : [ "sla", "policy", "response", "resolution", "business hours", "breach" ] }
+                ]
+            }
+        };
         variables.routes                = [];
         variables.interceptorSettings   = { customInterceptionPoints : [] };
         variables.interceptors          = [];

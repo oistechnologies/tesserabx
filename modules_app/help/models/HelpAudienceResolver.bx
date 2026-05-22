@@ -1,0 +1,80 @@
+/**
+ * HelpAudienceResolver: maps a viewer struct to the set of help-page
+ * audience tags they can see.
+ *
+ * Audience hierarchy (broadest to narrowest):
+ *   public    : anonymous portal visitors
+ *   client    : signed-in contacts on the portal
+ *   agent     : signed-in agents on the provider dashboard
+ *   developer : agents with the `help.developer` permission
+ *
+ * Resolved allowed-audiences by viewer:
+ *   anonymous                           -> [ public ]
+ *   contact   (signed in, portal)       -> [ public, client ]
+ *   agent     (no help.developer perm)  -> [ public, client, agent ]
+ *   agent     (with help.developer)     -> [ public, client, agent, developer ]
+ *
+ * The asymmetry between portal and agent surfaces is intentional:
+ * /agent/help and /help share one registry, but the resolver knows
+ * whether the viewer is signed in as an agent vs a contact and
+ * filters accordingly. Direct navigation to a page above the
+ * viewer's audience returns null from `canSeePage` so handlers can
+ * render a "page not found / not available" response without
+ * leaking the page's existence.
+ */
+class singleton=true {
+
+    /**
+     * Return the sorted list of audience tags this viewer is allowed
+     * to read. The list always includes "public"; higher tiers are
+     * added per the rules above.
+     */
+    public array function allowedAudiencesForViewer( required struct viewer ){
+        var out = [ "public" ];
+        if ( !( arguments.viewer.signedIn ?: false ) ) return out;
+
+        var userType = arguments.viewer.userType ?: "";
+        if ( userType == "contact" ) {
+            out.append( "client" );
+            return out;
+        }
+        if ( userType == "agent" ) {
+            // An agent can also read everything a contact can.
+            out.append( "client" );
+            out.append( "agent" );
+            var perms = arguments.viewer.permissions ?: [];
+            if ( isArray( perms ) && arrayFindNoCase( perms, "help.developer" ) ) {
+                out.append( "developer" );
+            }
+            return out;
+        }
+        return out;
+    }
+
+    public boolean function canSeeAudience( required struct viewer, required string audience ){
+        return arrayContains( allowedAudiencesForViewer( arguments.viewer ), arguments.audience );
+    }
+
+    public boolean function canSeeSection( required struct viewer, required struct section ){
+        return canSeeAudience( arguments.viewer, arguments.section.audience ?: "agent" );
+    }
+
+    public boolean function canSeePage( required struct viewer, required struct page ){
+        return canSeeAudience( arguments.viewer, arguments.page.audience ?: "agent" );
+    }
+
+    /**
+     * Filter an array of registry entries to those the viewer can
+     * read. Order is preserved.
+     */
+    public array function filterEntries( required struct viewer, required array entries ){
+        var allowed = allowedAudiencesForViewer( arguments.viewer );
+        var out = [];
+        for ( var e in arguments.entries ) {
+            var aud = e.audience ?: "agent";
+            if ( arrayContains( allowed, aud ) ) out.append( e );
+        }
+        return out;
+    }
+
+}

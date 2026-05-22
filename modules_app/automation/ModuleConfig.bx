@@ -24,7 +24,16 @@ class {
     this.dependencies       = [ "tickets", "contacts", "sla" ];
 
     function configure(){
-        variables.settings            = {};
+        variables.settings = {
+            tesserabx : {
+                helpSections : [
+                    { id : "automation", title : "Automation", audience : "agent", sortWeight : 500, icon : "bi bi-lightning" }
+                ],
+                helpPages : [
+                    { id : "automation.rule-basics", section : "automation", title : "Automation rule basics", audience : "agent", sortWeight : 10, source : "resources/help/rule-basics.md", searchable : true, keywords : [ "automation", "rule", "trigger", "condition", "action" ] }
+                ]
+            }
+        };
         variables.routes              = [];
         variables.interceptorSettings = { customInterceptionPoints : [] };
         variables.interceptors        = [

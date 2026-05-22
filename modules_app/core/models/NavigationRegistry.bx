@@ -146,7 +146,13 @@ class singleton=true {
             for ( var n in declared ) {
                 if ( !isStruct( n ) ) continue;
                 var id = n.id ?: ( ( n.surface ?: "" ) & "." & ( n.menu ?: "" ) & "." & lcase( reReplace( n.label ?: "", "[^A-Za-z0-9]+", "-", "all" ) ) );
-                variables.cache[ id ] = normalize( n & { id : id }, moduleName );
+                // `&` is string concatenation in BoxLang; struct merge
+                // uses structAppend. Pre-Phase 11 this line never
+                // fired because no manifest contributed a navigation
+                // entry. The help module is the first.
+                var merged = duplicate( n );
+                merged.id = id;
+                variables.cache[ id ] = normalize( merged, moduleName );
             }
         }
         // cacheLoaded is already set at the top of this function.

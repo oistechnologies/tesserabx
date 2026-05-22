@@ -1,0 +1,193 @@
+/**
+ * HelpSearchService: ranks help pages against a free-text query and
+ * filters the result by the viewer's allowed audiences.
+ *
+ * Two ranking paths, gated by AiCapability.isEnabled():
+ *   - AI-on:  cosine similarity between an embedding of the query
+ *             and per-page embeddings from HelpEmbeddingConsumer.
+ *             Embeddings are lazily built on first search.
+ *   - AI-off: substring + keyword match over title, declared
+ *             keywords, and body text. Scoring is a count of
+ *             distinct query tokens that hit, weighted heavier on
+ *             title hits.
+ *
+ * Either way, the audience filter applies AFTER ranking (the same
+ * filter the browse index uses). A page above the viewer's
+ * audience is excluded from results without leaking its existence.
+ *
+ * The public surface returns the standard hit shape:
+ *   [
+ *     { page : <full registry entry>, score : 0.0..1.0, snippet : "..." }
+ *   ]
+ */
+class singleton=true {
+
+    property name="aiCapability"      inject="AiCapability@ai";
+    property name="aiMiddleware"      inject="AiMiddleware@ai";
+    property name="pageRegistry"      inject="HelpPageRegistry@help";
+    property name="audienceResolver"  inject="HelpAudienceResolver@help";
+    property name="embeddingConsumer" inject="HelpEmbeddingConsumer@help";
+
+    /**
+     * Run a search against the help pages a viewer is allowed to
+     * see. Returns up to `limit` hits, ranked.
+     */
+    public array function search(
+        required string query,
+        required struct viewer,
+        numeric limit = 10
+    ){
+        var q = trim( arguments.query );
+        if ( !len( q ) ) return [];
+
+        var hits = aiCapability.isEnabled()
+            ? semanticSearch( q )
+            : textSearch( q );
+
+        // Audience filter applied after ranking so the same audience
+        // set the browse index uses is used here. Order preserved.
+        var visible = audienceResolver.filterEntries( arguments.viewer, hits.map( ( h ) => h.page ) );
+        var visibleIds = {};
+        for ( var v in visible ) visibleIds[ v.id ] = true;
+
+        var filtered = [];
+        for ( var h in hits ) {
+            if ( structKeyExists( visibleIds, h.page.id ) ) filtered.append( h );
+            if ( filtered.len() >= arguments.limit ) break;
+        }
+        return filtered;
+    }
+
+    // ---------- AI semantic path ----------
+
+    private array function semanticSearch( required string query ){
+        ensureEmbeddingsBuilt();
+
+        var queryEmbedResult = aiMiddleware.embed( "help-page-search", arguments.query, {} );
+        if ( ( queryEmbedResult.outcome ?: "" ) != "ok" ) {
+            // Embedding failed for some reason (provider error,
+            // PII-only redact). Fall back to text search so the
+            // user never sees a broken search box.
+            return textSearch( arguments.query );
+        }
+        var qv = queryEmbedResult.vector ?: [];
+        if ( !isArray( qv ) || !qv.len() ) return textSearch( arguments.query );
+
+        var cache = embeddingConsumer.getVectorCache();
+        var scored = [];
+        for ( var pageId in cache ) {
+            var pv = cache[ pageId ];
+            if ( !isArray( pv ) || !pv.len() ) continue;
+            var page = pageRegistry.findById( pageId );
+            if ( isNull( page ) ) continue;
+            scored.append( {
+                page    : page,
+                score   : cosineSimilarity( qv, pv ),
+                snippet : snippetFor( page, arguments.query )
+            } );
+        }
+        scored.sort( function( a, b ){
+            // Descending by score.
+            var d = val( b.score ) - val( a.score );
+            return d > 0 ? 1 : ( d < 0 ? -1 : 0 );
+        } );
+        return scored;
+    }
+
+    private void function ensureEmbeddingsBuilt(){
+        var pending = embeddingConsumer.listEntitiesNeedingIndex();
+        if ( !pending.len() ) return;
+        for ( var pageId in pending ) {
+            var text = embeddingConsumer.getTextForEmbedding( pageId );
+            if ( !len( text ) ) continue;
+            var res = aiMiddleware.embed( "help-page-index", text, {} );
+            if ( ( res.outcome ?: "" ) == "ok" && isArray( res.vector ?: "" ) ) {
+                embeddingConsumer.saveEmbedding( pageId, res.vector );
+            }
+        }
+    }
+
+    private numeric function cosineSimilarity( required array a, required array b ){
+        if ( arguments.a.len() != arguments.b.len() ) return 0;
+        var dot = 0;
+        var aMagSq = 0;
+        var bMagSq = 0;
+        for ( var i = 1; i <= arguments.a.len(); i++ ) {
+            var av = val( arguments.a[ i ] );
+            var bv = val( arguments.b[ i ] );
+            dot    += av * bv;
+            aMagSq += av * av;
+            bMagSq += bv * bv;
+        }
+        if ( aMagSq == 0 || bMagSq == 0 ) return 0;
+        // BoxLang has a sqr() BIF (returns the SQUARE, not the square
+        // root). Use the ^0.5 idiom for sqrt to avoid the collision.
+        return dot / ( ( aMagSq ^ 0.5 ) * ( bMagSq ^ 0.5 ) );
+    }
+
+    // ---------- text-match fallback ----------
+
+    private array function textSearch( required string query ){
+        var tokens = tokenize( arguments.query );
+        if ( !tokens.len() ) return [];
+
+        var pages = pageRegistry.listSearchable();
+        var scored = [];
+        for ( var p in pages ) {
+            var s = textScore( p, tokens );
+            if ( s > 0 ) {
+                scored.append( {
+                    page    : p,
+                    score   : s,
+                    snippet : snippetFor( p, arguments.query )
+                } );
+            }
+        }
+        scored.sort( function( a, b ){
+            var d = val( b.score ) - val( a.score );
+            return d > 0 ? 1 : ( d < 0 ? -1 : 0 );
+        } );
+        return scored;
+    }
+
+    private numeric function textScore( required struct page, required array tokens ){
+        var title    = lcase( arguments.page.title    ?: "" );
+        var keywords = lcase( arguments.page.keywords.toList( " " ) );
+        var body     = lcase( embeddingConsumer.readPageBody( arguments.page ) );
+
+        var hits = 0;
+        for ( var t in arguments.tokens ) {
+            // Title hits weighted x4, keyword hits x2, body hits x1.
+            if ( find( t, title ) )    hits += 4;
+            if ( find( t, keywords ) ) hits += 2;
+            if ( find( t, body ) )     hits += 1;
+        }
+        return hits;
+    }
+
+    private array function tokenize( required string query ){
+        var out = [];
+        for ( var t in listToArray( lcase( arguments.query ), " ,;.:" ) ) {
+            t = trim( t );
+            if ( len( t ) >= 2 ) out.append( t );
+        }
+        return out;
+    }
+
+    private string function snippetFor( required struct page, required string query ){
+        var body = embeddingConsumer.readPageBody( arguments.page );
+        if ( !len( body ) ) return "";
+        // Find the first token that appears in the body and return
+        // a 160-char window around it. Falls back to the body head.
+        var tokens = tokenize( arguments.query );
+        for ( var t in tokens ) {
+            var i = findNoCase( t, body );
+            if ( i > 0 ) {
+                var start = max( 1, i - 60 );
+                return ( start > 1 ? "..." : "" ) & mid( body, start, 200 ) & ( ( start + 200 ) < len( body ) ? "..." : "" );
+            }
+        }
+        return left( body, 160 ) & ( len( body ) > 160 ? "..." : "" );
+    }
+
+}

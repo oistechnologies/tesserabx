@@ -1,0 +1,41 @@
+/**
+ * help.Section: renders the page list for one section.
+ */
+class {
+
+    property name="sectionRegistry"  inject="HelpSectionRegistry@help";
+    property name="pageRegistry"     inject="HelpPageRegistry@help";
+    property name="audienceResolver" inject="HelpAudienceResolver@help";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        var viewer = tbxViewer();
+        if ( ( viewer.signedIn ?: false ) && ( viewer.userType ?: "" ) == "agent" ) {
+            arguments.event.setLayout( name = "Agent",  module = "core" );
+        } else {
+            arguments.event.setLayout( name = "Portal", module = "core" );
+        }
+    }
+
+    function show( event, rc, prc ){
+        param rc.sectionId = "";
+
+        prc.viewer  = tbxViewer();
+        prc.section = sectionRegistry.findById( rc.sectionId );
+
+        // Section unknown OR viewer can't see it -> render the same
+        // "not available" page either way. Never leak existence.
+        if ( isNull( prc.section ) || !audienceResolver.canSeeSection( prc.viewer, prc.section ) ) {
+            prc.pageTitle = "Help page not available";
+            event.setView( "home/not_available" );
+            return;
+        }
+
+        prc.pageTitle = prc.section.title;
+        prc.pages     = audienceResolver.filterEntries(
+            prc.viewer,
+            pageRegistry.listForSection( rc.sectionId )
+        );
+        event.setView( "home/section" );
+    }
+
+}

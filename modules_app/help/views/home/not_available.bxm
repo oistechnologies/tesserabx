@@ -1,0 +1,13 @@
+<bx:output>
+<bx:set basePath = "/help" >
+
+<div class="card">
+    <div class="card-body">
+        <h2 class="h5">Help page not available</h2>
+        <p class="text-body-secondary mb-2">
+            That help page does not exist, or you do not have access to it with your current sign-in.
+        </p>
+        <a class="btn btn-outline-secondary btn-sm" href="#basePath#"><i class="bi bi-arrow-left"></i> Back to help</a>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,34 @@
+/**
+ * help.Download: streams downloadable artifacts associated with the
+ * help system.
+ *
+ * Today: the live `docs/EXTENSIONS.md` file, gated to the developer
+ * audience. The same file is rendered inline as the "Module
+ * Development" section's per-chapter pages; this endpoint exists so
+ * developers can grab the whole document at once.
+ */
+class {
+
+    property name="audienceResolver" inject="HelpAudienceResolver@help";
+
+    function extensions( event, rc, prc ){
+        var viewer = tbxViewer();
+        if ( !audienceResolver.canSeeAudience( viewer, "developer" ) ) {
+            event.setHTTPHeader( statusCode = 404, statusText = "Not Found" );
+            event.renderData( type = "plain", data = "Not found." );
+            return;
+        }
+        // The file lives in the repo root's docs/ folder. expandPath
+        // resolves from the app root.
+        var path = expandPath( "/docs/EXTENSIONS.md" );
+        if ( !fileExists( path ) ) {
+            event.setHTTPHeader( statusCode = 404, statusText = "Not Found" );
+            event.renderData( type = "plain", data = "Not found." );
+            return;
+        }
+        var body = fileRead( path );
+        event.setHTTPHeader( name = "Content-Disposition", value = "attachment; filename=""EXTENSIONS.md""" );
+        event.renderData( type = "plain", data = body );
+    }
+
+}

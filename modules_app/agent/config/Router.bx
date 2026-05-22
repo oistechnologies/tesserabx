@@ -120,6 +120,16 @@ class {
         route( "notifications/mark-all-read" ).withVerbs( "POST" ).to( "Notifications.markAllRead" );
         route( "notifications/:id/read"      ).withVerbs( "POST" ).to( "Notifications.markRead" );
         route( "notifications"               ).to( "Notifications.index" );
+
+        // Help (Phase 11) is served from a single /help URL space
+        // for both surfaces. The help handlers pick the Agent layout
+        // when tbxViewer().userType is 'agent' and the Portal layout
+        // otherwise, so signed-in agents land on /help with their
+        // dashboard chrome while anonymous portal visitors land on
+        // the same URLs with the portal chrome. Routing the agent
+        // surface separately (/agent/help) would require the
+        // cross-module event syntax, which ColdBox parses
+        // inconsistently when invoked from a module router.
     }
 
 }

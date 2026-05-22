@@ -1,0 +1,44 @@
+<bx:output>
+<bx:set basePath = "/help" >
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h2 class="h5 mb-1">
+            <i class="#encodeForHTMLAttribute( prc.section.icon )#"></i>
+            #encodeForHTML( prc.section.title )#
+        </h2>
+        <bx:if prc.section.id eq "development">
+            <p class="text-body-secondary small mb-0">
+                Documentation for developers building TesseraBX add-ons. Mirrors the live <code>docs/EXTENSIONS.md</code> file.
+            </p>
+        </bx:if>
+    </div>
+    <div class="d-flex gap-2 align-items-start">
+        <bx:if prc.section.id eq "development">
+            <a class="btn btn-primary btn-sm" href="#basePath#/download/extensions.md" title="Download the live docs/EXTENSIONS.md from the repo">
+                <i class="bi bi-download"></i> Download EXTENSIONS.md
+            </a>
+        </bx:if>
+        <a class="btn btn-outline-secondary btn-sm" href="#basePath#"><i class="bi bi-arrow-left"></i> All help</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="list-group list-group-flush">
+        <bx:if !arrayLen( prc.pages )>
+            <div class="list-group-item text-body-secondary">No pages in this section are available with your current access.</div>
+        </bx:if>
+        <bx:loop array="#prc.pages#" item="p">
+            <a class="list-group-item list-group-item-action"
+               href="#basePath#/#encodeForHTMLAttribute( prc.section.id )#/#encodeForHTMLAttribute( replace( p.id, prc.section.id & '.', '' ) )#">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>#encodeForHTML( p.title )#</span>
+                    <bx:if p.audience eq "developer">
+                        <span class="badge text-bg-light text-black">developer</span>
+                    </bx:if>
+                </div>
+            </a>
+        </bx:loop>
+    </div>
+</div>
+</bx:output>

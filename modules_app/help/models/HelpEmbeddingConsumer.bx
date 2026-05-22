@@ -1,0 +1,103 @@
+/**
+ * HelpEmbeddingConsumer: implements the EmbeddingConsumerRegistry
+ * contract from Phase 7 for the in-app help system.
+ *
+ * Used by HelpSearchService to keep an in-memory map of page-id ->
+ * vector. Re-embedding happens lazily on the first search after a
+ * reinit (or when the consumer's invalidate() is called).
+ *
+ * Contract methods (from EmbeddingConsumerRegistry):
+ *   - getTextForEmbedding( entityId )  -> string text to embed
+ *   - saveEmbedding( entityId, vector ) -> void (cache in memory)
+ *   - listEntitiesNeedingIndex()        -> array<page-id>
+ *
+ * The consumer does NOT persist vectors. The page-set is small
+ * (~13 in core, slightly more with add-ons), the embedding model
+ * is fast, and skipping persistence avoids a migration just for a
+ * search ergonomic. If the help-page corpus grows substantially,
+ * promoting this to a `help_page_embeddings` table is a small
+ * follow-up.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="pageRegistry" inject="HelpPageRegistry@help";
+    property name="aiMiddleware" inject="AiMiddleware@ai";
+
+    // pageId -> vector array
+    variables.vectorCache = {};
+
+    public string function getTextForEmbedding( required string entityId ){
+        var page = pageRegistry.findById( arguments.entityId );
+        if ( isNull( page ) ) return "";
+        var body = readPageBody( page );
+        var keywordPart = page.keywords.toList( " " );
+        // Title is weighted heavily by repetition; titles often
+        // contain the most discriminating tokens.
+        return page.title & "\n" & page.title & "\n" & keywordPart & "\n" & body;
+    }
+
+    public void function saveEmbedding( required string entityId, required array vector ){
+        variables.vectorCache[ arguments.entityId ] = arguments.vector;
+    }
+
+    public array function listEntitiesNeedingIndex(){
+        var pages = pageRegistry.listSearchable();
+        var out = [];
+        for ( var p in pages ) {
+            if ( !structKeyExists( variables.vectorCache, p.id ) ) out.append( p.id );
+        }
+        return out;
+    }
+
+    /**
+     * Drop the in-memory cache so the next search rebuilds it. Useful
+     * after a help-pages reload or when an add-on's pages change.
+     */
+    public void function invalidate(){
+        variables.vectorCache = {};
+    }
+
+    /**
+     * Resolve a page's markdown source file and read its body. Used
+     * by getTextForEmbedding and by HelpSearchService's text-match
+     * fallback path.
+     */
+    public string function readPageBody( required struct page ){
+        if ( !len( arguments.page.source ?: "" ) ) return "";
+        var modulePath = resolveModulePath( arguments.page.module );
+        if ( !len( modulePath ) ) return "";
+        var fullPath = modulePath & "/" & arguments.page.source;
+        try {
+            if ( !fileExists( fullPath ) ) return "";
+            return fileRead( fullPath );
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    /**
+     * Direct accessor for HelpSearchService.
+     */
+    public struct function getVectorCache(){
+        return variables.vectorCache;
+    }
+
+    // ---------- internals ----------
+
+    private string function resolveModulePath( required string moduleName ){
+        // ColdBox modules live under modules_app/<module> for core
+        // first-party modules and modules/<module> for add-ons. Try
+        // the colder lookup first.
+        var moduleConfig = getColdbox().getSetting( "modules" );
+        if ( structKeyExists( moduleConfig, arguments.moduleName ) ) {
+            return moduleConfig[ arguments.moduleName ].path ?: "";
+        }
+        return "";
+    }
+
+    private any function getColdbox(){
+        return wirebox.getInstance( "coldbox" );
+    }
+
+}

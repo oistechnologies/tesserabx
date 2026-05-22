@@ -1,0 +1,49 @@
+/**
+ * help.Page: renders one help page from its module-relative
+ * markdown source.
+ *
+ * Audience filter is checked server-side against the viewer's
+ * resolved audience list. A direct navigation to a page the
+ * viewer can't see returns the same "not available" view as
+ * an unknown page id, so a developer-tier URL guessed by a
+ * non-developer never reveals the page exists.
+ */
+class {
+
+    property name="pageRegistry"      inject="HelpPageRegistry@help";
+    property name="sectionRegistry"   inject="HelpSectionRegistry@help";
+    property name="audienceResolver"  inject="HelpAudienceResolver@help";
+    property name="embeddingConsumer" inject="HelpEmbeddingConsumer@help";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        var viewer = tbxViewer();
+        if ( ( viewer.signedIn ?: false ) && ( viewer.userType ?: "" ) == "agent" ) {
+            arguments.event.setLayout( name = "Agent",  module = "core" );
+        } else {
+            arguments.event.setLayout( name = "Portal", module = "core" );
+        }
+    }
+
+    function show( event, rc, prc ){
+        param rc.sectionId = "";
+        param rc.pageId    = "";
+
+        prc.viewer  = tbxViewer();
+        prc.section = sectionRegistry.findById( rc.sectionId );
+        prc.page    = pageRegistry.findBySectionAndPage( rc.sectionId, rc.pageId );
+
+        var sectionOk = !isNull( prc.section ) && audienceResolver.canSeeSection( prc.viewer, prc.section );
+        var pageOk    = !isNull( prc.page )    && audienceResolver.canSeePage(    prc.viewer, prc.page    );
+        if ( !sectionOk || !pageOk ) {
+            prc.pageTitle = "Help page not available";
+            event.setView( "home/not_available" );
+            return;
+        }
+
+        prc.pageTitle = prc.page.title;
+        var body      = embeddingConsumer.readPageBody( prc.page );
+        prc.bodyHtml  = len( body ) ? markdown( body ) : "<p class=""text-body-secondary"">(no content)</p>";
+        event.setView( "page/show" );
+    }
+
+}

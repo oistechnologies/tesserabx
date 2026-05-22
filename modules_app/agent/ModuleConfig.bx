@@ -26,7 +26,16 @@ class {
         // assignments in ModuleConfig.bx configure() go to function-
         // local"). Unscoped settings/routes/etc. are invisible to
         // ColdBox.
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                helpSections : [
+                    { id : "agent", title : "Agent dashboard", audience : "agent", sortWeight : 150, icon : "bi bi-person-badge" }
+                ],
+                helpPages : [
+                    { id : "agent.signing-in-mfa", section : "agent", title : "Signing in and MFA", audience : "agent", sortWeight : 10, source : "resources/help/signing-in-mfa.md", searchable : true, keywords : [ "mfa", "totp", "sign in", "login", "recovery code", "two factor" ] }
+                ]
+            }
+        };
 
         // Routes for /agent live in modules_app/agent/config/Router.bx,
         // which uses verb-aware route() declarations (POST /login goes

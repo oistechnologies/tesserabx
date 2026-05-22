@@ -128,7 +128,8 @@ class singleton=true {
                     "admin.access", "admin.users.manage", "admin.teams.manage",
                     "admin.workflow.manage", "admin.settings.manage", "admin.audit.view",
                     "admin.addons.manage",
-                    "tickets.view", "tickets.assign", "tickets.bulk"
+                    "tickets.view", "tickets.assign", "tickets.bulk",
+                    "help.developer"
                 ]
             },
             {
