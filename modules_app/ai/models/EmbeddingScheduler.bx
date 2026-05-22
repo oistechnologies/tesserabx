@@ -1,0 +1,140 @@
+/**
+ * EmbeddingScheduler: drives the periodic re-embed sweep across
+ * every consumer registered in EmbeddingConsumerRegistry.
+ *
+ * Follow-up A2. Phase 7 shipped the registry contract; the existing
+ * KbIndexingService kept its dedicated interceptor + scheduled task
+ * (which fire on `onKbArticlePublished`). This sweep is **additive**:
+ * it picks up anything the interceptor missed (every consumer, not
+ * just KB articles), runs on a slower cadence, and gives add-on
+ * embedding consumers an indexing hook without touching scheduler
+ * code.
+ *
+ * Per-consumer dispatch:
+ *   1. Resolve the consumer via the registry's `mapping`.
+ *   2. If the consumer exposes `backfillMissing( limit )` (the legacy
+ *      KbIndexingService shape), call that — it owns its own chunking
+ *      and sanitization rules.
+ *   3. Otherwise, walk the documented contract:
+ *        for id in consumer.listEntitiesNeedingIndex():
+ *            text   = consumer.getTextForEmbedding( id )
+ *            result = AiMiddleware.embed( feature, text )
+ *            if ok: consumer.saveEmbedding( id, result.vector )
+ *      Capped at `limit` ids per consumer per run.
+ *
+ * Returns a structured report so the calling scheduled task can log
+ * a summary.
+ */
+class singleton=true {
+
+    property name="wirebox"   inject="wirebox";
+    property name="registry"  inject="EmbeddingConsumerRegistry@ai";
+    property name="ai"        inject="AiMiddleware@ai";
+
+    /**
+     * Run one sweep across every registered consumer.
+     *
+     * @perConsumerLimit Max entities to embed per consumer per run.
+     *                   Keeps a backlog from melting the AI quota in
+     *                   a single tick.
+     */
+    public struct function runOnce( numeric perConsumerLimit = 25 ){
+        var startMs   = getTickCount();
+        var consumers = registry.listAll();
+        var report    = { startedAt : now(), consumers : [], totalIndexed : 0, totalSkipped : 0, totalErrored : 0 };
+
+        for ( var c in consumers ) {
+            var entry = sweepOne( c, arguments.perConsumerLimit );
+            report.consumers.append( entry );
+            report.totalIndexed += val( entry.indexed );
+            report.totalSkipped += val( entry.skipped );
+            report.totalErrored += val( entry.errored );
+        }
+        report.durationMs = getTickCount() - startMs;
+        report.finishedAt = now();
+        return report;
+    }
+
+    // ---------- internals ----------
+
+    private struct function sweepOne( required struct consumerEntry, required numeric perConsumerLimit ){
+        var c = arguments.consumerEntry;
+        var out = {
+            id      : c.id,
+            mapping : c.mapping,
+            feature : c.feature ?: "",
+            indexed : 0,
+            skipped : 0,
+            errored : 0,
+            error   : ""
+        };
+        try {
+            var consumer = wirebox.getInstance( c.mapping );
+            // Prefer the legacy backfill path when the consumer
+            // implements it (KbIndexingService): it knows its own
+            // chunking and sanitization rules.
+            if ( hasMethod( consumer, "backfillMissing" ) ) {
+                var legacy = consumer.backfillMissing( arguments.perConsumerLimit );
+                if ( isStruct( legacy ) ) {
+                    out.indexed = val( legacy.indexed ?: legacy.processed ?: 0 );
+                    out.skipped = val( legacy.skipped ?: 0 );
+                    out.errored = val( legacy.errored ?: legacy.failed ?: 0 );
+                }
+                return out;
+            }
+            // Contract path. The 3 methods listed in
+            // EmbeddingConsumerRegistry's docstring.
+            if ( !hasMethod( consumer, "listEntitiesNeedingIndex" ) ) {
+                out.skipped = 1;
+                out.error   = "Consumer has neither backfillMissing nor listEntitiesNeedingIndex";
+                return out;
+            }
+            var pending = consumer.listEntitiesNeedingIndex();
+            if ( !isArray( pending ) ) pending = [];
+            if ( !pending.len() ) return out;
+
+            var limit = min( arguments.perConsumerLimit, pending.len() );
+            for ( var i = 1; i <= limit; i++ ) {
+                var entityId = pending[ i ];
+                try {
+                    var text = consumer.getTextForEmbedding( entityId );
+                    if ( !len( trim( text ) ) ) {
+                        out.skipped += 1;
+                        continue;
+                    }
+                    var result = ai.embed( c.feature ?: "embedding-sweep", text, {} );
+                    if ( result.outcome != "ok" ) {
+                        out.errored += 1;
+                        continue;
+                    }
+                    consumer.saveEmbedding( entityId, result.vector );
+                    out.indexed += 1;
+                } catch ( any inner ) {
+                    out.errored += 1;
+                }
+            }
+        } catch ( any e ) {
+            out.errored = 1;
+            out.error   = e.message;
+        }
+        return out;
+    }
+
+    /**
+     * BoxLang doesn't have a public structKeyExists for class methods;
+     * fall back to a try-invoke probe. The `getMetadata` route would
+     * work too but is heavier per call.
+     */
+    private boolean function hasMethod( required any obj, required string name ){
+        try {
+            var meta = getMetadata( arguments.obj );
+            if ( isStruct( meta ) && structKeyExists( meta, "functions" ) ) {
+                for ( var fn in meta.functions ) {
+                    if ( ( fn.name ?: "" ) == arguments.name ) return true;
+                }
+            }
+        } catch ( any e ) {}
+        return false;
+    }
+
+}

@@ -100,6 +100,35 @@ class extends="coldbox.system.web.tasks.ColdBoxScheduler" {
             } )
             .everyDayAt( "02:00" );
 
+        // AI embedding sweep (follow-up A2). Walks the
+        // EmbeddingConsumerRegistry and gives every registered
+        // consumer a chance to backfill missing vectors. Additive to
+        // KbIndexingService's onKbArticlePublished interceptor: that
+        // path indexes new articles immediately, this sweep catches
+        // anything the interceptor missed (every consumer, not just
+        // KB articles) on a slower cadence. Caps each consumer at
+        // 25 entities per run to stay polite on the AI quota.
+        task( "ai:embedding-sweep" )
+            .call( () => {
+                var scheduler = getWireBox().getInstance( "EmbeddingScheduler@ai" );
+                var report    = scheduler.runOnce( 25 );
+                writeLog(
+                    text : "ai:embedding-sweep completed: indexed=" & report.totalIndexed
+                         & " skipped=" & report.totalSkipped
+                         & " errored=" & report.totalErrored
+                         & " durationMs=" & report.durationMs,
+                    log  : "tesserabx-scheduler"
+                );
+            } )
+            .every( 1, "hour" )
+            .onFailure( ( task, exception ) => {
+                writeLog(
+                    text : "ai:embedding-sweep failed: " & exception.message,
+                    log  : "tesserabx-scheduler",
+                    type : "error"
+                );
+            } );
+
         // Retention sweeps: prune notifications / audit events /
         // webhook deliveries / ai interactions / completed cbq
         // jobs that have aged past their per-table window. Runs

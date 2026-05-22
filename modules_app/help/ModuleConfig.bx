@@ -99,6 +99,22 @@ class {
         variables.settings.tesserabx.permissions = [
             { id : "help.developer", label : "View developer help section" }
         ];
+
+        // Follow-up A2: register the help-page embedding consumer so
+        // the periodic EmbeddingScheduler sweep picks it up. The
+        // consumer is also driven lazily by HelpSearchService on the
+        // first AI search after a reinit; both paths share the same
+        // singleton + cache.
+        variables.settings.tesserabx.embeddingConsumers = [
+            {
+                id          : "help.page",
+                label       : "In-app help pages",
+                description : "Embeds help-page bodies for semantic search across /help.",
+                feature     : "help-page-index",
+                mapping     : "HelpEmbeddingConsumer@help",
+                dimension   : 1536
+            }
+        ];
     }
 
     function onLoad(){

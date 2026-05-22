@@ -1,0 +1,79 @@
+/**
+ * EmbeddingSchedulerSpec: follow-up A2.
+ *
+ * Verifies the scheduled re-embed sweep walks every consumer in
+ * EmbeddingConsumerRegistry and produces a structured report.
+ * Cannot exercise live AI calls (the test app forces AI off via
+ * the test-mode flag), but the dispatcher's shape, the per-
+ * consumer-limit cap, and the legacy backfillMissing detour are
+ * all observable from the report.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.scheduler = getController().getWireBox().getInstance( "EmbeddingScheduler@ai" );
+        variables.registry  = getController().getWireBox().getInstance( "EmbeddingConsumerRegistry@ai" );
+    }
+
+    function run(){
+        describe( "EmbeddingScheduler", function(){
+
+            it( "runOnce returns a structured report with one entry per registered consumer", function(){
+                var report = variables.scheduler.runOnce( 1 );
+                expect( report ).toHaveKey( "consumers" );
+                expect( report ).toHaveKey( "totalIndexed" );
+                expect( report ).toHaveKey( "totalSkipped" );
+                expect( report ).toHaveKey( "totalErrored" );
+                expect( report ).toHaveKey( "durationMs" );
+                // Every registered consumer gets one report row.
+                expect( report.consumers.len() ).toBe( variables.registry.listAll().len() );
+            } );
+
+            it( "every consumer entry in the report carries id + mapping + feature + counters", function(){
+                var report = variables.scheduler.runOnce( 1 );
+                expect( report.consumers.len() ).toBeGT( 0 );
+                for ( var c in report.consumers ) {
+                    expect( c ).toHaveKey( "id" );
+                    expect( c ).toHaveKey( "mapping" );
+                    expect( c ).toHaveKey( "feature" );
+                    expect( c ).toHaveKey( "indexed" );
+                    expect( c ).toHaveKey( "skipped" );
+                    expect( c ).toHaveKey( "errored" );
+                }
+            } );
+
+            it( "totals equal the sum of per-consumer counts", function(){
+                var report = variables.scheduler.runOnce( 1 );
+                var sumI = 0;
+                var sumS = 0;
+                var sumE = 0;
+                for ( var c in report.consumers ) {
+                    sumI += val( c.indexed );
+                    sumS += val( c.skipped );
+                    sumE += val( c.errored );
+                }
+                expect( val( report.totalIndexed ) ).toBe( sumI );
+                expect( val( report.totalSkipped ) ).toBe( sumS );
+                expect( val( report.totalErrored ) ).toBe( sumE );
+            } );
+
+            it( "the kb.article consumer appears in the report (legacy backfillMissing path)", function(){
+                var report = variables.scheduler.runOnce( 1 );
+                var ids = [];
+                for ( var c in report.consumers ) ids.append( c.id );
+                expect( ids ).toInclude( "kb.article" );
+            } );
+
+            it( "the help.page consumer appears in the report (contract path)", function(){
+                var report = variables.scheduler.runOnce( 1 );
+                var ids = [];
+                for ( var c in report.consumers ) ids.append( c.id );
+                expect( ids ).toInclude( "help.page" );
+            } );
+
+        } );
+    }
+
+}

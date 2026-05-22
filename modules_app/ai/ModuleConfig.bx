@@ -88,6 +88,13 @@ class {
         binder.map( "EmbeddingConsumerRegistry@ai" )
               .to( "#moduleMapping#.models.EmbeddingConsumerRegistry" )
               .asSingleton();
+        // Follow-up A2: periodic re-embed sweep across every consumer
+        // in the registry. Wired into config/Scheduler.bx; the sweep
+        // is additive to KbIndexingService's existing onKbArticle
+        // Published interceptor path.
+        binder.map( "EmbeddingScheduler@ai" )
+              .to( "#moduleMapping#.models.EmbeddingScheduler" )
+              .asSingleton();
 
         // Phase 7 provider: BxAiProvider wraps the existing
         // aiChat / aiEmbed BIF calls; add-ons register additional
