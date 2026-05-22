@@ -26,7 +26,8 @@
  */
 class singleton=true {
 
-    property name="coldbox" inject="coldbox";
+    property name="coldbox"           inject="coldbox";
+    property name="warningCollector"  inject="RegistrationWarningCollector@core";
 
     variables.cache       = {};
     variables.cacheLoaded = false;
@@ -90,7 +91,7 @@ class singleton=true {
     }
 
     private struct function normalize( required struct raw, required string source ){
-        return {
+        var entry = {
             id                 : arguments.raw.id,
             title              : arguments.raw.title       ?: arguments.raw.id,
             description        : arguments.raw.description ?: "",
@@ -102,6 +103,25 @@ class singleton=true {
             requiresAi         : !!( arguments.raw.requiresAi     ?: false ),
             source             : arguments.source
         };
+        validatePermissionGate( entry );
+        return entry;
+    }
+
+    /**
+     * Follow-up A8: warn at registration time when a manifest-
+     * contributed admin card has no requiredPermission. Core seeds
+     * (source = "imperative") are skipped; every core admin card
+     * declares its permission directly.
+     */
+    private void function validatePermissionGate( required struct entry ){
+        if ( arguments.entry.source == "core" || arguments.entry.source == "imperative" ) return;
+        if ( len( arguments.entry.requiredPermission ) ) return;
+        warningCollector.report(
+            registry : "AdminPagesRegistry",
+            entryId  : arguments.entry.id,
+            source   : arguments.entry.source,
+            reason   : "missing-required-permission"
+        );
     }
 
     private boolean function isVisible( required struct entry, required struct viewer ){

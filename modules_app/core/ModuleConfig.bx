@@ -88,6 +88,9 @@ class {
         binder.map( "NavigationRegistry@core" )
               .to( "#moduleMapping#.models.NavigationRegistry" )
               .asSingleton();
+        binder.map( "RegistrationWarningCollector@core" )
+              .to( "#moduleMapping#.models.RegistrationWarningCollector" )
+              .asSingleton();
         binder.map( "AddonAssetService@core" )
               .to( "#moduleMapping#.models.AddonAssetService" )
               .asSingleton();

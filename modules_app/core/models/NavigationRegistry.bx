@@ -55,7 +55,8 @@
  */
 class singleton=true {
 
-    property name="coldbox" inject="coldbox";
+    property name="coldbox"           inject="coldbox";
+    property name="warningCollector"  inject="RegistrationWarningCollector@core";
 
     variables.cache       = {};   // id -> entry struct
     variables.cacheLoaded = false;
@@ -159,7 +160,7 @@ class singleton=true {
     }
 
     private struct function normalize( required struct raw, required string source ){
-        return {
+        var entry = {
             id                 : arguments.raw.id,
             surface            : arguments.raw.surface ?: "agent",
             menu               : arguments.raw.menu    ?: "main",
@@ -174,6 +175,25 @@ class singleton=true {
             requiresAi         : !!( arguments.raw.requiresAi        ?: false ),
             source             : arguments.source
         };
+        validatePermissionGate( entry );
+        return entry;
+    }
+
+    /**
+     * Follow-up A8: emit a registration-time warning when a manifest-
+     * contributed entry lands without a requiredPermission. Core
+     * seeds (source = "imperative") legitimately have permissionless
+     * entries like the portal home page, so we skip those.
+     */
+    private void function validatePermissionGate( required struct entry ){
+        if ( arguments.entry.source == "core" || arguments.entry.source == "imperative" ) return;
+        if ( len( arguments.entry.requiredPermission ) ) return;
+        warningCollector.report(
+            registry : "NavigationRegistry",
+            entryId  : arguments.entry.id,
+            source   : arguments.entry.source,
+            reason   : "missing-required-permission"
+        );
     }
 
     private boolean function isVisible( required struct entry, required struct viewer ){

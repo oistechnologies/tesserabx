@@ -1,0 +1,64 @@
+/**
+ * RegistrationWarningCollector: in-memory log of UI-registry
+ * registration-time concerns (follow-up A8).
+ *
+ * The four UI registries (NavigationRegistry, AdminPagesRegistry,
+ * TicketPanelRegistry, DashboardWidgetRegistry) call `report` from
+ * their `normalize()` step whenever a manifest-contributed entry
+ * lands without a `requiredPermission`. We do not reject the
+ * registration: an already-deployed add-on that forgot the field
+ * should still load. We do, however, emit a loud warning so an
+ * operator can fix it.
+ *
+ * Calls also writeLog so the warning surfaces in the AddonRegistry
+ * log file at boot, even when the in-memory list has not yet been
+ * queried.
+ *
+ * --- Public extension contract ---
+ *
+ *   var collector = wirebox.getInstance( "RegistrationWarningCollector@core" );
+ *   var rows = collector.list();
+ *   // rows: [ { registry, entryId, source, reason, recordedAt } ]
+ */
+class singleton=true {
+
+    variables.warnings = [];
+
+    public void function report(
+        required string registry,
+        required string entryId,
+        required string source,
+        required string reason
+    ){
+        variables.warnings.append( {
+            registry   : arguments.registry,
+            entryId    : arguments.entryId,
+            source     : arguments.source,
+            reason     : arguments.reason,
+            recordedAt : now()
+        } );
+        writeLog(
+            file = "AddonRegistry",
+            text = "[" & arguments.registry & "] " & arguments.reason
+                 & " entry=[" & arguments.entryId & "] source=[" & arguments.source & "]",
+            type = "warning"
+        );
+    }
+
+    public array function list(){
+        return variables.warnings;
+    }
+
+    public array function listForRegistry( required string registry ){
+        var out = [];
+        for ( var w in variables.warnings ) {
+            if ( w.registry == arguments.registry ) out.append( w );
+        }
+        return out;
+    }
+
+    public void function clear(){
+        variables.warnings = [];
+    }
+
+}

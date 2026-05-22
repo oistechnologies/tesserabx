@@ -34,6 +34,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.widgets      = wb.getInstance( "DashboardWidgetRegistry@reporting" );
         variables.audience     = wb.getInstance( "HelpAudienceResolver@help" );
         variables.entityExt    = wb.getInstance( "EntityExtensionService@core" );
+        variables.warnings     = wb.getInstance( "RegistrationWarningCollector@core" );
     }
 
     function run(){
@@ -209,6 +210,122 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
         } );
 
+        describe( "Phase 13: registration-time warnings for missing requiredPermission", function(){
+
+            // The collector is a singleton with shared state; each
+            // spec works against a unique entry id so concurrent runs
+            // do not stomp each other. Probes intentionally omit
+            // requiredPermission, which would leak into downstream
+            // specs (notably AdminPagesRegistrySpec's "every seeded
+            // card requires admin-class permission" assertion); the
+            // afterEach reloads each registry so each test starts
+            // from manifest-only state.
+
+            afterEach( function( currentSpec ){
+                variables.nav.reload();
+                variables.adminPages.reload();
+                variables.ticketPanels.reload();
+                variables.widgets.reload();
+                variables.warnings.clear();
+            } );
+
+            it( "NavigationRegistry flags a manifest-style entry without requiredPermission", function(){
+                var probeId = "spec-nav-perm-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                // The register() helper marks `source = "imperative"`
+                // when entry.source is absent, which is what core seeds
+                // use. To exercise the manifest path we set source
+                // explicitly to a non-imperative value.
+                variables.nav.register( {
+                    id      : probeId,
+                    surface : "agent",
+                    menu    : "main",
+                    label   : "Spec missing-perm " & probeId,
+                    route   : "/agent/spec-missing-perm",
+                    source  : "spec-addon"
+                } );
+                var hits = filterWarnings( "NavigationRegistry", probeId );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].reason ).toBe( "missing-required-permission" );
+                expect( hits[ 1 ].source ).toBe( "spec-addon" );
+            } );
+
+            it( "NavigationRegistry does NOT flag an imperatively-seeded permissionless entry", function(){
+                var probeId = "spec-nav-perm-imp-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.nav.register( {
+                    id      : probeId,
+                    surface : "portal",
+                    menu    : "main",
+                    label   : "Spec imperative " & probeId,
+                    route   : "/spec-imperative"
+                } );
+                expect( filterWarnings( "NavigationRegistry", probeId ).len() ).toBe( 0 );
+            } );
+
+            it( "AdminPagesRegistry flags a manifest-style entry without requiredPermission", function(){
+                var probeId = "spec-admin-perm-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.adminPages.register( {
+                    id          : probeId,
+                    title       : "Spec missing-perm",
+                    description : "x",
+                    route       : "/agent/admin/spec-missing-perm",
+                    source      : "spec-addon"
+                } );
+                var hits = filterWarnings( "AdminPagesRegistry", probeId );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].reason ).toBe( "missing-required-permission" );
+            } );
+
+            it( "TicketPanelRegistry flags a manifest-style entry without requiredPermission", function(){
+                var probeId = "spec-panel-perm-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.ticketPanels.register( {
+                    id      : probeId,
+                    label   : "Spec missing-perm panel",
+                    partial : "panels/_spec",
+                    module  : "spec-addon",
+                    source  : "spec-addon"
+                } );
+                var hits = filterWarnings( "TicketPanelRegistry", probeId );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].reason ).toBe( "missing-required-permission" );
+            } );
+
+            it( "DashboardWidgetRegistry flags a manifest-style entry without requiredPermission", function(){
+                var probeId = "spec-widget-perm-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id      : probeId,
+                    title   : "Spec missing-perm widget",
+                    partial : "widgets/_spec",
+                    module  : "spec-addon",
+                    source  : "spec-addon"
+                } );
+                var hits = filterWarnings( "DashboardWidgetRegistry", probeId );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].reason ).toBe( "missing-required-permission" );
+            } );
+
+            it( "an entry that DOES declare requiredPermission produces no warning", function(){
+                var probeId = "spec-admin-perm-ok-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.adminPages.register( {
+                    id                 : probeId,
+                    title              : "Spec with perm",
+                    description        : "x",
+                    route              : "/agent/admin/spec-ok",
+                    requiredPermission : "admin.settings.manage",
+                    source             : "spec-addon"
+                } );
+                expect( filterWarnings( "AdminPagesRegistry", probeId ).len() ).toBe( 0 );
+            } );
+
+        } );
+
+    }
+
+    private array function filterWarnings( required string registry, required string entryId ){
+        var out = [];
+        for ( var w in variables.warnings.listForRegistry( arguments.registry ) ) {
+            if ( w.entryId == arguments.entryId ) out.append( w );
+        }
+        return out;
     }
 
     // ---------- helpers ----------

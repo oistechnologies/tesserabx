@@ -40,8 +40,9 @@
  */
 class singleton=true {
 
-    property name="wirebox" inject="wirebox";
-    property name="coldbox" inject="coldbox";
+    property name="wirebox"           inject="wirebox";
+    property name="coldbox"           inject="coldbox";
+    property name="warningCollector"  inject="RegistrationWarningCollector@core";
 
     variables.cache       = {};
     variables.cacheLoaded = false;
@@ -118,7 +119,7 @@ class singleton=true {
     }
 
     private struct function normalize( required struct raw, required string source ){
-        return {
+        var entry = {
             id                 : arguments.raw.id,
             title              : arguments.raw.title   ?: arguments.raw.id,
             partial            : arguments.raw.partial ?: "",
@@ -132,6 +133,25 @@ class singleton=true {
             requiresAi         : !!( arguments.raw.requiresAi     ?: false ),
             source             : arguments.source
         };
+        validatePermissionGate( entry );
+        return entry;
+    }
+
+    /**
+     * Follow-up A8: warn at registration time when a manifest-
+     * contributed dashboard widget has no requiredPermission.
+     * Dashboards live on the agent surface; an unscoped widget is
+     * visible to every agent regardless of role.
+     */
+    private void function validatePermissionGate( required struct entry ){
+        if ( arguments.entry.source == "core" || arguments.entry.source == "imperative" ) return;
+        if ( len( arguments.entry.requiredPermission ) ) return;
+        warningCollector.report(
+            registry : "DashboardWidgetRegistry",
+            entryId  : arguments.entry.id,
+            source   : arguments.entry.source,
+            reason   : "missing-required-permission"
+        );
     }
 
     private boolean function isVisible( required struct entry, required struct viewer ){
