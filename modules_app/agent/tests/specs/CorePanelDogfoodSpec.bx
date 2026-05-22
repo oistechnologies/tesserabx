@@ -1,0 +1,156 @@
+/**
+ * CorePanelDogfoodSpec: follow-up B1.
+ *
+ * Verifies that the ten core right-column ticket-detail cards are
+ * registered through TicketPanelRegistry, exactly the same way an
+ * add-on contribution lands. Before B1 these cards were hard-coded
+ * inline in agent/views/tickets/show.bxm and the registry contract
+ * was only exercised by add-ons.
+ *
+ * The spec covers:
+ *   - All ten core panel ids are registered.
+ *   - Each is in the "right" position.
+ *   - Each declares a sortWeight, a requiredPermission, and points
+ *     at a partial under modules_app/agent/views/panels/.
+ *   - The three AI-flagged panels (summary, kb-draft, related-articles)
+ *     carry requiresAi=true so the AI-off invariant filter hides them
+ *     when AI is disabled.
+ *   - sortWeights produce the documented visual order.
+ *   - Each partial file actually exists on disk so a registry hit
+ *     does not fail at render time.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.panels = getController().getWireBox().getInstance( "TicketPanelRegistry@tickets" );
+        // Modules.path resolves the on-disk root of the agent module
+        // regardless of whether it lives in modules_app/ or modules/.
+        variables.agentPath = getController().getSetting( "modules" )[ "agent" ].path;
+    }
+
+    function run(){
+        describe( "B1: core ticket panels are registered, not inlined", function(){
+
+            it( "the registry contains all ten core panel ids", function(){
+                var expected = [
+                    "summary", "kb-draft", "related-articles", "custom-fields",
+                    "status", "sla", "assignment", "block-sender",
+                    "promote-sender", "timeline"
+                ];
+                var actual = variables.panels.listAll().map( ( p ) => p.id );
+                for ( var id in expected ) expect( actual ).toInclude( id );
+            } );
+
+            it( "every core panel targets position=right", function(){
+                for ( var id in coreIds() ) {
+                    var entry = findPanelById( id );
+                    expect( entry ).notToBeNull();
+                    expect( entry.position ).toBe( "right" );
+                }
+            } );
+
+            it( "every core panel declares partial, sortWeight, and requiredPermission", function(){
+                for ( var id in coreIds() ) {
+                    var entry = findPanelById( id );
+                    expect( len( entry.partial ?: "" ) ).toBeGT( 0, "partial set for " & id );
+                    expect( entry.sortWeight ).toBeGT( 0, "sortWeight set for " & id );
+                    expect( len( entry.requiredPermission ?: "" ) ).toBeGT( 0, "requiredPermission set for " & id );
+                }
+            } );
+
+            it( "the three AI panels carry requiresAi=true", function(){
+                var aiPanels = [ "summary", "kb-draft", "related-articles" ];
+                for ( var id in aiPanels ) {
+                    var entry = findPanelById( id );
+                    expect( !!entry.requiresAi ).toBeTrue( id & " should require AI" );
+                }
+            } );
+
+            it( "non-AI panels do NOT carry requiresAi=true", function(){
+                var nonAiPanels = [ "custom-fields", "status", "sla", "assignment", "block-sender", "promote-sender", "timeline" ];
+                for ( var id in nonAiPanels ) {
+                    var entry = findPanelById( id );
+                    expect( !!entry.requiresAi ).toBeFalse( id & " should not require AI" );
+                }
+            } );
+
+            it( "every core panel's partial file exists on disk", function(){
+                for ( var id in coreIds() ) {
+                    var entry = findPanelById( id );
+                    // entry.partial is "panels/<name>"; resolve against
+                    // the agent module's views directory.
+                    var path = variables.agentPath & "/views/" & entry.partial & ".bxm";
+                    expect( fileExists( path ) ).toBeTrue( "missing partial file " & path & " for panel " & id );
+                }
+            } );
+
+            it( "sortWeight order matches the documented visual sequence", function(){
+                var expectedOrder = [
+                    "summary", "kb-draft", "related-articles", "custom-fields",
+                    "status", "sla", "assignment", "block-sender",
+                    "promote-sender", "timeline"
+                ];
+                var sorted = variables.panels.listAll();
+                arraySort( sorted, function( a, b ){
+                    return ( a.sortWeight < b.sortWeight ) ? -1 : ( a.sortWeight > b.sortWeight ? 1 : 0 );
+                } );
+                var sortedCoreIds = [];
+                for ( var p in sorted ) {
+                    if ( arrayFindNoCase( expectedOrder, p.id ) ) sortedCoreIds.append( p.id );
+                }
+                expect( sortedCoreIds ).toBe( expectedOrder );
+            } );
+
+            it( "registration source is `agent` (manifest), not `imperative` or `core`", function(){
+                // Confirms the panels travel through the manifest path
+                // an add-on uses, not a hand-rolled imperative
+                // register() that would bypass the A8 dogfooding.
+                for ( var id in coreIds() ) {
+                    var entry = findPanelById( id );
+                    expect( entry.source ).toBe( "agent" );
+                }
+            } );
+
+            it( "every core panel registration is silent in the warning collector (A8)", function(){
+                // requiredPermission is set on every core panel, so the
+                // A8 warning collector should have zero
+                // missing-required-permission entries for any core
+                // panel id. Catches a regression where a future panel
+                // ships without a permission.
+                var collector = getController().getWireBox().getInstance( "RegistrationWarningCollector@core" );
+                var warnings = collector.listForRegistry( "TicketPanelRegistry" );
+                var coreWarningIds = [];
+                for ( var w in warnings ) {
+                    if ( arrayFindNoCase( coreIds(), w.entryId ) ) coreWarningIds.append( w.entryId );
+                }
+                expect( coreWarningIds ).toBeEmpty();
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private array function coreIds(){
+        return [
+            "summary", "kb-draft", "related-articles", "custom-fields",
+            "status", "sla", "assignment", "block-sender",
+            "promote-sender", "timeline"
+        ];
+    }
+
+    /**
+     * Linear scan over listAll() to find a panel by id. The registry
+     * does not expose a findById, and adding one is out of scope for
+     * B1. Linear is fine at 10-15 entries.
+     */
+    private any function findPanelById( required string id ){
+        for ( var p in variables.panels.listAll() ) {
+            if ( p.id == arguments.id ) return p;
+        }
+        return javaCast( "null", "" );
+    }
+
+}

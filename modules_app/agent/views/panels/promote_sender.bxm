@@ -1,0 +1,41 @@
+<bx:output>
+<bx:set local.t = prc.ticket >
+<bx:if local.t.isAccountless()>
+    <div class="card mb-3 border-warning">
+        <div class="card-header bg-warning-subtle p-0">
+            <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
+               data-bs-toggle="collapse"
+               href="##promote-sender-card"
+               role="button"
+               aria-expanded="false"
+               aria-controls="promote-sender-card">
+                <span>Promote sender to contact</span>
+                <i class="bi bi-chevron-down"></i>
+            </a>
+        </div>
+        <div id="promote-sender-card" class="collapse">
+            <div class="card-body">
+                <p class="small mb-2">Creates a Contact for <code>#encodeForHTML( local.t.getOriginatingEmail() ?: "" )#</code> in the chosen organization and assigns this ticket to them.</p>
+                <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/promote-sender">
+                    <div class="mb-2">
+                        <select class="form-select" name="organizationId" required>
+                            <option value="">Select organization...</option>
+                            <bx:loop array="#prc.organizations#" item="local.o">
+                                <option value="#encodeForHTMLAttribute( local.o.getId() )#">#encodeForHTML( local.o.getName() )#</option>
+                            </bx:loop>
+                        </select>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6"><input type="text" class="form-control" name="firstName" placeholder="First name"></div>
+                        <div class="col-6"><input type="text" class="form-control" name="lastName" placeholder="Last name"></div>
+                    </div>
+                    <div class="mb-2">
+                        <input type="text" class="form-control" name="password" placeholder="Initial password (min 8 chars)" minlength="8" required>
+                    </div>
+                    <button class="btn btn-warning w-100" type="submit">Promote</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</bx:if>
+</bx:output>

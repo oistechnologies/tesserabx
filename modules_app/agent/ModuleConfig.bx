@@ -33,6 +33,27 @@ class {
                 ],
                 helpPages : [
                     { id : "agent.signing-in-mfa", section : "agent", title : "Signing in and MFA", audience : "agent", sortWeight : 10, source : "resources/help/signing-in-mfa.md", searchable : true, keywords : [ "mfa", "totp", "sign in", "login", "recovery code", "two factor" ] }
+                ],
+                // Follow-up B1: the ten right-column cards on the
+                // agent ticket-detail page are registered through the
+                // same TicketPanelRegistry path as add-on panels. The
+                // partials live under modules_app/agent/views/panels/
+                // and consume prc.* the same way the inline cards did.
+                // A `requiredPermission` of "tickets.view" is the
+                // baseline for "anyone who can already see the
+                // ticket"; tightening individual panels is a separate
+                // pass.
+                ticketPanels : [
+                    { id : "summary",          position : "right", label : "AI summary",            partial : "panels/summary",          module : "agent", sortWeight : 100,  requiredPermission : "tickets.view", requiresAi : true                  },
+                    { id : "kb-draft",         position : "right", label : "Draft KB article",      partial : "panels/kb_draft",         module : "agent", sortWeight : 200,  requiredPermission : "tickets.view", requiresAi : true                  },
+                    { id : "related-articles", position : "right", label : "Related articles",      partial : "panels/related_articles", module : "agent", sortWeight : 300,  requiredPermission : "tickets.view", requiresAi : true                  },
+                    { id : "custom-fields",    position : "right", label : "Custom fields",         partial : "panels/custom_fields",    module : "agent", sortWeight : 400,  requiredPermission : "tickets.view"                                     },
+                    { id : "status",           position : "right", label : "Status",                partial : "panels/status",           module : "agent", sortWeight : 500,  requiredPermission : "tickets.view"                                     },
+                    { id : "sla",              position : "right", label : "SLA",                   partial : "panels/sla",              module : "agent", sortWeight : 600,  requiredPermission : "tickets.view"                                     },
+                    { id : "assignment",       position : "right", label : "Assignment",            partial : "panels/assignment",       module : "agent", sortWeight : 700,  requiredPermission : "tickets.view"                                     },
+                    { id : "block-sender",     position : "right", label : "Block sender",          partial : "panels/block_sender",     module : "agent", sortWeight : 800,  requiredPermission : "tickets.view"                                     },
+                    { id : "promote-sender",   position : "right", label : "Promote sender",        partial : "panels/promote_sender",   module : "agent", sortWeight : 900,  requiredPermission : "tickets.view"                                     },
+                    { id : "timeline",         position : "right", label : "Timeline",              partial : "panels/timeline",         module : "agent", sortWeight : 1000, requiredPermission : "tickets.view"                                     }
                 ]
             }
         };
