@@ -83,9 +83,9 @@ class {
 
                 // ---- Phase 4: UI registries ----
                 navigation : [
-                    { id : "exampleSync.agent.main",      surface : "agent",  menu : "main",    label : "Example Sync", route : "/agent/admin/example-sync", icon : "bi bi-arrow-repeat", sortWeight : 850, requiresAuth : true,  requiredPermission : "exampleSync.view"   },
-                    { id : "exampleSync.agent.account",   surface : "agent",  menu : "account", label : "Example Sync settings", route : "/agent/admin/example-sync", icon : "bi bi-gear", sortWeight : 50, requiresAuth : true, requiredPermission : "exampleSync.manage" },
-                    { id : "exampleSync.portal.main",     surface : "portal", menu : "main",    label : "Sync status",  route : "/help/example-sync/status", icon : "bi bi-arrow-repeat", sortWeight : 800, requiresAuth : false }
+                    { id : "exampleSync.agent.main",      surface : "agent",  menu : "main",    label : "Example Sync",          route : "/example-sync/admin",  icon : "bi bi-arrow-repeat", sortWeight : 850, requiresAuth : true,  requiredPermission : "exampleSync.view"   },
+                    { id : "exampleSync.agent.account",   surface : "agent",  menu : "account", label : "Example Sync settings", route : "/example-sync/admin",  icon : "bi bi-gear",         sortWeight : 50,  requiresAuth : true,  requiredPermission : "exampleSync.manage" },
+                    { id : "exampleSync.portal.main",     surface : "portal", menu : "main",    label : "Sync status",           route : "/example-sync/status", icon : "bi bi-arrow-repeat", sortWeight : 800, requiresAuth : false }
                 ],
                 permissions : [
                     { id : "exampleSync.view",   label : "View Example Sync status"  },
@@ -101,7 +101,7 @@ class {
                     }
                 ],
                 adminPages : [
-                    { id : "exampleSync.connection", title : "Example Sync connection", description : "Configure the connection to the external system.", route : "/agent/admin/example-sync", icon : "bi bi-arrow-repeat", sortWeight : 620, requiredPermission : "exampleSync.manage" }
+                    { id : "exampleSync.connection", title : "Example Sync connection", description : "Configure the connection to the external system.", route : "/example-sync/admin", icon : "bi bi-arrow-repeat", sortWeight : 620, requiredPermission : "exampleSync.manage" }
                 ],
                 ticketPanels : [
                     { id : "exampleSync.linkedIssue", title : "External link", view : "panels/linked_issue", module : "example-sync", position : "right", sortWeight : 700, requiredPermission : "exampleSync.view", defaultCollapsed : true }
@@ -133,8 +133,15 @@ class {
 
                 // ---- Phase 8: API resources + webhook events ----
                 apiResources : [
-                    { id : "exampleSync.status", method : "GET",  path : "/api/v1/example-sync/status",        version : "v1", handler : "Api", action : "status", summary : "Current sync status (stub).", requiresAuth : true, requiredPermission : "exampleSync.view" },
-                    { id : "exampleSync.link",   method : "POST", path : "/api/v1/example-sync/tickets/:id/link", version : "v1", handler : "Api", action : "link",   summary : "Link a ticket to an external issue.",  requiresAuth : true, requiredPermission : "exampleSync.manage" }
+                    // Routes mount under the add-on's own entryPoint
+                    // (/example-sync/api/v1/*) because cross-module
+                    // routing from a module router is brittle in this
+                    // ColdBox version. The canonical /api/v1/example
+                    // -sync/* paths declared below are documentation
+                    // (the URL surface a real implementation might
+                    // expose once cross-module routing is solved).
+                    { id : "exampleSync.status", method : "GET",  path : "/example-sync/api/v1/status",              version : "v1", handler : "Api", action : "status", summary : "Current sync status (stub).",          requiresAuth : true, requiredPermission : "exampleSync.view" },
+                    { id : "exampleSync.link",   method : "POST", path : "/example-sync/api/v1/tickets/:id/link",    version : "v1", handler : "Api", action : "link",   summary : "Link a ticket to an external issue.",  requiresAuth : true, requiredPermission : "exampleSync.manage" }
                 ],
                 webhookEvents : [
                     { key : "exampleSync.issue_linked",   label : "Example Sync: issue linked to ticket",     description : "Fires when an agent links a ticket to an external issue." },

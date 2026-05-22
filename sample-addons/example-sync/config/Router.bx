@@ -1,20 +1,37 @@
 /**
  * example-sync module router.
  *
- * The /agent/admin/example-sync URL is owned by the agent surface;
- * we route it here from the agent module via the standard route
- * pattern. The /api/v1/example-sync/* routes mount through the
- * standard `:handler/:action?` fallback in the api module's
- * router.
+ * The add-on owns its URL space under its own entryPoint
+ * (/example-sync/*). Cross-module routing from a module's
+ * Router.bx is brittle in this ColdBox version (the parser
+ * concatenates the caller module's prefix onto the target event),
+ * so add-on routes live with the add-on rather than under
+ * /agent/admin or /api/v1.
+ *
+ * URLs (all under /example-sync/):
+ *   GET  /admin                       -> Admin.index   admin connection page
+ *   GET  /status                      -> Api.status    public stub status
+ *   GET  /api/v1/status               -> Api.status    aliased for parity
+ *   POST /api/v1/tickets/:id/link     -> Api.link      link a ticket (stub)
  */
 class {
 
     function configure(){
-        // Stub endpoints; only the API ones are actually wired through
-        // the api module's router today. The admin route lives on the
-        // agent module's router (see modules_app/agent/config/Router.bx)
-        // because cross-module routing in module routers is brittle in
-        // BoxLang's ColdBox port.
+        // Admin connection page. The AdminPagesRegistry card on
+        // /agent/admin links here.
+        route( "/admin" ).withVerbs( "GET" ).to( "Admin.index" );
+
+        // REST API. Mounted under the add-on's own entry point so
+        // the api module's catchall doesn't intercept. ApiResource
+        // Registry catalogs the canonical /api/v1/* paths for any
+        // tooling that wants the inventory; the actual URLs are
+        // under /example-sync/api/v1/* per ColdBox routing limits.
+        route( "/api/v1/tickets/:id/link" ).withVerbs( "POST" ).to( "Api.link" );
+        route( "/api/v1/status"           ).withVerbs( "GET"  ).to( "Api.status" );
+
+        // Legacy stub route from the scaffold. /example-sync/status
+        // mirrors /example-sync/api/v1/status so anyone clicking the
+        // portal nav entry still lands on the same JSON.
         route( "/status" ).withVerbs( "GET" ).to( "Api.status" );
     }
 

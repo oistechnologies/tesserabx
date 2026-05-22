@@ -34,6 +34,7 @@ class {
         // cbswagger at /cbswagger; this route renders the
         // swagger-ui-dist client and points it at that spec URL.
         route( "/swagger" ).to( "Swagger.index" );
+
     }
 
 }
