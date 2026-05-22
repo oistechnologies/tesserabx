@@ -50,6 +50,22 @@ class {
         binder.map( "NotificationDto@notifications" )
               .to( "#moduleMapping#.models.dtos.NotificationDto" )
               .asSingleton();
+        // Phase 10 registries + built-in channel implementations.
+        binder.map( "NotificationTemplateRegistry@notifications" )
+              .to( "#moduleMapping#.models.NotificationTemplateRegistry" )
+              .asSingleton();
+        binder.map( "NotificationChannelRegistry@notifications" )
+              .to( "#moduleMapping#.models.NotificationChannelRegistry" )
+              .asSingleton();
+        binder.map( "InappChannel@notifications" )
+              .to( "#moduleMapping#.models.channels.InappChannel" )
+              .asSingleton();
+        binder.map( "EmailChannel@notifications" )
+              .to( "#moduleMapping#.models.channels.EmailChannel" )
+              .asSingleton();
+        binder.map( "SlackChannel@notifications" )
+              .to( "#moduleMapping#.models.channels.SlackChannel" )
+              .asSingleton();
     }
 
     function onUnload(){}

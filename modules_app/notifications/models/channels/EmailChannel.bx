@@ -1,0 +1,86 @@
+/**
+ * EmailChannel: cbmailservices-backed email delivery.
+ *
+ * Phase 10 extraction of the previously inlined
+ * NotificationsService.sendEmail() body. Behavior is identical:
+ *   - Look up the recipient email by recipient_type (agent or contact).
+ *   - Build the message via cbmailservices, apply the admin-managed
+ *     mail server override, send.
+ *   - On success: flip the Notification entity to status=sent,
+ *     stamp sent_at, save.
+ *   - On failure (no email on file, cbmailservices error, exception):
+ *     flip to status=failed, record error_message, save. We never
+ *     throw, because the dispatcher is a per-recipient fan-out and
+ *     other recipients still need their notifications.
+ */
+class singleton=true {
+
+    property name="mailService"     inject="mailService@cbmailservices";
+    property name="settingsService" inject="SettingsService@admin";
+
+    public string function getChannelId(){
+        return "email";
+    }
+
+    public string function getDisplayName(){
+        return "Email";
+    }
+
+    public boolean function supportsBatch(){
+        return false;
+    }
+
+    public void function send( required any notification ){
+        try {
+            var to = lookupRecipientEmail(
+                arguments.notification.getRecipientType(),
+                arguments.notification.getRecipientId()
+            );
+            if ( !len( to ) ) {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( "No email address on file for recipient" );
+                arguments.notification.save();
+                return;
+            }
+            var mail = mailService.newMail(
+                to      = to,
+                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
+                subject = arguments.notification.getTitle(),
+                type    = "text/plain",
+                body    = arguments.notification.getBody() ?: ""
+            );
+            settingsService.applyMailOverride( mail );
+            var result = mailService.send( mail );
+            var failed = false;
+            try { if ( isStruct( result ) && structKeyExists( result, "error" ) && result.error ) failed = true; }
+            catch ( any e ) {}
+
+            if ( failed ) {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( "cbmailservices reported send error" );
+            } else {
+                arguments.notification.setStatus( "sent" );
+                arguments.notification.setSentAt( now() );
+            }
+            arguments.notification.save();
+        } catch ( any e ) {
+            arguments.notification.setStatus( "failed" );
+            arguments.notification.setErrorMessage( e.message );
+            try { arguments.notification.save(); } catch ( any inner ) {}
+            writeLog(
+                text : "EmailChannel.send [#arguments.notification.getId()#] failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private string function lookupRecipientEmail( required string recipientType, required string recipientId ){
+        var sql = arguments.recipientType == "agent"
+                ? "SELECT email FROM agents   WHERE id = :id"
+                : "SELECT email FROM contacts WHERE id = :id";
+        var rows = queryExecute( sql, { id : arguments.recipientId } );
+        return rows.recordCount ? toString( rows.email[ 1 ] ?: "" ) : "";
+    }
+
+}

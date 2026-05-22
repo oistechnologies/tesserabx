@@ -154,7 +154,7 @@ class singleton=true {
         if ( isStruct( rawHeaders ) ) {
             headers = rawHeaders;
         } else if ( isSimpleValue( rawHeaders ) ) {
-            for ( var line in listToArray( rawHeaders, chr( 10 ) ) ) {
+            for ( var line in listToArray( rawHeaders, char( 10 ) ) ) {
                 var parts = listToArray( line, ":", false, true );
                 if ( arrayLen( parts ) >= 2 ) {
                     var name = trim( parts[ 1 ] );

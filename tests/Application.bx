@@ -56,6 +56,110 @@ class {
     };
     this.datasource = "tesserabx";
 
+    function onApplicationStart(){
+        // Force CBFS to use the local disk for the test app context,
+        // regardless of how the dev container's .env points the live
+        // app (typically CBFS_DEFAULT_PROVIDER=b2 so the live app
+        // tests the production-like path). Real B2 round-trips add
+        // ~14s per attachment write, which makes the spec suite
+        // unusably slow. The system property override is JVM-wide
+        // but cheap: ColdBox caches its config at app-boot time, so
+        // the live app keeps the b2 value it loaded at container
+        // start. A `?fwreinit` on the live app after tests run will
+        // observe the override and also flip to local; that's an
+        // acceptable dev-only side effect.
+        var sys = createObject( "java", "java.lang.System" );
+        sys.setProperty( "CBFS_DEFAULT_PROVIDER", "local" );
+        sys.setProperty( "CBFS_PUBLIC_PROVIDER",  "public-local" );
+
+        // Scrub leftover test-fixture rows at test-app boot. Many
+        // specs that create agents/SLA policies/etc. never tear them
+        // down. Without this purge, downstream specs pick up the
+        // accumulated rows and either run pathologically slowly
+        // (the agent fan-out problem: 250+ agents = 750+ notification
+        // fan-outs per ticket) or fail outright (an older catch-all
+        // SLA policy matches before the test's own fixture).
+        purgeFixtureAgents();
+        purgeFixtureSlaPolicies();
+        return true;
+    }
+
+    /**
+     * Idempotent cleanup of orphaned spec-fixture agents.
+     *
+     * Walks every NO ACTION FK that references `agents.id`, NULLs
+     * the referring column, then deletes the doomed rows. Wrapped
+     * in a try/catch because the dev DB may be in a partially-
+     * migrated state on first boot and a missing column should not
+     * stop the test app from starting.
+     */
+    private void function purgeFixtureAgents(){
+        try {
+            queryExecute(
+                "WITH doomed AS (
+                    SELECT id FROM agents
+                    WHERE  email LIKE '%@example.com'
+                    AND    email <> 'agent@example.com'
+                ),
+                t1  AS ( UPDATE tickets               SET assigned_to_agent_id  = NULL WHERE assigned_to_agent_id  IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t2  AS ( UPDATE ticket_messages       SET author_agent_id       = NULL WHERE author_agent_id       IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t3  AS ( UPDATE attachments           SET uploader_agent_id     = NULL WHERE uploader_agent_id     IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t4  AS ( UPDATE attachments           SET deleted_by_agent_id   = NULL WHERE deleted_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t5  AS ( UPDATE contact_roles         SET granted_by_agent_id   = NULL WHERE granted_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t6  AS ( UPDATE channel_blacklist     SET added_by_agent_id     = NULL WHERE added_by_agent_id     IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t7  AS ( UPDATE kb_articles           SET author_agent_id       = NULL WHERE author_agent_id       IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t8  AS ( UPDATE kb_article_versions   SET published_by_agent_id = NULL WHERE published_by_agent_id IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t9  AS ( UPDATE recurring_tickets     SET assigned_to_agent_id  = NULL WHERE assigned_to_agent_id  IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t10 AS ( UPDATE agent_roles           SET granted_by_agent_id   = NULL WHERE granted_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t11 AS ( UPDATE app_settings          SET updated_by_agent_id   = NULL WHERE updated_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t12 AS ( UPDATE webhook_subscriptions SET created_by_agent_id   = NULL WHERE created_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t13 AS ( UPDATE agents                SET manager_agent_id      = NULL WHERE manager_agent_id      IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t14 AS ( UPDATE addon_organization_enablement SET enabled_by_agent_id = NULL WHERE enabled_by_agent_id IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t15 AS ( UPDATE addon_settings        SET updated_by_agent_id   = NULL WHERE updated_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 ),
+                t16 AS ( UPDATE registry_overrides    SET updated_by_agent_id   = NULL WHERE updated_by_agent_id   IN ( SELECT id FROM doomed ) RETURNING 1 )
+                DELETE FROM agents WHERE id IN ( SELECT id FROM doomed )"
+            );
+        } catch ( any e ) {
+            // Cleanup is best-effort; a fresh DB or in-progress
+            // migration may not have every referenced table yet.
+            writeLog(
+                text : "tests/Application.bx purgeFixtureAgents skipped: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * Idempotent cleanup of orphaned spec-fixture SLA policies.
+     *
+     * SLA specs create catch-all and scoped policies but rarely
+     * delete them on teardown. The leftover rows match against new
+     * ticket scoping with the same precedence as the test's own
+     * fixture, producing flaky failures. Pattern-matched on the
+     * documented spec-fixture name prefixes; any policy a human
+     * created via the admin UI with a different name pattern is
+     * untouched.
+     */
+    private void function purgeFixtureSlaPolicies(){
+        try {
+            queryExecute(
+                "WITH doomed AS (
+                    SELECT id FROM sla_policies
+                    WHERE  name ~ '^(sla-spec|spec-catchall|spec-policy)'
+                ),
+                t1 AS ( UPDATE tickets SET sla_policy_id = NULL WHERE sla_policy_id IN ( SELECT id FROM doomed ) RETURNING 1 )
+                DELETE FROM sla_policies WHERE id IN ( SELECT id FROM doomed )"
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "tests/Application.bx purgeFixtureSlaPolicies skipped: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
     function onRequestStart(){
         bx:setting requesttimeout="120";
         // Spec runs must be deterministic. The TriageInterceptor would

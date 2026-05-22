@@ -43,7 +43,7 @@ class singleton=true {
                 tags.append( '<link rel="stylesheet" href="' & encodeForHTMLAttribute( a.href ) & '">' );
             }
         }
-        return tags.toList( chr( 10 ) );
+        return tags.toList( char( 10 ) );
     }
 
     /**
@@ -60,7 +60,7 @@ class singleton=true {
                 tags.append( '<script src="' & encodeForHTMLAttribute( a.src ) & '"' & deferAttr & '></script>' );
             }
         }
-        return tags.toList( chr( 10 ) );
+        return tags.toList( char( 10 ) );
     }
 
     /**

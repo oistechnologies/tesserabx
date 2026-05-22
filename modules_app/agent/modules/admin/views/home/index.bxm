@@ -16,7 +16,7 @@
                             <a href="#encodeForHTMLAttribute( card.route )#" class="d-block text-decoration-none">
                                 <div class="card h-100 border-1">
                                     <div class="card-body">
-                                        <h5 class="card-title mb-2">
+                                        <h5 class="card-title float-none mb-2">
                                             <i class="#encodeForHTMLAttribute( card.icon )#"></i>
                                             #encodeForHTML( card.title )#
                                         </h5>

@@ -1,0 +1,161 @@
+/**
+ * NotificationRegistriesSpec: Phase 10 contracts for the notifications
+ * module.
+ *
+ *   - NotificationTemplateRegistry seeds the core templates and
+ *     exposes the lookup surface (listAll, listForEvent, findTemplate,
+ *     register).
+ *   - NotificationChannelRegistry seeds the three built-in channels
+ *     (inapp, email, slack), exposes the lookup + dispatch surface,
+ *     and tolerates unknown channel ids (silent no-op).
+ *   - The three built-in channel implementations conform to the
+ *     INotificationChannel contract.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.tmplReg = wb.getInstance( "NotificationTemplateRegistry@notifications" );
+        variables.chanReg = wb.getInstance( "NotificationChannelRegistry@notifications" );
+    }
+
+    function run(){
+
+        describe( "NotificationTemplateRegistry", function(){
+
+            it( "seeds the inapp, email, and slack core templates", function(){
+                var byChannel = { inapp : 0, email : 0, slack : 0 };
+                for ( var entry in variables.tmplReg.listAll() ) {
+                    if ( entry.source != "core" ) continue;
+                    if ( structKeyExists( byChannel, entry.channel ) ) byChannel[ entry.channel ] &= 1;
+                }
+                expect( byChannel.inapp ).toBeGTE( 6 );  // 3 events x 2 recipient types
+                expect( byChannel.email ).toBeGTE( 6 );
+                expect( byChannel.slack ).toBeGTE( 3 );  // 3 events, agents only
+            } );
+
+            it( "findTemplate returns the agent inapp template for ticket.created", function(){
+                var t = variables.tmplReg.findTemplate( "ticket.created", "inapp", "agent" );
+                expect( t ).notToBeNull();
+                expect( t.titleTemplate ).toInclude( "{{ticketNumber}}" );
+                expect( t.bodyTemplate ).toBeString();
+                expect( t.linkTemplate ).toInclude( "/agent/tickets/" );
+                expect( t.source ).toBe( "core" );
+            } );
+
+            it( "listForEvent returns every (channel, recipientType) for one event", function(){
+                var entries = variables.tmplReg.listForEvent( "ticket.created" );
+                expect( entries.len() ).toBeGTE( 5 );  // inapp x2 + email x2 + slack x1
+                var pairs = {};
+                for ( var e in entries ) pairs[ e.channel & "|" & e.recipientType ] = true;
+                expect( pairs ).toHaveKey( "inapp|agent" );
+                expect( pairs ).toHaveKey( "inapp|contact" );
+                expect( pairs ).toHaveKey( "email|agent" );
+                expect( pairs ).toHaveKey( "email|contact" );
+                expect( pairs ).toHaveKey( "slack|agent" );
+            } );
+
+            it( "imperative register adds a template tagged 'imperative'", function(){
+                var ev = "spec.event." & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.tmplReg.register( {
+                    eventKey      : ev,
+                    channel       : "inapp",
+                    recipientType : "agent",
+                    titleTemplate : "spec title",
+                    bodyTemplate  : "spec body",
+                    linkTemplate  : ""
+                } );
+                var t = variables.tmplReg.findTemplate( ev, "inapp", "agent" );
+                expect( t ).notToBeNull();
+                expect( t.titleTemplate ).toBe( "spec title" );
+                expect( t.source ).toBe( "imperative" );
+            } );
+
+            it( "register skips entries missing required keys", function(){
+                var before = variables.tmplReg.listAll().len();
+                variables.tmplReg.register( { eventKey : "spec.missing", channel : "inapp" } );  // no recipientType
+                variables.tmplReg.register( { channel : "inapp", recipientType : "agent" } );    // no eventKey
+                expect( variables.tmplReg.listAll().len() ).toBe( before );
+            } );
+
+        } );
+
+        describe( "NotificationChannelRegistry", function(){
+
+            it( "seeds the three built-in channels", function(){
+                expect( variables.chanReg.isRegistered( "inapp" ) ).toBeTrue();
+                expect( variables.chanReg.isRegistered( "email" ) ).toBeTrue();
+                expect( variables.chanReg.isRegistered( "slack" ) ).toBeTrue();
+            } );
+
+            it( "isRegistered is false for an unknown channel id", function(){
+                expect( variables.chanReg.isRegistered( "made-up-channel" ) ).toBeFalse();
+            } );
+
+            it( "findById returns the entry shape with displayName + wirebox alias", function(){
+                var entry = variables.chanReg.findById( "email" );
+                expect( entry ).notToBeNull();
+                expect( entry.id ).toBe( "email" );
+                expect( entry.displayName ).toBeString();
+                expect( entry.wirebox ).toBe( "EmailChannel@notifications" );
+                expect( entry.source ).toBe( "core" );
+            } );
+
+            it( "resolve hands back a WireBox-resolved channel impl conforming to INotificationChannel", function(){
+                var impl = variables.chanReg.resolve( "email" );
+                expect( impl ).notToBeNull();
+                expect( impl.getChannelId() ).toBe( "email" );
+                expect( impl.getDisplayName() ).toBeString();
+                expect( impl.supportsBatch() ).toBeFalse();
+            } );
+
+            it( "send silently no-ops on an unknown channel id", function(){
+                // Should not throw; nothing else to assert because the
+                // dispatcher is a void method that simply returns when
+                // the channel is not registered.
+                variables.chanReg.send( "made-up-channel", "anything" );
+                expect( true ).toBeTrue();
+            } );
+
+            it( "imperative register adds an add-on channel tagged with the contributor source", function(){
+                variables.chanReg.register( {
+                    id          : "spec-imp",
+                    displayName : "Spec Imperative",
+                    wirebox     : "SpecImperativeChannel@somewhere"
+                } );
+                expect( variables.chanReg.isRegistered( "spec-imp" ) ).toBeTrue();
+                expect( variables.chanReg.findById( "spec-imp" ).source ).toBe( "imperative" );
+            } );
+
+        } );
+
+        describe( "Built-in channel implementations conform to INotificationChannel", function(){
+
+            it( "InappChannel reports id 'inapp' and is a no-op send", function(){
+                var impl = variables.chanReg.resolve( "inapp" );
+                expect( impl.getChannelId() ).toBe( "inapp" );
+                expect( impl.getDisplayName() ).toBe( "In-app bell" );
+                // send() must not throw on a stub.
+                impl.send( {} );
+                expect( true ).toBeTrue();
+            } );
+
+            it( "EmailChannel reports id 'email'", function(){
+                var impl = variables.chanReg.resolve( "email" );
+                expect( impl.getChannelId() ).toBe( "email" );
+                expect( impl.getDisplayName() ).toBe( "Email" );
+            } );
+
+            it( "SlackChannel reports id 'slack'", function(){
+                var impl = variables.chanReg.resolve( "slack" );
+                expect( impl.getChannelId() ).toBe( "slack" );
+                expect( impl.getDisplayName() ).toInclude( "Slack" );
+            } );
+
+        } );
+
+    }
+
+}

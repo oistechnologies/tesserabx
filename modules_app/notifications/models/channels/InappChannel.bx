@@ -1,0 +1,30 @@
+/**
+ * InappChannel: the bell-dropdown in-app delivery channel.
+ *
+ * Trivial. The Notification row is already persisted in status=sent
+ * (the dispatcher short-circuits inapp before calling .send()), so
+ * there is nothing to do here. The class exists to satisfy the
+ * INotificationChannel contract so dispatch can route everything
+ * through the channel registry.
+ */
+class singleton=true {
+
+    public string function getChannelId(){
+        return "inapp";
+    }
+
+    public string function getDisplayName(){
+        return "In-app bell";
+    }
+
+    public void function send( required any notification ){
+        // The dispatcher persists inapp notifications in status=sent
+        // already; the bell dropdown reads them from the notifications
+        // table directly. Nothing further to do.
+    }
+
+    public boolean function supportsBatch(){
+        return false;
+    }
+
+}

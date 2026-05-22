@@ -1,0 +1,173 @@
+/**
+ * NotificationTemplateRegistry: in-code catalog of default templates
+ * for the notification fan-out.
+ *
+ * Templates are keyed on the tuple `(event_key, channel, recipient_type)`.
+ * The registry is the *defaults* layer; the `notification_templates`
+ * DB table is the *overrides* layer. NotificationsService.dispatchForEvent
+ * queries the DB first (admin-edited template wins), then falls back
+ * to the registry for any tuple the DB doesn't cover.
+ *
+ * Each entry declares:
+ *   eventKey       stable event id (e.g. "ticket.created")
+ *   channel        delivery channel id ("inapp", "email", "slack", or
+ *                  any add-on channel registered through the channel
+ *                  registry)
+ *   recipientType  "agent" | "contact"
+ *   titleTemplate  rendered title (with `{{token}}` substitution)
+ *   bodyTemplate   rendered body
+ *   linkTemplate   optional deep link (empty string when not needed)
+ *   placeholders   optional array of placeholder names the template
+ *                  references; used for admin documentation only
+ *   source         auto-populated: "core" for the seeds shipped here,
+ *                  contributing module name for manifest declarations
+ *
+ * Add-ons contribute via:
+ *
+ *   settings.tesserabx.notificationTemplates = [
+ *       {
+ *           eventKey      : "exampleJira.issue_linked",
+ *           channel       : "email",
+ *           recipientType : "agent",
+ *           titleTemplate : "Jira issue {{issueKey}} linked to ticket {{ticketNumber}}",
+ *           bodyTemplate  : "{{authorLabel}} linked {{issueKey}} to ticket {{ticketNumber}}.",
+ *           linkTemplate  : "{{appBaseUrl}}/agent/tickets/{{ticketId}}",
+ *           placeholders  : [ "issueKey", "ticketNumber", "ticketId", "authorLabel" ]
+ *       }
+ *   ];
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "NotificationTemplateRegistry@notifications" );
+ *   var all      = registry.listAll();
+ *   var byEvent  = registry.listForEvent( "ticket.created" );
+ *   var single   = registry.findTemplate( "ticket.created", "inapp", "agent" );
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var key in variables.cache ) out.append( variables.cache[ key ] );
+        out.sort( function( a, b ){
+            var ev = compare( a.eventKey, b.eventKey );
+            if ( ev != 0 ) return ev;
+            var ch = compare( a.channel, b.channel );
+            if ( ch != 0 ) return ch;
+            return compare( a.recipientType, b.recipientType );
+        } );
+        return out;
+    }
+
+    public array function listForEvent( required string eventKey ){
+        ensureLoaded();
+        var out = [];
+        for ( var key in variables.cache ) {
+            var entry = variables.cache[ key ];
+            if ( entry.eventKey == arguments.eventKey ) out.append( entry );
+        }
+        return out;
+    }
+
+    public any function findTemplate(
+        required string eventKey,
+        required string channel,
+        required string recipientType
+    ){
+        ensureLoaded();
+        var key = makeKey( arguments.eventKey, arguments.channel, arguments.recipientType );
+        if ( structKeyExists( variables.cache, key ) ) return variables.cache[ key ];
+        return javaCast( "null", "" );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreTemplates();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.notificationTemplates ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var t in declared ) addEntry( t, moduleName );
+        }
+    }
+
+    private void function seedCoreTemplates(){
+        // Mirror the DB seeds shipped in
+        //   resources/database/migrations/2026_05_15_001220_*.cfc (inapp)
+        //   resources/database/migrations/2026_05_15_001310_*.cfc (email)
+        //   resources/database/migrations/2026_05_15_001410_*.cfc (slack)
+        // The DB rows remain the live source of truth; the registry is
+        // the fallback for fresh installs and the extension point for
+        // add-on contributions.
+
+        // --- inapp ---
+        addEntry( { eventKey : "ticket.created",        channel : "inapp", recipientType : "agent",   titleTemplate : "New ticket ##{{ticketNumber}}: {{subject}}",             bodyTemplate : "A new ticket landed in your queue.",                                       linkTemplate : "/agent/tickets/{{ticketId}}" }, "core" );
+        addEntry( { eventKey : "ticket.created",        channel : "inapp", recipientType : "contact", titleTemplate : "We received your request",                              bodyTemplate : "Your support request ##{{ticketNumber}} is on its way to an agent.",         linkTemplate : "/tickets/{{ticketId}}"       }, "core" );
+        addEntry( { eventKey : "ticket.message_added",  channel : "inapp", recipientType : "agent",   titleTemplate : "Customer replied on ##{{ticketNumber}}",                bodyTemplate : "{{authorLabel}} added a message to ""{{subject}}"".",                       linkTemplate : "/agent/tickets/{{ticketId}}" }, "core" );
+        addEntry( { eventKey : "ticket.message_added",  channel : "inapp", recipientType : "contact", titleTemplate : "Agent replied to your request ##{{ticketNumber}}",      bodyTemplate : "An agent replied to ""{{subject}}"".",                                     linkTemplate : "/tickets/{{ticketId}}"       }, "core" );
+        addEntry( { eventKey : "ticket.status_changed", channel : "inapp", recipientType : "agent",   titleTemplate : "Ticket ##{{ticketNumber}} moved to {{to}}",            bodyTemplate : "Status changed from {{from}} to {{to}}.",                                   linkTemplate : "/agent/tickets/{{ticketId}}" }, "core" );
+        addEntry( { eventKey : "ticket.status_changed", channel : "inapp", recipientType : "contact", titleTemplate : "Your ticket ##{{ticketNumber}} is now {{to}}",         bodyTemplate : "We moved your ticket from {{from}} to {{to}}.",                             linkTemplate : "/tickets/{{ticketId}}"       }, "core" );
+
+        // --- email (Phase 5c-2 seed shape; unsubscribe footer added at render time) ---
+        addEntry( { eventKey : "ticket.created",        channel : "email", recipientType : "agent",   titleTemplate : "[Ticket ##{{ticketNumber}}] {{subject}}",               bodyTemplate : "A new ticket has landed in your queue.\n\nOpen it: {{appBaseUrl}}/agent/tickets/{{ticketId}}",         linkTemplate : "" }, "core" );
+        addEntry( { eventKey : "ticket.created",        channel : "email", recipientType : "contact", titleTemplate : "Ticket ##{{ticketNumber}} received",                    bodyTemplate : "Thanks for reaching out. Your support request ##{{ticketNumber}} is on its way to an agent.\n\nTrack it: {{appBaseUrl}}/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
+        addEntry( { eventKey : "ticket.message_added",  channel : "email", recipientType : "agent",   titleTemplate : "[Ticket ##{{ticketNumber}}] new reply",                  bodyTemplate : "{{authorLabel}} added a message to ""{{subject}}"".\n\nReview it: {{appBaseUrl}}/agent/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
+        addEntry( { eventKey : "ticket.message_added",  channel : "email", recipientType : "contact", titleTemplate : "[Ticket ##{{ticketNumber}}] agent replied",              bodyTemplate : "An agent replied to your ticket ""{{subject}}"".\n\nRead the reply: {{appBaseUrl}}/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
+        addEntry( { eventKey : "ticket.status_changed", channel : "email", recipientType : "agent",   titleTemplate : "[Ticket ##{{ticketNumber}}] {{from}} -> {{to}}",         bodyTemplate : "Ticket ##{{ticketNumber}} moved from {{from}} to {{to}}.\n\nView it: {{appBaseUrl}}/agent/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
+        addEntry( { eventKey : "ticket.status_changed", channel : "email", recipientType : "contact", titleTemplate : "Your ticket ##{{ticketNumber}} is now {{to}}",          bodyTemplate : "We updated ticket ##{{ticketNumber}} ({{subject}}) from {{from}} to {{to}}.\n\nDetails: {{appBaseUrl}}/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
+
+        // --- slack / teams (Phase 5c-3 seed shape) ---
+        addEntry( { eventKey : "ticket.created",        channel : "slack", recipientType : "agent",   titleTemplate : "New ticket ##{{ticketNumber}}",                          bodyTemplate : "{{subject}}",                                                              linkTemplate : "{{appBaseUrl}}/agent/tickets/{{ticketId}}" }, "core" );
+        addEntry( { eventKey : "ticket.message_added",  channel : "slack", recipientType : "agent",   titleTemplate : "Reply on ticket ##{{ticketNumber}}",                     bodyTemplate : "{{authorLabel}} replied to ""{{subject}}"".",                              linkTemplate : "{{appBaseUrl}}/agent/tickets/{{ticketId}}" }, "core" );
+        addEntry( { eventKey : "ticket.status_changed", channel : "slack", recipientType : "agent",   titleTemplate : "Ticket ##{{ticketNumber}} -> {{to}}",                    bodyTemplate : "Moved from {{from}} to {{to}}.",                                           linkTemplate : "{{appBaseUrl}}/agent/tickets/{{ticketId}}" }, "core" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "eventKey" )      || !len( arguments.raw.eventKey      ?: "" ) ) return;
+        if ( !structKeyExists( arguments.raw, "channel" )       || !len( arguments.raw.channel       ?: "" ) ) return;
+        if ( !structKeyExists( arguments.raw, "recipientType" ) || !len( arguments.raw.recipientType ?: "" ) ) return;
+        var key = makeKey( arguments.raw.eventKey, arguments.raw.channel, arguments.raw.recipientType );
+        var placeholders = structKeyExists( arguments.raw, "placeholders" ) && isArray( arguments.raw.placeholders )
+            ? arguments.raw.placeholders
+            : [];
+        variables.cache[ key ] = {
+            eventKey      : arguments.raw.eventKey,
+            channel       : arguments.raw.channel,
+            recipientType : arguments.raw.recipientType,
+            titleTemplate : structKeyExists( arguments.raw, "titleTemplate" ) ? arguments.raw.titleTemplate : "",
+            bodyTemplate  : structKeyExists( arguments.raw, "bodyTemplate" )  ? arguments.raw.bodyTemplate  : "",
+            linkTemplate  : structKeyExists( arguments.raw, "linkTemplate" )  ? arguments.raw.linkTemplate  : "",
+            placeholders  : placeholders,
+            source        : arguments.source
+        };
+    }
+
+    private string function makeKey( required string eventKey, required string channel, required string recipientType ){
+        return arguments.eventKey & "|" & arguments.channel & "|" & arguments.recipientType;
+    }
+
+}

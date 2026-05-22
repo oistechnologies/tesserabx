@@ -1,0 +1,87 @@
+/**
+ * SlackChannel: Slack incoming-webhook delivery.
+ *
+ * Phase 10 extraction of the previously inlined
+ * NotificationsService.sendSlack() body. Behavior is identical:
+ *   - Read the SLACK_WEBHOOK_URL setting. Microsoft Teams accepts the
+ *     same Slack-compatible payload through its own webhook, so the
+ *     same code serves both via this one setting.
+ *   - When no webhook URL is configured: flip the row to status=failed
+ *     with a clear error_message rather than logging noise on every
+ *     dispatch (dev stacks without Slack should not spam logs).
+ *   - POST a `{ "text" : title + body + link }` JSON payload.
+ *   - HTTP 2xx -> status=sent; non-2xx -> status=failed with HTTP code.
+ *   - Network exception -> status=failed with exception message.
+ */
+class singleton=true {
+
+    property name="slackWebhookUrl" inject="coldbox:setting:slackWebhookUrl";
+
+    public string function getChannelId(){
+        return "slack";
+    }
+
+    public string function getDisplayName(){
+        return "Slack / Teams";
+    }
+
+    public boolean function supportsBatch(){
+        return false;
+    }
+
+    public void function send( required any notification ){
+        // `url` is a CFML/BoxLang reserved scope name. A local
+        // `var url = ...` declaration is silently dropped by the
+        // scope walker, and subsequent references resolve to the
+        // URL scope (a struct), which makes `len()` non-zero even
+        // when the setting is empty and crashes `.init( url )` with
+        // "no constructor for URLScope". Use a non-reserved name.
+        var webhookUrl = toString( variables.slackWebhookUrl ?: "" );
+        if ( !len( webhookUrl ) ) {
+            arguments.notification.setStatus( "failed" );
+            arguments.notification.setErrorMessage( "SLACK_WEBHOOK_URL is not set" );
+            arguments.notification.save();
+            return;
+        }
+        var body = arguments.notification.getBody() ?: "";
+        if ( len( arguments.notification.getLink() ?: "" ) ) {
+            body &= char( 10 ) & arguments.notification.getLink();
+        }
+        var payload = jsonSerialize( { "text" : arguments.notification.getTitle() & char( 10 ) & body } );
+        try {
+            var slackUrlObj = createObject( "java", "java.net.URL" ).init( webhookUrl );
+            var conn = slackUrlObj.openConnection();
+            conn.setRequestMethod( "POST" );
+            conn.setRequestProperty( "Content-Type", "application/json" );
+            conn.setDoOutput( javaCast( "boolean", true ) );
+            conn.setConnectTimeout( javaCast( "int", 5000 ) );
+            conn.setReadTimeout( javaCast( "int", 5000 ) );
+            var os = conn.getOutputStream();
+            try {
+                os.write( payload.getBytes( "UTF-8" ) );
+                os.flush();
+            } finally {
+                os.close();
+            }
+            var code = conn.getResponseCode();
+            if ( code >= 200 && code < 300 ) {
+                arguments.notification.setStatus( "sent" );
+                arguments.notification.setSentAt( now() );
+            } else {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( "Slack webhook returned HTTP " & code );
+            }
+            arguments.notification.save();
+        } catch ( any e ) {
+            arguments.notification.setStatus( "failed" );
+            arguments.notification.setErrorMessage( e.message );
+            try { arguments.notification.save(); } catch ( any inner ) {}
+            writeLog(
+                text : "SlackChannel.send [#arguments.notification.getId()#] failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

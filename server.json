@@ -16,7 +16,7 @@
         "directoryBrowsing":false
     },
     "jvm":{
-        "heapSize":1024,
+        "heapSize":4096,
         "minHeapSize":256,
         "javaVersion":"openjdk21_jre"
     },

@@ -1,0 +1,138 @@
+/**
+ * NotificationChannelRegistry: the catalog of delivery channels
+ * NotificationsService can dispatch to.
+ *
+ * Core seeds three channels: `inapp`, `email`, `slack`. Each is a
+ * thin wrapper around the logic that previously lived inline in
+ * NotificationsService.sendEmail / sendSlack / createNotification's
+ * inapp short-circuit.
+ *
+ * Add-ons contribute via:
+ *
+ *   settings.tesserabx.notificationChannels = [
+ *       {
+ *           id           : "sms",
+ *           displayName  : "SMS",
+ *           wirebox      : "TwilioSmsChannel@addon-twilio"
+ *       }
+ *   ];
+ *
+ * The class referenced by `wirebox` must conform to the
+ * INotificationChannel contract (see contracts/INotificationChannel.bx).
+ *
+ * --- Public extension contract ---
+ *
+ *   var registry = wirebox.getInstance( "NotificationChannelRegistry@notifications" );
+ *   var all      = registry.listAll();           // catalog for the preferences UI
+ *   var ok       = registry.isRegistered( id );  // accept/skip check in dispatch
+ *   var chan     = registry.findById( id );      // resolve channel impl
+ *   registry.send( "email", notification );      // deliver one row
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+    property name="coldbox" inject="coldbox";
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var id in variables.cache ) {
+            var entry = variables.cache[ id ];
+            out.append( {
+                id          : entry.id,
+                displayName : entry.displayName,
+                source      : entry.source
+            } );
+        }
+        out.sort( function( a, b ){ return compare( a.id, b.id ); } );
+        return out;
+    }
+
+    public array function listIds(){
+        ensureLoaded();
+        var ids = structKeyArray( variables.cache );
+        ids.sort( "textnocase" );
+        return ids;
+    }
+
+    public boolean function isRegistered( required string id ){
+        ensureLoaded();
+        return structKeyExists( variables.cache, arguments.id );
+    }
+
+    public any function findById( required string id ){
+        ensureLoaded();
+        if ( !structKeyExists( variables.cache, arguments.id ) ) return javaCast( "null", "" );
+        return variables.cache[ arguments.id ];
+    }
+
+    public any function resolve( required string id ){
+        var entry = findById( arguments.id );
+        if ( isNull( entry ) ) return javaCast( "null", "" );
+        return wirebox.getInstance( entry.wirebox );
+    }
+
+    /**
+     * Deliver one persisted Notification through the channel whose
+     * id matches `arguments.channelId`. Silently no-ops when the
+     * channel is not registered, mirroring the previous "unknown
+     * channel = skip" allowlist behavior.
+     */
+    public void function send( required string channelId, required any notification ){
+        if ( !isRegistered( arguments.channelId ) ) return;
+        var impl = resolve( arguments.channelId );
+        if ( isNull( impl ) ) return;
+        impl.send( arguments.notification );
+    }
+
+    public void function register( required struct entry ){
+        ensureLoaded();
+        addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        variables.cacheLoaded = true;
+
+        seedCoreChannels();
+
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.notificationChannels ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var c in declared ) addEntry( c, moduleName );
+        }
+    }
+
+    private void function seedCoreChannels(){
+        addEntry( { id : "inapp", displayName : "In-app bell",     wirebox : "InappChannel@notifications" }, "core" );
+        addEntry( { id : "email", displayName : "Email",            wirebox : "EmailChannel@notifications" }, "core" );
+        addEntry( { id : "slack", displayName : "Slack / Teams",   wirebox : "SlackChannel@notifications" }, "core" );
+    }
+
+    private void function addEntry( required any raw, required string source ){
+        if ( !isStruct( arguments.raw ) ) return;
+        if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
+        if ( !structKeyExists( arguments.raw, "wirebox" ) || !len( arguments.raw.wirebox ?: "" ) ) return;
+        variables.cache[ arguments.raw.id ] = {
+            id          : arguments.raw.id,
+            displayName : structKeyExists( arguments.raw, "displayName" ) ? arguments.raw.displayName : arguments.raw.id,
+            wirebox     : arguments.raw.wirebox,
+            source      : arguments.source
+        };
+    }
+
+}

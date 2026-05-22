@@ -1,0 +1,61 @@
+/**
+ * INotificationChannel: contract every notification delivery channel
+ * must satisfy.
+ *
+ * The notifications module ships three built-in channels: `inapp`,
+ * `email`, `slack`. Add-ons can register additional channels (e.g.
+ * SMS via Twilio, Pushover, in-house webhook) via the manifest:
+ *
+ *   settings.tesserabx.notificationChannels = [
+ *       { id : "sms", wirebox : "TwilioSmsChannel@addon-twilio" }
+ *   ];
+ *
+ * The implementation class is resolved through WireBox by the alias
+ * given in `wirebox`. The class must conform to the methods below
+ * (BoxLang does not enforce interface implementation at the class
+ * level; conformance is documented and checked by the channel
+ * registry on register).
+ *
+ * --- Contract ---
+ *
+ *   string  getChannelId()         The stable id ("email", "sms", ...)
+ *                                  matched against the `channel` column
+ *                                  on notification_templates rows.
+ *
+ *   string  getDisplayName()       Human label for the admin UI and
+ *                                  per-user preference pages.
+ *
+ *   void    send( notification )   Deliver one Notification entity.
+ *                                  Mutate the entity's status to
+ *                                  "sent" / "failed" and call .save()
+ *                                  before returning. The entity is
+ *                                  already persisted in status=pending
+ *                                  (or status=sent for the inapp
+ *                                  no-op channel) when send() is
+ *                                  invoked.
+ *
+ *   boolean supportsBatch()        Reserved for a future fan-out path
+ *                                  that batches deliveries. The base
+ *                                  fan-out today calls send() once
+ *                                  per recipient. Return false until
+ *                                  the batch path lands.
+ */
+class {
+
+    public string function getChannelId(){
+        throw( type : "INotificationChannel.NotImplemented", message : "getChannelId() must be overridden" );
+    }
+
+    public string function getDisplayName(){
+        throw( type : "INotificationChannel.NotImplemented", message : "getDisplayName() must be overridden" );
+    }
+
+    public void function send( required any notification ){
+        throw( type : "INotificationChannel.NotImplemented", message : "send( notification ) must be overridden" );
+    }
+
+    public boolean function supportsBatch(){
+        return false;
+    }
+
+}

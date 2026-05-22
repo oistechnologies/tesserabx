@@ -267,18 +267,24 @@ class extends="cbwire.models.Component" {
 
     private void function sendVerificationEmail( newEmail, rawToken ){
         try {
-            var base = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
-            var url  = base & "/agent/account/confirm-email?token=" & arguments.rawToken;
+            // `url` is a reserved scope name in CFML/BoxLang. A local
+            // `var url = ...` declaration is silently dropped by the
+            // scope walker, and subsequent references resolve to the
+            // URL scope. Use a non-reserved name. Also: BoxLang has
+            // `char()` for character codes; `chr()` is a Lucee/ACF
+            // variant that throws "method does not exist" here.
+            var base      = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var verifyUrl = base & "/agent/account/confirm-email?token=" & arguments.rawToken;
             var body = "Hello,
-" & chr( 10 )
-                & "" & chr( 10 )
-                & "We received a request to change your TesseraBX agent email to this address." & chr( 10 )
-                & "" & chr( 10 )
-                & "Click the link below within 60 minutes to finish the change:" & chr( 10 )
-                & "" & chr( 10 )
-                & url & chr( 10 )
-                & "" & chr( 10 )
-                & "If you did not request this change you can safely ignore this message." & chr( 10 );
+" & char( 10 )
+                & "" & char( 10 )
+                & "We received a request to change your TesseraBX agent email to this address." & char( 10 )
+                & "" & char( 10 )
+                & "Click the link below within 60 minutes to finish the change:" & char( 10 )
+                & "" & char( 10 )
+                & verifyUrl & char( 10 )
+                & "" & char( 10 )
+                & "If you did not request this change you can safely ignore this message." & char( 10 );
             var mail = mailService.newMail(
                 to      = arguments.newEmail,
                 from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),

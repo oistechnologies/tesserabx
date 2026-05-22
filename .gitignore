@@ -38,6 +38,11 @@ modules/hyper/
 modules/cbantisamy/
 modules/cbcsrf/
 modules/bcrypt/
+modules/s3sdk/
+modules/cbstreams/
+
+# Local Claude Code agent state
+.claude/
 
 # Build artifacts
 build/
