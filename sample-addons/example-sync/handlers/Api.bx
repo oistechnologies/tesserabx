@@ -1,0 +1,48 @@
+/**
+ * Example Sync REST API handler.
+ *
+ * Wired through ApiResourceRegistry entries in ModuleConfig.bx.
+ * Stub responses; a real add-on would call its SyncService here.
+ *
+ * The doc-block annotations follow the BoxLang-friendly conventions
+ * documented in docs/EXTENSIONS.md (plural keys with inline JSON
+ * values) so cbswagger picks them up.
+ */
+class {
+
+    /**
+     * Current sync status.
+     *
+     * @tags ["Example Sync"]
+     * @summary Current Example Sync status
+     * @responses { "200": { "description": "OK", "content": { "application/json": {} } } }
+     */
+    function status( event, rc, prc ){
+        event.renderData( type : "json", data : {
+            status        : "stub",
+            note          : "Example Sync is a reference add-on; this endpoint returns canned data.",
+            linkedTickets : 0
+        } );
+    }
+
+    /**
+     * Link a ticket to an external issue (stub).
+     *
+     * @tags ["Example Sync"]
+     * @summary Link a ticket to an external issue
+     * @parameters [ { "in": "path", "name": "id", "schema": { "type": "string" }, "required": true } ]
+     * @requestBody { "content": { "application/json": { "schema": { "type": "object", "properties": { "projectKey": { "type": "string" } } } } } }
+     * @responses { "200": { "description": "OK", "content": { "application/json": {} } } }
+     */
+    function link( event, rc, prc ){
+        param rc.id = "";
+        var projectKey = rc.projectKey ?: "DEMO";
+        event.renderData( type : "json", data : {
+            ok         : true,
+            note       : "Stub link recorded. A real add-on would round-trip to the external system.",
+            ticketId   : rc.id,
+            projectKey : projectKey
+        } );
+    }
+
+}

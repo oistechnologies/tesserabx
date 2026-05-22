@@ -26,6 +26,10 @@ class {
     this.mappings[ "/testbox" ]                 = rootPath & "testbox";
     this.mappings[ "/tesserabx" ]               = rootPath;
     this.mappings[ "/tesserabx/modules" ]       = rootPath & "modules_app";
+    // Phase 12: reference sample add-on. Lives outside modules_app/
+    // so it is clearly demo, not core. A production build can simply
+    // not ship the directory; the rest of the app is unaffected.
+    this.mappings[ "/tesserabx/sample-addons" ] = rootPath & "sample-addons";
     this.mappings[ "/root" ]                    = rootPath;
 
     // Datasource definitions. tesserabx is the single Postgres datasource

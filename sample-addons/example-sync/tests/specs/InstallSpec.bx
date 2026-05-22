@@ -1,0 +1,128 @@
+/**
+ * example-sync InstallSpec: verifies every contribution the
+ * add-on's ModuleConfig.bx declares actually lands in the right
+ * core registry.
+ *
+ * This is the test you copy into your own add-on. Add a probe per
+ * contribution; if a manifest field is silently dropped (typo'd
+ * key, wrong shape) the spec fails loud.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.nav         = wb.getInstance( "NavigationRegistry@core" );
+        variables.adminPages  = wb.getInstance( "AdminPagesRegistry@admin" );
+        variables.roles       = wb.getInstance( "RoleRegistry@agent" );
+        variables.perms       = wb.getInstance( "PermissionRegistry@agent" );
+        variables.ticketPanel = wb.getInstance( "TicketPanelRegistry@tickets" );
+        variables.dashboard   = wb.getInstance( "DashboardWidgetRegistry@reporting" );
+        variables.channels    = wb.getInstance( "ChannelAdapterRegistry@channels" );
+        variables.actions     = wb.getInstance( "ActionRegistry@automation" );
+        variables.aiFeatures  = wb.getInstance( "AiFeatureRegistry@ai" );
+        variables.embedders   = wb.getInstance( "EmbeddingConsumerRegistry@ai" );
+        variables.apiRes      = wb.getInstance( "ApiResourceRegistry@api" );
+        variables.webhooks    = wb.getInstance( "WebhookEventRegistry@api" );
+        variables.notifChan   = wb.getInstance( "NotificationChannelRegistry@notifications" );
+        variables.notifTmpl   = wb.getInstance( "NotificationTemplateRegistry@notifications" );
+        variables.settingsReg = wb.getInstance( "SettingsRegistry@core" );
+        variables.helpSect    = wb.getInstance( "HelpSectionRegistry@help" );
+        variables.helpPages   = wb.getInstance( "HelpPageRegistry@help" );
+        variables.auditSvc    = wb.getInstance( "AuditService@audit" );
+    }
+
+    function run(){
+        describe( "example-sync add-on InstallSpec", function(){
+
+            it( "registers navigation entries on portal/main + agent/main + agent/account", function(){
+                expect( variables.nav.findById( "exampleSync.agent.main"    ) ).notToBeNull();
+                expect( variables.nav.findById( "exampleSync.agent.account" ) ).notToBeNull();
+                expect( variables.nav.findById( "exampleSync.portal.main"   ) ).notToBeNull();
+            } );
+
+            it( "registers an admin connection-settings card", function(){
+                expect( variables.adminPages.listAll().filter( ( c ) => c.id == "exampleSync.connection" ).len() ).toBe( 1 );
+            } );
+
+            it( "registers the example-sync-admin role + 2 permissions", function(){
+                expect( variables.roles.findById( "example-sync-admin" ) ).notToBeNull();
+                var permIds = variables.perms.listAll().map( ( p ) => p.id );
+                expect( permIds ).toInclude( "exampleSync.view" );
+                expect( permIds ).toInclude( "exampleSync.manage" );
+            } );
+
+            it( "registers the linked-issue ticket panel", function(){
+                expect( variables.ticketPanel.listAll().filter( ( p ) => p.id == "exampleSync.linkedIssue" ).len() ).toBe( 1 );
+            } );
+
+            it( "registers the sync-status dashboard widget", function(){
+                expect( variables.dashboard.listAll().filter( ( w ) => w.id == "exampleSync.syncStatus" ).len() ).toBe( 1 );
+            } );
+
+            it( "registers the exampleSync.webhook channel adapter", function(){
+                expect( variables.channels.listChannelIds() ).toInclude( "exampleSync.webhook" );
+            } );
+
+            it( "registers the exampleSync.linkIssue automation action", function(){
+                expect( variables.actions.findById( "exampleSync.linkIssue" ) ).notToBeNull();
+            } );
+
+            it( "registers the exampleSync.summarize AI feature", function(){
+                expect( variables.aiFeatures.findById( "exampleSync.summarize" ) ).notToBeNull();
+            } );
+
+            it( "registers the exampleSync.external-issue embedding consumer", function(){
+                expect( variables.embedders.findById( "exampleSync.external-issue" ) ).notToBeNull();
+            } );
+
+            it( "registers the API resource entries", function(){
+                expect( variables.apiRes.findById( "exampleSync.status" ) ).notToBeNull();
+                expect( variables.apiRes.findById( "exampleSync.link"   ) ).notToBeNull();
+            } );
+
+            it( "registers the webhook event keys", function(){
+                expect( variables.webhooks.isRegistered( "exampleSync.issue_linked"   ) ).toBeTrue();
+                expect( variables.webhooks.isRegistered( "exampleSync.issue_unlinked" ) ).toBeTrue();
+            } );
+
+            it( "registers the exampleSyncStub notification channel", function(){
+                expect( variables.notifChan.isRegistered( "exampleSyncStub" ) ).toBeTrue();
+            } );
+
+            it( "registers a notification template for the issue_linked event", function(){
+                var t = variables.notifTmpl.findTemplate( "exampleSync.issue_linked", "email", "agent" );
+                expect( t ).notToBeNull();
+                expect( t.titleTemplate ).toInclude( "{{ticketNumber}}" );
+            } );
+
+            it( "registers the example-sync help section + 2 pages", function(){
+                expect( variables.helpSect.findById( "example-sync" ) ).notToBeNull();
+                expect( variables.helpPages.findById( "example-sync.using"     ) ).notToBeNull();
+                expect( variables.helpPages.findById( "example-sync.extending" ) ).notToBeNull();
+            } );
+
+            it( "registers the per-tenant settings", function(){
+                var descs = variables.settingsReg.listDescriptors( "example-sync" );
+                var keys = descs.map( ( s ) => s.key );
+                expect( keys ).toInclude( "exampleSync.baseUrl" );
+                expect( keys ).toInclude( "exampleSync.apiKey"  );
+            } );
+
+            it( "registers the audit event types", function(){
+                var types = variables.auditSvc.listEventTypes();
+                expect( types ).toInclude( "exampleSync.issue_linked"   );
+                expect( types ).toInclude( "exampleSync.issue_unlinked" );
+            } );
+
+            it( "SyncService is resolvable from WireBox", function(){
+                var svc = getController().getWireBox().getInstance( "SyncService@example-sync" );
+                expect( svc ).notToBeNull();
+                expect( svc.statusForDashboard() ).toHaveKey( "linkedTickets" );
+            } );
+
+        } );
+    }
+
+}

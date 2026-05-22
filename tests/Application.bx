@@ -17,7 +17,8 @@ class {
     this.mappings[ "/" ]                  = rootPath;
     this.mappings[ "/root" ]              = rootPath;
     this.mappings[ "/tesserabx" ]         = rootPath;
-    this.mappings[ "/tesserabx/modules" ] = rootPath & "modules_app";
+    this.mappings[ "/tesserabx/modules" ]       = rootPath & "modules_app";
+    this.mappings[ "/tesserabx/sample-addons" ] = rootPath & "sample-addons";
     this.mappings[ "/coldbox" ]           = rootPath & "coldbox";
     this.mappings[ "/testbox" ]           = rootPath & "testbox";
     this.mappings[ "/tests" ]             = rootPath & "tests";

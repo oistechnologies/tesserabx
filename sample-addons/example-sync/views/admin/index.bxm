@@ -1,0 +1,30 @@
+<bx:output>
+<div class="card">
+    <div class="card-body">
+        <h2 class="card-title float-none mb-2">Example Sync connection</h2>
+        <p class="text-body-secondary">
+            Example Sync is a reference add-on. The connection form below is read-only;
+            see <code>docs/EXTENSIBILITY-PLAN.md</code> and <code>docs/EXTENSIONS.md</code>
+            for the contract a real connection would implement.
+        </p>
+
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Status</dt>
+            <dd class="col-sm-9"><span class="badge text-bg-secondary">stub</span></dd>
+
+            <dt class="col-sm-3">Base URL</dt>
+            <dd class="col-sm-9"><code>(unset; configure via SettingsRegistry per organization)</code></dd>
+
+            <dt class="col-sm-3">API key</dt>
+            <dd class="col-sm-9"><code>(unset; configure via SettingsRegistry per organization)</code></dd>
+        </dl>
+
+        <p class="text-body-secondary small mt-3 mb-0">
+            <i class="bi bi-info-circle"></i>
+            This page is the demo target for the Phase 12 reference add-on. The
+            <strong>Example Sync settings</strong> entry in your agent account
+            dropdown points here too.
+        </p>
+    </div>
+</div>
+</bx:output>

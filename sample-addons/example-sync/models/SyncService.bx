@@ -1,0 +1,57 @@
+/**
+ * SyncService: the sample add-on's domain service.
+ *
+ * Methods are all stubs. A real add-on would talk to its external
+ * system; this one returns canned data so the registries can be
+ * exercised end-to-end without depending on a live integration.
+ */
+class singleton=true {
+
+    /**
+     * Used by the dashboard widget (see DashboardWidgetRegistry
+     * `dataProvider`/`dataMethod` declaration in ModuleConfig.bx).
+     * Returns whatever struct the widget partial expects.
+     */
+    public struct function statusForDashboard(){
+        return {
+            connected      : false,
+            connectionUrl  : "",
+            linkedTickets  : 0,
+            lastSyncedAt   : "",
+            note           : "Example Sync is a reference add-on. Configure the connection in /agent/admin/example-sync to see real numbers."
+        };
+    }
+
+    /**
+     * Stub link-issue: writes to the extension table via
+     * EntityExtensionService. Real add-on would call the external
+     * system here.
+     */
+    public struct function linkTicketToIssue(
+        required string ticketId,
+        required string issueKey,
+        required string projectKey,
+        string organizationId = ""
+    ){
+        var ext = wirebox().getInstance( "EntityExtensionService@core" );
+        ext.upsertRow(
+            coreEntityType : "ticket",
+            entityId       : arguments.ticketId,
+            addonId        : "example_sync",
+            organizationId : arguments.organizationId,
+            data           : {
+                external_issue_key   : arguments.issueKey,
+                external_project_key : arguments.projectKey,
+                linked_at            : now(),
+                last_synced_at       : now(),
+                snapshot             : "{}"
+            }
+        );
+        return { ok : true, issueKey : arguments.issueKey };
+    }
+
+    private any function wirebox(){
+        return application.wirebox;
+    }
+
+}

@@ -1,0 +1,59 @@
+/**
+ * ExampleSyncChannelAdapter: stub IChannelAdapter implementation.
+ *
+ * Demonstrates the registration shape only. A real channel adapter
+ * would parse inbound payloads from the external system, normalize
+ * into the TicketsService.createTicket shape, and post outbound
+ * replies. Here every method returns a canned response.
+ */
+class singleton=true {
+
+    public string function getChannelId(){
+        return "exampleSync.webhook";
+    }
+
+    public string function getDisplayName(){
+        return "Example Sync webhook";
+    }
+
+    public string function getIcon(){
+        return "bi bi-arrow-repeat";
+    }
+
+    /**
+     * ChannelAdapterRegistry calls this at boot to decide whether
+     * pollAll() should iterate the adapter. Stub adapter is
+     * push-based (external system POSTs to a webhook), so false.
+     */
+    public boolean function isPullBased(){
+        return false;
+    }
+
+    public struct function verifyConfig( required struct config ){
+        return { ok : true, errors : [] };
+    }
+
+    public array function pollOnce(){
+        // Stub adapter: no polling. Push-based adapters return an
+        // empty array and let the external system POST to their
+        // webhook handler instead.
+        return [];
+    }
+
+    public struct function normalizeInbound( required struct payload ){
+        // Map the stub external payload shape into the normalized
+        // ticket-create struct that TicketsService.createTicket
+        // accepts. Real adapters do real mapping; we just echo.
+        return {
+            subject          : arguments.payload.subject ?: "(no subject)",
+            body             : arguments.payload.body    ?: "",
+            fromEmail        : arguments.payload.from    ?: "",
+            source           : "example-sync"
+        };
+    }
+
+    public struct function sendOutbound( required any message, required any ticket ){
+        return { sent : false, reason : "Example Sync is a stub adapter; no outbound delivery." };
+    }
+
+}

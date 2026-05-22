@@ -41,6 +41,19 @@ if ( !structKeyExists( url, "directory" ) || !len( url.directory ) ) {
             }
         }
     }
+    // sample-addons/ holds the Phase 12 reference add-on (and any
+    // other in-tree demo add-ons). Same per-add-on spec discovery
+    // shape as modules_app/, just rooted under a different folder.
+    sampleAddonsRoot = expandPath( "/sample-addons" );
+    if ( directoryExists( sampleAddonsRoot ) ) {
+        for ( entry in directoryList( sampleAddonsRoot, false, "query" ) ) {
+            if ( entry.type != "Dir" ) continue;
+            specPath = sampleAddonsRoot & "/" & entry.name & "/tests/specs";
+            if ( directoryExists( specPath ) ) {
+                dirs.append( "sample-addons." & entry.name & ".tests.specs" );
+            }
+        }
+    }
     url.directory = dirs.toList();
 }
 </bx:script>

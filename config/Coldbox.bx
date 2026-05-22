@@ -30,7 +30,7 @@ class {
             // Extension points
             applicationHelper        : "includes/helpers/ApplicationHelper.bxm",
             viewsHelper              : "",
-            modulesExternalLocation  : [ "/tesserabx/modules" ],
+            modulesExternalLocation  : [ "/tesserabx/modules", "/tesserabx/sample-addons" ],
             viewsExternalLocation    : "",
             layoutsExternalLocation  : "",
             handlersExternalLocation : "",

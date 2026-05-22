@@ -1,0 +1,31 @@
+/**
+ * LinkIssueExecutor: action executor for the automation rule action
+ * `exampleSync.linkIssue`.
+ *
+ * Receives the dispatched ticket + the rule's action params and
+ * stubs a link operation via SyncService. Real executor would
+ * also fire an `exampleSync.issue_linked` event so the webhook +
+ * notification fan-outs activate.
+ */
+class singleton=true {
+
+    property name="syncService" inject="SyncService@example-sync";
+
+    public struct function dispatch( required struct action, required any ticket, required any rule ){
+        var params = arguments.action.params ?: {};
+        var projectKey = params.project ?: "DEMO";
+        // Issue keys would normally come from the external system on
+        // creation; for the stub we synthesize a deterministic one
+        // from the ticket id.
+        var issueKey = projectKey & "-" & ucase( left( replace( arguments.ticket.getId(), "-", "", "all" ), 6 ) );
+        var orgId  = arguments.ticket.getOrganizationId() ?: "";
+        syncService.linkTicketToIssue(
+            ticketId       : arguments.ticket.getId(),
+            issueKey       : issueKey,
+            projectKey     : projectKey,
+            organizationId : orgId
+        );
+        return { ok : true, action : "exampleSync.linkIssue", issueKey : issueKey, ticketId : arguments.ticket.getId() };
+    }
+
+}

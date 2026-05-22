@@ -1,0 +1,37 @@
+/**
+ * ExampleSyncNotificationChannel: stub INotificationChannel impl.
+ *
+ * Marks every dispatch as "sent" without doing any actual delivery.
+ * Demonstrates that an add-on can plug a new channel into the
+ * dispatcher with nothing more than a registration + a class that
+ * satisfies the four-method contract.
+ */
+class singleton=true {
+
+    public string function getChannelId(){
+        return "exampleSyncStub";
+    }
+
+    public string function getDisplayName(){
+        return "Example Sync (stub)";
+    }
+
+    public boolean function supportsBatch(){
+        return false;
+    }
+
+    public void function send( required any notification ){
+        try {
+            arguments.notification.setStatus( "sent" );
+            arguments.notification.setSentAt( now() );
+            arguments.notification.save();
+        } catch ( any e ) {
+            try {
+                arguments.notification.setStatus( "failed" );
+                arguments.notification.setErrorMessage( e.message );
+                arguments.notification.save();
+            } catch ( any inner ) {}
+        }
+    }
+
+}

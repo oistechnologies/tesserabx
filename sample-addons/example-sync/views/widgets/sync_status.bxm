@@ -1,0 +1,30 @@
+<bx:output>
+<!--
+    Dashboard widget contributed by example-sync. The
+    DashboardWidgetRegistry invokes SyncService.statusForDashboard
+    before rendering and exposes the return value as
+    `prc.widgetData` (or whatever key the registry's view helper
+    standardizes on).
+-->
+<bx:set data = ( prc.widgetData ?: variables.data ?: {} ) >
+<div class="card h-100">
+    <div class="card-body">
+        <h5 class="card-title float-none mb-2">
+            <i class="bi bi-arrow-repeat"></i> Example Sync status
+        </h5>
+        <dl class="row small mb-0">
+            <dt class="col-6">Connected</dt>
+            <dd class="col-6 text-end"><bx:if data.connected ?: false ><span class="text-success">yes</span><bx:else><span class="text-body-secondary">no</span></bx:if></dd>
+
+            <dt class="col-6">Linked tickets</dt>
+            <dd class="col-6 text-end">#data.linkedTickets ?: 0#</dd>
+
+            <dt class="col-6">Last synced</dt>
+            <dd class="col-6 text-end"><bx:if len( data.lastSyncedAt ?: "" )>#encodeForHTML( data.lastSyncedAt )#<bx:else>&mdash;</bx:if></dd>
+        </dl>
+        <bx:if len( data.note ?: "" )>
+            <p class="small text-body-secondary mt-2 mb-0">#encodeForHTML( data.note )#</p>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

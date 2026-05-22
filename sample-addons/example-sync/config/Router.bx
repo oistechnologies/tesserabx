@@ -1,0 +1,21 @@
+/**
+ * example-sync module router.
+ *
+ * The /agent/admin/example-sync URL is owned by the agent surface;
+ * we route it here from the agent module via the standard route
+ * pattern. The /api/v1/example-sync/* routes mount through the
+ * standard `:handler/:action?` fallback in the api module's
+ * router.
+ */
+class {
+
+    function configure(){
+        // Stub endpoints; only the API ones are actually wired through
+        // the api module's router today. The admin route lives on the
+        // agent module's router (see modules_app/agent/config/Router.bx)
+        // because cross-module routing in module routers is brittle in
+        // BoxLang's ColdBox port.
+        route( "/status" ).withVerbs( "GET" ).to( "Api.status" );
+    }
+
+}

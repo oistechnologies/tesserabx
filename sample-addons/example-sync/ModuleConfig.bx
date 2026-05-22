@@ -1,0 +1,188 @@
+/**
+ * example-sync: a reference TesseraBX add-on.
+ *
+ * Phase 12 of the extensibility plan. Demonstrates every registry
+ * and every extension contract that core ships. NOT a production
+ * integration: every external call is stubbed (the channel adapter
+ * does nothing real, the AI feature returns placeholder text, the
+ * API handler echoes its input). What's real is the registration
+ * shape.
+ *
+ * A new add-on author can copy this directory, rename the slug
+ * everywhere, and have a working starting point that already hits
+ * every extension point with passing tests.
+ *
+ * What this add-on contributes:
+ *
+ *   - Navigation:        portal/main + agent/main + agent/account
+ *   - Admin pages:       1 connection-settings card
+ *   - Roles + perms:     example-sync-admin / exampleSync.manage
+ *   - Ticket panel:      right-column "External link" card
+ *   - Dashboard widget:  "Sync status" tile
+ *   - Channel adapter:   inbound stub at exampleSync.webhook
+ *   - Automation action: "Link this ticket to a new external issue"
+ *   - AI feature:        exampleSync.summarize
+ *   - Embedding consumer: exampleSync.external-issue
+ *   - API resource:      GET /api/v1/example-sync/status
+ *   - Webhook event:     exampleSync.issue_linked
+ *   - Entity extension:  tickets_example_sync table
+ *   - Notification:      channel exampleSyncStub + 1 template
+ *   - Settings:          per-tenant connection URL + secret
+ *   - Help pages:        1 agent-audience + 1 developer-audience
+ *   - Audit events:      exampleSync.issue_linked
+ *   - API webhook event: exampleSync.issue_linked
+ *   - Custom field:      (intentionally not registered; the add-on
+ *                        uses its OWN extension table for typed
+ *                        per-ticket data, not the generic
+ *                        custom-fields registry)
+ */
+class {
+
+    this.title              = "Example Sync";
+    this.author             = "TesseraBX";
+    this.webURL             = "https://github.com/oistechnologies/tesserabx";
+    this.description        = "Reference add-on demonstrating every TesseraBX extension contract.";
+    this.version            = "0.0.1";
+    this.viewParentLookup   = true;
+    this.layoutParentLookup = true;
+    this.entryPoint         = "example-sync";
+    this.modelNamespace     = "example-sync";
+    this.cfmapping          = "tesserabx.sample-addons.example-sync";
+    this.autoMapModels      = false;
+    this.dependencies       = [ "core", "tickets", "contacts", "audit", "notifications", "ai", "api", "help" ];
+
+    function configure(){
+        variables.settings = {
+            tesserabx : {
+                // ---- Foundation: who we are + version range ----
+                addonId        : "example-sync",
+                displayName    : "Example Sync",
+                version        : "0.0.1",
+                minCoreVersion : "0.0.1",
+                contributesTo  : [
+                    "navigation", "adminPages", "roles", "permissions",
+                    "ticketPanels", "dashboardWidgets", "channelAdapters",
+                    "automationActions", "aiFeatures", "embeddingConsumers",
+                    "apiResources", "webhookEvents", "notificationTemplates",
+                    "notificationChannels", "settings", "helpPages",
+                    "helpSections", "auditEvents"
+                ],
+                requiresAi     : false,
+
+                // ---- Phase 2: per-tenant settings ----
+                settings : [
+                    { key : "exampleSync.baseUrl", type : "string", label : "External system base URL", description : "Where the add-on talks to (stub).", default : "", secret : false, perTenant : true },
+                    { key : "exampleSync.apiKey",  type : "string", label : "API key",                  description : "Token for the stub endpoint.",     default : "", secret : true,  perTenant : true }
+                ],
+
+                // ---- Phase 3: audit event types ----
+                auditEvents : [
+                    { type : "exampleSync.issue_linked",   label : "Example Sync: issue linked",     severity : "info" },
+                    { type : "exampleSync.issue_unlinked", label : "Example Sync: issue unlinked",   severity : "info" }
+                ],
+
+                // ---- Phase 4: UI registries ----
+                navigation : [
+                    { id : "exampleSync.agent.main",      surface : "agent",  menu : "main",    label : "Example Sync", route : "/agent/admin/example-sync", icon : "bi bi-arrow-repeat", sortWeight : 850, requiresAuth : true,  requiredPermission : "exampleSync.view"   },
+                    { id : "exampleSync.agent.account",   surface : "agent",  menu : "account", label : "Example Sync settings", route : "/agent/admin/example-sync", icon : "bi bi-gear", sortWeight : 50, requiresAuth : true, requiredPermission : "exampleSync.manage" },
+                    { id : "exampleSync.portal.main",     surface : "portal", menu : "main",    label : "Sync status",  route : "/help/example-sync/status", icon : "bi bi-arrow-repeat", sortWeight : 800, requiresAuth : false }
+                ],
+                permissions : [
+                    { id : "exampleSync.view",   label : "View Example Sync status"  },
+                    { id : "exampleSync.manage", label : "Manage Example Sync settings" }
+                ],
+                roles : [
+                    {
+                        id          : "example-sync-admin",
+                        label       : "Example Sync admin",
+                        description : "Manages the Example Sync connection and per-ticket links.",
+                        surface     : "agent",
+                        permissions : [ "exampleSync.view", "exampleSync.manage" ]
+                    }
+                ],
+                adminPages : [
+                    { id : "exampleSync.connection", title : "Example Sync connection", description : "Configure the connection to the external system.", route : "/agent/admin/example-sync", icon : "bi bi-arrow-repeat", sortWeight : 620, requiredPermission : "exampleSync.manage" }
+                ],
+                ticketPanels : [
+                    { id : "exampleSync.linkedIssue", title : "External link", view : "panels/linked_issue", module : "example-sync", position : "right", sortWeight : 700, requiredPermission : "exampleSync.view", defaultCollapsed : true }
+                ],
+                dashboardWidgets : [
+                    { id : "exampleSync.syncStatus", title : "Example Sync status", partial : "widgets/sync_status", module : "example-sync", dataProvider : "SyncService@example-sync", dataMethod : "statusForDashboard", defaultGridSize : "col-12 col-md-6", sortWeight : 500, requiredPermission : "exampleSync.view" }
+                ],
+
+                // ---- Phase 5: channel adapters ----
+                // ChannelAdapterRegistry reads `mapping` (the WireBox alias);
+                // NotificationChannelRegistry's notificationChannels reads
+                // `wirebox`. Different registries, different field names.
+                channelAdapters : [
+                    { mapping : "ExampleSyncChannelAdapter@example-sync" }
+                ],
+
+                // ---- Phase 6: automation triggers / actions ----
+                automationActions : [
+                    { id : "exampleSync.linkIssue", label : "Link to an external issue", description : "Create a stub external issue and link it to this ticket.", parameterSchema : [ { name : "project", type : "string", required : true, label : "Project key" } ], executor : "LinkIssueExecutor@example-sync" }
+                ],
+
+                // ---- Phase 7: AI features + embedding consumers ----
+                aiFeatures : [
+                    { id : "exampleSync.summarize", label : "Summarize linked external issue", description : "AI summary of the stub external issue body.", defaultSystemPrompt : "You summarize external issues for an agent in one paragraph.", defaultModel : "", kind : "completion" }
+                ],
+                embeddingConsumers : [
+                    { id : "exampleSync.external-issue", label : "Example Sync external issues", description : "Indexes the stub external-issue bodies for semantic search.", feature : "exampleSync.summarize", mapping : "ExampleSyncEmbeddingConsumer@example-sync", dimension : 1536 }
+                ],
+
+                // ---- Phase 8: API resources + webhook events ----
+                apiResources : [
+                    { id : "exampleSync.status", method : "GET",  path : "/api/v1/example-sync/status",        version : "v1", handler : "Api", action : "status", summary : "Current sync status (stub).", requiresAuth : true, requiredPermission : "exampleSync.view" },
+                    { id : "exampleSync.link",   method : "POST", path : "/api/v1/example-sync/tickets/:id/link", version : "v1", handler : "Api", action : "link",   summary : "Link a ticket to an external issue.",  requiresAuth : true, requiredPermission : "exampleSync.manage" }
+                ],
+                webhookEvents : [
+                    { key : "exampleSync.issue_linked",   label : "Example Sync: issue linked to ticket",     description : "Fires when an agent links a ticket to an external issue." },
+                    { key : "exampleSync.issue_unlinked", label : "Example Sync: issue unlinked from ticket", description : "Fires when an agent removes a ticket-to-issue link." }
+                ],
+
+                // ---- Phase 10: notifications ----
+                notificationChannels : [
+                    { id : "exampleSyncStub", displayName : "Example Sync (stub)", wirebox : "ExampleSyncNotificationChannel@example-sync" }
+                ],
+                notificationTemplates : [
+                    { eventKey : "exampleSync.issue_linked", channel : "email", recipientType : "agent", titleTemplate : "Ticket {{ticketNumber}} linked to {{issueKey}}", bodyTemplate : "{{authorLabel}} linked ticket {{ticketNumber}} to external issue {{issueKey}}.", linkTemplate : "{{appBaseUrl}}/agent/tickets/{{ticketId}}", placeholders : [ "ticketNumber", "issueKey", "authorLabel", "ticketId", "appBaseUrl" ] },
+                    { eventKey : "exampleSync.issue_linked", channel : "inapp", recipientType : "agent", titleTemplate : "Issue {{issueKey}} linked",                            bodyTemplate : "Ticket {{ticketNumber}} is now linked to external issue {{issueKey}}.", linkTemplate : "/agent/tickets/{{ticketId}}",       placeholders : [ "ticketNumber", "issueKey", "ticketId" ] }
+                ],
+
+                // ---- Phase 11: help pages ----
+                helpSections : [
+                    { id : "example-sync", title : "Example Sync", audience : "agent", sortWeight : 800, icon : "bi bi-arrow-repeat" }
+                ],
+                helpPages : [
+                    { id : "example-sync.using",     section : "example-sync", title : "Using Example Sync",         audience : "agent",     sortWeight : 10, source : "resources/help/using.md",     searchable : true, keywords : [ "example sync", "linking", "external issue" ] },
+                    { id : "example-sync.extending", section : "example-sync", title : "Extending Example Sync",     audience : "developer", sortWeight : 20, source : "resources/help/extending.md", searchable : true, keywords : [ "add-on", "extension", "developer" ] }
+                ]
+            }
+        };
+
+        variables.routes              = [];
+        variables.interceptorSettings = { customInterceptionPoints : [] };
+        variables.interceptors        = [];
+    }
+
+    function onLoad(){
+        binder.map( "SyncService@example-sync" )
+              .to( "#moduleMapping#.models.SyncService" )
+              .asSingleton();
+        binder.map( "ExampleSyncChannelAdapter@example-sync" )
+              .to( "#moduleMapping#.models.ExampleSyncChannelAdapter" )
+              .asSingleton();
+        binder.map( "ExampleSyncNotificationChannel@example-sync" )
+              .to( "#moduleMapping#.models.ExampleSyncNotificationChannel" )
+              .asSingleton();
+        binder.map( "ExampleSyncEmbeddingConsumer@example-sync" )
+              .to( "#moduleMapping#.models.ExampleSyncEmbeddingConsumer" )
+              .asSingleton();
+        binder.map( "LinkIssueExecutor@example-sync" )
+              .to( "#moduleMapping#.models.LinkIssueExecutor" )
+              .asSingleton();
+    }
+    function onUnload(){}
+
+}

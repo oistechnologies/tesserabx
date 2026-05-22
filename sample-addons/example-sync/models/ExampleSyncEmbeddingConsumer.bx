@@ -1,0 +1,24 @@
+/**
+ * ExampleSyncEmbeddingConsumer: stub EmbeddingConsumerRegistry impl.
+ *
+ * Real consumer would embed external-issue bodies for semantic
+ * search. This stub returns the empty set on every query, so
+ * the scheduled re-embed task has nothing to do.
+ */
+class singleton=true {
+
+    public string function getTextForEmbedding( required string entityId ){
+        return "";
+    }
+
+    public void function saveEmbedding( required string entityId, required array vector ){
+        // No-op. A real consumer would write into a per-table column
+        // (e.g. tickets_example_sync.embedding) sized to the
+        // registered `dimension`.
+    }
+
+    public array function listEntitiesNeedingIndex(){
+        return [];
+    }
+
+}

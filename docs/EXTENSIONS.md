@@ -2,9 +2,54 @@
 
 TesseraBX is extensible by third-party BoxLang ColdBox modules. A developer can ship an "add-on" as a standard ColdBox module, install it into a running TesseraBX deployment, and contribute navigation items, admin pages, ticket panels, dashboard widgets, channel adapters, automation actions, AI features, API routes, roles, custom field types, notification templates, and help pages, all without modifying core code.
 
-This guide is the contract that add-on authors code against and the operator's reference for managing add-ons in a TesseraBX install. The companion [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md) is the phased plan for landing this contract; this file documents whatever portion of the contract has shipped.
+This guide is the contract that add-on authors code against and the operator's reference for managing add-ons in a TesseraBX install. The companion [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md) is the phased plan for landing this contract; this file documents the full contract as it stands today (every phase 0-12 has shipped).
 
-> Status: Phase 1 (foundation) only. Discovery, manifest, version-range checking, enablement resolution, and the scaffolder are documented below. Later sections (registries, service interfaces, events, help pages) land as their respective phases complete.
+A complete working example lives in [`sample-addons/example-sync/`](../sample-addons/example-sync). It exercises every registry and contract documented here; its `tests/specs/InstallSpec.bx` runs in CI as the integrity check that the contract has not regressed.
+
+---
+
+## Quick start: build your first add-on
+
+1. **Scaffold.** Run `box tesserabx:scaffold-addon <slug>`. A skeleton module lands at `modules/<slug>/` with a passing `InstallSpec`.
+2. **Edit the manifest.** Open the new module's `ModuleConfig.bx` and find the `settings.tesserabx` block. Add the contributions you want (see the tables of contents below to find each contract).
+3. **Re-run the InstallSpec.** Restart the container, run `box testbox run bundles=modules.<slug>.tests.specs.InstallSpec`. Every registered contribution should land in the right core registry.
+4. **Test in the browser.** Reload the app. Nav entries appear in their menu zones, admin cards land on `/agent/admin`, ticket panels appear in the ticket detail right column, etc.
+
+The fastest path to a working add-on is to copy [`sample-addons/example-sync/`](../sample-addons/example-sync) and rename the slug everywhere (the literal string `example-sync` / `exampleSync` / `example_sync` are the only places the slug appears in identifier form).
+
+---
+
+## Contents
+
+- [What an add-on is](#what-an-add-on-is)
+- [Manifest fields](#manifest-fields)
+- [Discovery](#discovery)
+- [Enablement resolution](#enablement-resolution)
+- [Scaffolding a new add-on](#scaffolding-a-new-add-on)
+- [Service contracts](#service-contracts)
+- [DTOs](#dtos)
+- [Tenant scope](#tenant-scope)
+- [Add-on migrations](#add-on-migrations)
+- [Per-tenant settings](#per-tenant-settings)
+- [Events](#events)
+- [Audit-event contributions](#audit-event-contributions)
+- [Roles and permissions](#roles-and-permissions)
+- [Navigation](#navigation)
+- [Admin pages](#admin-pages)
+- [Ticket detail panels](#ticket-detail-panels)
+- [Dashboard widgets](#dashboard-widgets)
+- [Asset publishing](#asset-publishing)
+- [Override table for UI registries](#override-table-for-ui-registries)
+- [Channel adapters](#channel-adapters)
+- [Automation: triggers, conditions, and actions](#automation-triggers-conditions-and-actions)
+- [AI features, providers, and embeddings](#ai-features-providers-and-embeddings)
+- [API resources](#api-resources)
+- [Webhook events](#webhook-events)
+- [Custom fields](#custom-fields)
+- [Entity extension tables](#entity-extension-tables)
+- [Notification templates](#notification-templates)
+- [Notification channels](#notification-channels)
+- [Help pages and sections](#help-pages-and-sections)
 
 ---
 
@@ -1386,9 +1431,12 @@ var canSee      = resolver.canSeePage( viewer, page );
 
 ---
 
-## What is not yet documented here
+## Reference add-on
 
-Later phases of the extensibility plan add sections to this file as they land:
-- **Phase 12**: reference sample add-on and Quick start.
+A complete reference add-on lives at [`sample-addons/example-sync/`](../sample-addons/example-sync). It demonstrates every contract documented above: navigation across multiple menu zones, an admin connection page, a role + permission, a ticket right-column panel, a dashboard widget, a channel adapter, an automation action, an AI feature, an embedding consumer, REST API routes, a webhook event, an entity extension table, a per-tenant setting, a notification channel + template, audit event types, and two help pages (one agent-audience, one developer-audience).
 
-See [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md) for the full plan.
+Every external call in the add-on is stubbed (the channel adapter does not deliver, the API handler returns canned data, the AI feature returns placeholder text). What is real is the registration shape: a new add-on author can copy the directory, rename the slug, and have a working starting point that already hits every extension point with passing tests.
+
+The add-on's `tests/specs/InstallSpec.bx` is the canary: it walks every core registry and asserts the example-sync contributions landed. The CI workflow runs it on every push so a regression to the extension contract fails the whole pipeline.
+
+See [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md) for the full plan + the per-phase gotcha log.
