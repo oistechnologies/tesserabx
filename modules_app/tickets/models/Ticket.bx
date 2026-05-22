@@ -89,4 +89,9 @@ class
         return isNull( orgId ) || !len( orgId );
     }
 
+    // Custom-fields shortcut hook (follow-up A6). Lets callers do
+    // ticket.getCustomFieldValue("...") instead of going through
+    // CustomFieldsService for one-off reads.
+    public string function customFieldEntityType(){ return "ticket"; }
+
 }

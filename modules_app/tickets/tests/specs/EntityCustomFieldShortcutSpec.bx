@@ -1,0 +1,167 @@
+/**
+ * EntityCustomFieldShortcutSpec: follow-up A6.
+ *
+ * Round-trips the three TesseraBXEntity convenience methods
+ * (getCustomFieldValue, getCustomFieldValues, setCustomFieldValue)
+ * against a real Ticket entity. Each typed column (text, number,
+ * boolean) is exercised so the typedCustomFieldValue helper's
+ * type-coercion contract is observed end-to-end.
+ *
+ * The unknown-key safety net + the not-opted-in safety net are
+ * also covered. Not-opted-in is exercised against ContactRole, which
+ * extends TesseraBXEntity but does not override
+ * customFieldEntityType.
+ *
+ * Field definitions and the throwaway contact/org are torn down per
+ * spec so concurrent runs of the broader suite stay independent.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc      = getController().getWireBox().getInstance( "CustomFieldsService@tickets" );
+        variables.tsvc     = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.wirebox  = getController().getWireBox();
+    }
+
+    function run(){
+        describe( "TesseraBXEntity custom-field shortcuts", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute( "DELETE FROM custom_field_definitions WHERE key LIKE 'spec_a6_%'" );
+            } );
+
+            it( "Ticket.customFieldEntityType reports the right key", function(){
+                var ticket = makeTicket();
+                try {
+                    expect( ticket.customFieldEntityType() ).toBe( "ticket" );
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "setCustomFieldValue + getCustomFieldValue round-trip a text field", function(){
+                var textKey = "spec_a6_text_" & lCase( replace( createUUID(), "-", "", "all" ) );
+                variables.svc.createDefinition( entityType : "ticket", key : textKey, label : "T", fieldType : "text" );
+                var ticket = makeTicket();
+                try {
+                    ticket.setCustomFieldValue( textKey, "external-ref-9" );
+                    expect( ticket.getCustomFieldValue( textKey ) ).toBe( "external-ref-9" );
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "round-trips a number field as a numeric value", function(){
+                var numKey = "spec_a6_num_" & lCase( replace( createUUID(), "-", "", "all" ) );
+                variables.svc.createDefinition( entityType : "ticket", key : numKey, label : "N", fieldType : "number" );
+                var ticket = makeTicket();
+                try {
+                    ticket.setCustomFieldValue( numKey, "42.5" );
+                    var got = ticket.getCustomFieldValue( numKey );
+                    expect( got ).notToBeNull();
+                    expect( isNumeric( got ) ).toBeTrue();
+                    expect( got ).toBe( 42.5 );
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "round-trips a boolean field as a real boolean", function(){
+                var boolKey = "spec_a6_bool_" & lCase( replace( createUUID(), "-", "", "all" ) );
+                variables.svc.createDefinition( entityType : "ticket", key : boolKey, label : "B", fieldType : "boolean" );
+                var ticket = makeTicket();
+                try {
+                    ticket.setCustomFieldValue( boolKey, "true" );
+                    var got = ticket.getCustomFieldValue( boolKey );
+                    expect( isBoolean( got ) ).toBeTrue();
+                    expect( got ).toBeTrue();
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "getCustomFieldValues returns a flat key->value map across all definitions", function(){
+                var textKey = "spec_a6_t_"  & lCase( replace( createUUID(), "-", "", "all" ) );
+                var numKey  = "spec_a6_n_"  & lCase( replace( createUUID(), "-", "", "all" ) );
+                var boolKey = "spec_a6_b_"  & lCase( replace( createUUID(), "-", "", "all" ) );
+                variables.svc.createDefinition( entityType : "ticket", key : textKey, label : "T", fieldType : "text"    );
+                variables.svc.createDefinition( entityType : "ticket", key : numKey,  label : "N", fieldType : "number"  );
+                variables.svc.createDefinition( entityType : "ticket", key : boolKey, label : "B", fieldType : "boolean" );
+                var ticket = makeTicket();
+                try {
+                    ticket.setCustomFieldValue( textKey, "abc" );
+                    ticket.setCustomFieldValue( numKey,  "7"   );
+                    ticket.setCustomFieldValue( boolKey, "true" );
+                    var all = ticket.getCustomFieldValues();
+                    expect( all ).toHaveKey( textKey );
+                    expect( all ).toHaveKey( numKey  );
+                    expect( all ).toHaveKey( boolKey );
+                    expect( all[ textKey ] ).toBe( "abc" );
+                    expect( all[ numKey  ] ).toBe( 7 );
+                    expect( all[ boolKey ] ).toBeTrue();
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "getCustomFieldValue returns null when the key is unknown", function(){
+                var ticket = makeTicket();
+                try {
+                    expect( ticket.getCustomFieldValue( "no_such_field_here" ) ).toBeNull();
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "setCustomFieldValue throws on an unknown key", function(){
+                var ticket = makeTicket();
+                try {
+                    expect( function(){
+                        ticket.setCustomFieldValue( "no_such_field_here", "x" );
+                    } ).toThrow( type : "TesseraBXEntity.UnknownCustomFieldKey" );
+                } finally {
+                    cleanupTicket( ticket.getId() );
+                }
+            } );
+
+            it( "an entity that does not opt in (ContactRole) returns null and refuses writes", function(){
+                // ContactRole extends TesseraBXEntity but does not
+                // override customFieldEntityType, so it inherits the
+                // empty-string default.
+                var role = variables.wirebox.getInstance( "ContactRole@contacts" );
+                role.setId( createUUID() );
+                expect( role.customFieldEntityType() ).toBe( "" );
+                expect( role.getCustomFieldValue( "anything" ) ).toBeNull();
+                expect( role.getCustomFieldValues() ).toBeEmpty();
+                expect( function(){
+                    role.setCustomFieldValue( "anything", "x" );
+                } ).toThrow( type : "TesseraBXEntity.CustomFieldsNotSupported" );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private any function makeTicket(){
+        return variables.tsvc.createAccountlessTicket( {
+            subject          : "a6-shortcut-" & createUUID(),
+            originatingEmail : "a6-spec-" & createUUID() & "@example.com",
+            firstMessage     : "test",
+            source           : "spec"
+        } );
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_custom_field_values WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+}

@@ -37,4 +37,127 @@ class
         return variables._wirebox.getInstance( "NullKeyType@quick" );
     }
 
+    // ------------------------------------------------------------
+    //  Custom-field shortcuts (follow-up A6)
+    // ------------------------------------------------------------
+    //
+    // Subclasses that want to participate in the admin-defined
+    // custom-fields system override customFieldEntityType() to return
+    // their entity-type key (one of the ids in
+    // CustomFieldsService.supportedEntities, e.g. "ticket").
+    //
+    // The shortcut methods delegate to CustomFieldsService with the
+    // entity-type and entity-id pre-bound, and return typed values
+    // (string / numeric / date / boolean) instead of the four-column
+    // value struct. Callers that need to render the full editable
+    // form should keep using CustomFieldsService.getValuesFor /
+    // setValuesFor; these shortcuts are for code that just wants
+    // "give me the value for key X".
+
+    /**
+     * Entity-type key for the custom-fields system. Default empty
+     * means "this entity does not participate"; the getters return
+     * null/empty and setCustomFieldValue throws.
+     */
+    public string function customFieldEntityType(){
+        return "";
+    }
+
+    /**
+     * Typed value for one custom field by key. Returns null when the
+     * key is unknown or the entity does not participate in custom
+     * fields, so callers can probe optional fields without try/catch.
+     */
+    public any function getCustomFieldValue( required string key ){
+        var et = customFieldEntityType();
+        if ( !len( et ) ) return javaCast( "null", "" );
+        var svc = variables._wirebox.getInstance( "CustomFieldsService@tickets" );
+        for ( var row in svc.getValuesFor( entityType : et, entityId : this.getId() ) ) {
+            if ( row.definition.key == arguments.key ) {
+                return typedCustomFieldValue( row.definition, row.value );
+            }
+        }
+        return javaCast( "null", "" );
+    }
+
+    /**
+     * Flat `{ key : typedValue }` map for every active definition of
+     * this entity's type. A definition with no saved value still
+     * appears with the type's default (empty string / null / false).
+     */
+    public struct function getCustomFieldValues(){
+        var et = customFieldEntityType();
+        if ( !len( et ) ) return {};
+        var svc = variables._wirebox.getInstance( "CustomFieldsService@tickets" );
+        var out = {};
+        for ( var row in svc.getValuesFor( entityType : et, entityId : this.getId() ) ) {
+            out[ row.definition.key ] = typedCustomFieldValue( row.definition, row.value );
+        }
+        return out;
+    }
+
+    /**
+     * Write one custom-field value by key. Throws
+     * TesseraBXEntity.UnknownCustomFieldKey when the key does not
+     * map to an active definition: blind writes are almost always
+     * a bug. Use CustomFieldsService.setValuesFor for batch writes.
+     */
+    public void function setCustomFieldValue(
+        required string key,
+        any    value        = "",
+        string actorAgentId = ""
+    ){
+        var et = customFieldEntityType();
+        if ( !len( et ) ) {
+            throw(
+                type    = "TesseraBXEntity.CustomFieldsNotSupported",
+                message = "This entity does not declare a customFieldEntityType()."
+            );
+        }
+        var svc = variables._wirebox.getInstance( "CustomFieldsService@tickets" );
+        for ( var def in svc.listDefinitions( entityType : et, activeOnly : true ) ) {
+            if ( def.key == arguments.key ) {
+                svc.setValuesFor(
+                    entityType   : et,
+                    entityId     : this.getId(),
+                    values       : { "#def.id#" : arguments.value },
+                    actorAgentId : arguments.actorAgentId
+                );
+                return;
+            }
+        }
+        throw(
+            type    = "TesseraBXEntity.UnknownCustomFieldKey",
+            message = "No active custom field with key [#arguments.key#] for entity type [#et#]."
+        );
+    }
+
+    /**
+     * Pick the right typed value out of the four-column value struct
+     * that CustomFieldsService.getValuesFor returns. Empty saved
+     * values fall back to the type's natural empty: "" for strings,
+     * null for number/date, false for boolean. The boolean default
+     * matches how getValuesFor itself coerces the column.
+     */
+    private any function typedCustomFieldValue( required struct def, required struct v ){
+        switch ( arguments.def.fieldType ) {
+            case "text":
+            case "textarea":
+            case "select":
+                return arguments.v.valueText ?: "";
+            case "number":
+                var n = arguments.v.valueNumber ?: "";
+                if ( !len( toString( n ) ) ) return javaCast( "null", "" );
+                return val( n );
+            case "date":
+                var d = arguments.v.valueDate ?: "";
+                if ( isNull( d ) || !len( toString( d ) ) ) return javaCast( "null", "" );
+                return d;
+            case "boolean":
+                var b = arguments.v.valueBoolean ?: false;
+                return ( isBoolean( b ) && b ) ? true : false;
+        }
+        return javaCast( "null", "" );
+    }
+
 }

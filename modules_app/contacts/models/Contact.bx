@@ -131,4 +131,7 @@ class
         return hasRole( "organization-admin" );
     }
 
+    // Custom-fields shortcut hook (follow-up A6).
+    public string function customFieldEntityType(){ return "contact"; }
+
 }

@@ -33,6 +33,36 @@ svc.setValuesFor(
 
 `supportedEntities()` returns the catalog (key + label + valueTable + fkColumn) so an admin UI or add-on tool can enumerate the entity types without hard-coding the list.
 
+### Entity-level shortcuts
+
+The base `TesseraBXEntity` class exposes typed shortcut methods so add-on code does not have to drive `CustomFieldsService` directly for one-off reads:
+
+```boxlang
+ticket.getCustomFieldValue( "external_jira_key" )    // returns the typed value, or null
+ticket.getCustomFieldValues()                        // { key : typedValue, ... } across every active definition
+ticket.setCustomFieldValue( "external_jira_key", "JIRA-1234", actorAgentId )
+```
+
+The four core entities (`Ticket`, `Contact`, `Organization`, `Article`) participate out of the box. Each declares its entity-type key via:
+
+```boxlang
+public string function customFieldEntityType(){ return "ticket"; }
+```
+
+Add-on entities that ship custom-field-style metadata can override the same hook to opt in. Entities that do not override (e.g. join tables, value records) inherit the empty default; the getters return null / `{}`, and `setCustomFieldValue` throws `TesseraBXEntity.CustomFieldsNotSupported`.
+
+Typed return values:
+
+| Field type      | `getCustomFieldValue` returns                        |
+| --------------- | ---------------------------------------------------- |
+| text / textarea | the saved string, or `""` if unset                   |
+| select          | the saved option value, or `""` if unset             |
+| number          | a numeric value, or null if unset                    |
+| date            | a date value, or null if unset                       |
+| boolean         | a real boolean (false when unset)                    |
+
+`setCustomFieldValue` throws `TesseraBXEntity.UnknownCustomFieldKey` when the key does not match an active definition; blind writes are almost always a bug. Use `CustomFieldsService.setValuesFor` directly when batch-saving the full form.
+
 ### Admin UI
 
 The admin Custom Fields page (`/agent/admin/custom-fields`) carries an entity-type picker. The URL query string `?entityType=contact` (etc.) selects which catalog to manage; all CRUD actions inherit that scope.
