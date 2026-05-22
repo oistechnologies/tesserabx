@@ -1,0 +1,212 @@
+/**
+ * EntityExtensionService: convention helper for add-on tables that
+ * extend a core entity without altering its core schema.
+ *
+ * Phase 9.2 of the extensibility plan. An add-on that needs to attach
+ * its own columns to (say) a Ticket creates a table named
+ * `<core_entity_plural>_<addon_id_safe>` (e.g. `tickets_example_jira`)
+ * with a primary FK to the core entity, an `organization_id` column,
+ * and whatever add-on-specific columns it needs. This service is the
+ * sanctioned read/write path for those rows.
+ *
+ * Naming rules:
+ *   - Core entity is expressed by its singular slug ("ticket",
+ *     "contact", "organization", "article"). The service maps that to
+ *     the parent core table ("tickets", "contacts", "organizations",
+ *     "kb_articles") and to the FK column name ("ticket_id", etc.).
+ *   - Add-on id is normalized: hyphens become underscores, anything
+ *     other than `[a-z0-9_]` is rejected.
+ *   - Final table name is `<parent_table>_<safe_addon_id>`.
+ *
+ * What this service DOES:
+ *   - Validates the entity-type / add-on-id combination at the public
+ *     boundary.
+ *   - Reads, upserts, deletes a single extension row per entity id.
+ *   - Enforces tenancy: writes always carry organization_id; reads
+ *     compare against the requesting organization when one is given.
+ *   - Caches per-request reads in `request.tbxExtensionCache` so a
+ *     handler and the views it renders share a single fetch.
+ *
+ * What this service does NOT do:
+ *   - Create the table. Add-on migrations own the schema. Use
+ *     `tableNameFor( ... )` from your migration to pick the canonical
+ *     name. Recommended add-on migration:
+ *
+ *       schema.create( extensionSvc.tableNameFor( "ticket", "example_jira" ), function( table ){
+ *           table.string( "ticket_id", 36 ).primaryKey().references( "id" ).onTable( "tickets" ).onDelete( "CASCADE" );
+ *           table.string( "organization_id", 36 ).nullable().references( "id" ).onTable( "organizations" );
+ *           table.string( "jira_issue_key", 50 );
+ *           table.timestamp( "synced_at" ).nullable();
+ *       } );
+ *
+ *   - Inspect or validate the add-on-defined columns. The data struct
+ *     is passed through verbatim. Use BoxLang/Postgres types that
+ *     queryExecute accepts. Cast non-text columns at the call site
+ *     (e.g. `cast( :synced_at as timestamp )`) per the JDBC bind gotcha.
+ */
+class singleton=true {
+
+    public string function tableNameFor(
+        required string coreEntityType,
+        required string addonId
+    ){
+        var parent = parentTableFor( arguments.coreEntityType );
+        return parent.tableName & "_" & safeAddonId( arguments.addonId );
+    }
+
+    public string function fkColumnFor( required string coreEntityType ){
+        return parentTableFor( arguments.coreEntityType ).fkColumn;
+    }
+
+    public array function supportedCoreEntities(){
+        return [
+            { key : "ticket",       tableName : "tickets",       fkColumn : "ticket_id"       },
+            { key : "contact",      tableName : "contacts",      fkColumn : "contact_id"      },
+            { key : "organization", tableName : "organizations", fkColumn : "organization_id" },
+            { key : "article",      tableName : "kb_articles",   fkColumn : "article_id"      }
+        ];
+    }
+
+    /**
+     * Read the single extension row for one entity. Returns the row
+     * as a struct or null when nothing is stored. The first call in
+     * a given request caches the result; subsequent calls in the
+     * same request return the cached value.
+     *
+     * Pass `organizationId` to assert tenancy: when given, the row is
+     * only returned if `organization_id` matches (or the row's
+     * organization_id is null, which signals an accountless ticket
+     * row that core treats as agent-only).
+     */
+    public any function getRow(
+        required string coreEntityType,
+        required string entityId,
+        required string addonId,
+        string organizationId = ""
+    ){
+        var table   = tableNameFor( arguments.coreEntityType, arguments.addonId );
+        var fk      = fkColumnFor( arguments.coreEntityType );
+        var cacheKey = table & "::" & arguments.entityId;
+        if ( structKeyExists( request, "tbxExtensionCache" ) && structKeyExists( request.tbxExtensionCache, cacheKey ) ) {
+            return enforceTenancy( request.tbxExtensionCache[ cacheKey ], arguments.organizationId );
+        }
+        var rows = queryExecute(
+            "SELECT * FROM " & table & " WHERE " & fk & " = :eid",
+            { eid : arguments.entityId }
+        );
+        if ( !rows.recordCount ) {
+            cacheStore( cacheKey, javaCast( "null", "" ) );
+            return javaCast( "null", "" );
+        }
+        var row = {};
+        for ( var col in rows.columnList.listToArray() ) {
+            row[ col ] = rows[ col ][ 1 ];
+        }
+        cacheStore( cacheKey, row );
+        return enforceTenancy( row, arguments.organizationId );
+    }
+
+    /**
+     * Upsert the extension row for one entity. `data` is a struct of
+     * add-on column names mapped to values; the service injects the
+     * FK and `organization_id` columns on top.
+     *
+     * The service expects the table to use the FK column as its
+     * primary key (recommended pattern). If your add-on uses a
+     * separate surrogate id, you'll need to roll your own write
+     * path or extend this service.
+     */
+    public void function upsertRow(
+        required string coreEntityType,
+        required string entityId,
+        required string addonId,
+        required struct data,
+        string organizationId = ""
+    ){
+        var table = tableNameFor( arguments.coreEntityType, arguments.addonId );
+        var fk    = fkColumnFor( arguments.coreEntityType );
+
+        // The data struct should not name FK or organization_id; they
+        // are computed here. If the add-on accidentally includes them
+        // we let the DB-level error surface; better than silently
+        // ignoring the override.
+        var cols   = [ fk, "organization_id" ];
+        var binds  = { eid : arguments.entityId, org : len( arguments.organizationId ) ? arguments.organizationId : javaCast( "null", "" ) };
+        var values = [ ":eid", ":org" ];
+        var sets   = [ "organization_id = EXCLUDED.organization_id" ];
+        var i      = 0;
+        for ( var col in arguments.data ) {
+            i &= 1;
+            var bind = "d" & i;
+            cols.append( col );
+            values.append( ":" & bind );
+            sets.append( col & " = EXCLUDED." & col );
+            binds[ bind ] = arguments.data[ col ];
+        }
+        var sql = "INSERT INTO " & table
+                & " ( " & cols.toList() & " ) VALUES ( " & values.toList() & " )"
+                & " ON CONFLICT ( " & fk & " ) DO UPDATE SET " & sets.toList();
+        queryExecute( sql, binds );
+        cacheInvalidate( table & "::" & arguments.entityId );
+    }
+
+    public void function deleteRow(
+        required string coreEntityType,
+        required string entityId,
+        required string addonId
+    ){
+        var table = tableNameFor( arguments.coreEntityType, arguments.addonId );
+        var fk    = fkColumnFor( arguments.coreEntityType );
+        queryExecute(
+            "DELETE FROM " & table & " WHERE " & fk & " = :eid",
+            { eid : arguments.entityId }
+        );
+        cacheInvalidate( table & "::" & arguments.entityId );
+    }
+
+    // ---------- internals ----------
+
+    private struct function parentTableFor( required string coreEntityType ){
+        for ( var entry in supportedCoreEntities() ) {
+            if ( entry.key == arguments.coreEntityType ) return entry;
+        }
+        throw(
+            type    : "EntityExtensionService.UnknownEntityType",
+            message : "Unknown core entity type: " & arguments.coreEntityType & ". Supported: " & supportedCoreEntities().map( ( e ) => e.key ).toList( ", " )
+        );
+    }
+
+    private string function safeAddonId( required string addonId ){
+        var normalized = lcase( replace( arguments.addonId, "-", "_", "all" ) );
+        if ( !reFind( "^[a-z][a-z0-9_]*$", normalized ) ) {
+            throw(
+                type    : "EntityExtensionService.InvalidAddonId",
+                message : "Add-on id must be a kebab-case or snake_case slug: " & arguments.addonId
+            );
+        }
+        return normalized;
+    }
+
+    private any function enforceTenancy( required any row, required string organizationId ){
+        if ( isNull( arguments.row ) ) return javaCast( "null", "" );
+        if ( !len( arguments.organizationId ) ) return arguments.row;
+        // A row with null organization_id is an accountless entity
+        // (per the tickets-without-Contact rule); we let the call
+        // site decide whether to surface it.
+        var rowOrg = arguments.row.organization_id ?: "";
+        if ( !len( rowOrg ) ) return arguments.row;
+        if ( rowOrg == arguments.organizationId ) return arguments.row;
+        return javaCast( "null", "" );
+    }
+
+    private void function cacheStore( required string cacheKey, required any row ){
+        if ( !structKeyExists( request, "tbxExtensionCache" ) ) request.tbxExtensionCache = {};
+        request.tbxExtensionCache[ arguments.cacheKey ] = arguments.row;
+    }
+
+    private void function cacheInvalidate( required string cacheKey ){
+        if ( !structKeyExists( request, "tbxExtensionCache" ) ) return;
+        structDelete( request.tbxExtensionCache, arguments.cacheKey );
+    }
+
+}

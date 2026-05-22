@@ -91,6 +91,9 @@ class {
         binder.map( "AddonAssetService@core" )
               .to( "#moduleMapping#.models.AddonAssetService" )
               .asSingleton();
+        binder.map( "EntityExtensionService@core" )
+              .to( "#moduleMapping#.models.EntityExtensionService" )
+              .asSingleton();
         // Patched cbq DBProvider that quotes "reservedBy" in its
         // orderByRaw fragments. Required for Postgres + cbq.
         binder.map( "PostgresDBProvider@core" )

@@ -17,6 +17,68 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 queryExecute( "DELETE FROM custom_field_definitions WHERE key LIKE 'spec_%'" );
             } );
 
+            it( "supportedEntities lists the four core entity types", function(){
+                var keys = variables.svc.supportedEntities().map( ( e ) => e.key );
+                expect( keys ).toInclude( "ticket" );
+                expect( keys ).toInclude( "contact" );
+                expect( keys ).toInclude( "organization" );
+                expect( keys ).toInclude( "article" );
+            } );
+
+            it( "setValuesFor rejects an unknown entity type", function(){
+                expect( function(){
+                    variables.svc.setValuesFor(
+                        entityType : "made_up",
+                        entityId   : "doesnt-matter",
+                        values     : {}
+                    );
+                } ).toThrow( type : "CustomFieldsService.UnknownEntityType" );
+            } );
+
+            it( "setValuesFor + getValuesFor round-trip on a contact row", function(){
+                var orgId     = createUUID();
+                var contactId = createUUID();
+                queryExecute(
+                    "INSERT INTO organizations ( id, name, slug, created_at, updated_at )
+                     VALUES ( :id, 'CF Spec Org', :slug, NOW(), NOW() )",
+                    { id : orgId, slug : "cf-spec-" & lCase( replace( orgId, "-", "", "all" ) ) }
+                );
+                queryExecute(
+                    "INSERT INTO contacts ( id, organization_id, first_name, last_name, email, password_hash, created_at, updated_at )
+                     VALUES ( :id, :oid, 'Spec', 'CF', :em, 'unused', NOW(), NOW() )",
+                    { id : contactId, oid : orgId, em : "cf-spec-" & contactId & "@example.com" }
+                );
+                try {
+                    var defId = variables.svc.createDefinition(
+                        entityType : "contact",
+                        key        : "spec_cn_" & lCase( replace( createUUID(), "-", "", "all" ) ),
+                        label      : "Contact note",
+                        fieldType  : "text"
+                    );
+                    variables.svc.setValuesFor(
+                        entityType : "contact",
+                        entityId   : contactId,
+                        values     : { "#defId#" : "VIP" }
+                    );
+                    var loaded = variables.svc.getValuesFor( entityType : "contact", entityId : contactId );
+                    var match = false;
+                    for ( var row in loaded ) {
+                        if ( row.definition.id == defId && row.value.valueText == "VIP" ) match = true;
+                    }
+                    expect( match ).toBeTrue();
+                    // Row landed in the contact-specific value table.
+                    var check = queryExecute(
+                        "SELECT count(*) AS c FROM contact_custom_field_values WHERE contact_id = :cid",
+                        { cid : contactId }
+                    );
+                    expect( val( check.c[ 1 ] ) ).toBe( 1 );
+                } finally {
+                    queryExecute( "DELETE FROM contact_custom_field_values WHERE contact_id = :cid", { cid : contactId } );
+                    queryExecute( "DELETE FROM contacts WHERE id = :id", { id : contactId } );
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+            } );
+
             it( "createDefinition inserts a row that listDefinitions surfaces", function(){
                 var id = variables.svc.createDefinition(
                     entityType : "ticket",
@@ -72,7 +134,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( found ).toBeFalse();
             } );
 
-            it( "setValuesForTicket upserts the right typed column per field type", function(){
+            it( "setValuesFor upserts the right typed column per field type", function(){
                 var ticket = variables.tsvc.createAccountlessTicket( {
                     subject          : "cf-spec-" & createUUID(),
                     originatingEmail : "cf-spec-" & createUUID() & "@example.com",
@@ -88,16 +150,17 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 var numDefId  = variables.svc.createDefinition( entityType : "ticket", key : numKey,  label : "N", fieldType : "number" );
                 var boolDefId = variables.svc.createDefinition( entityType : "ticket", key : boolKey, label : "B", fieldType : "boolean" );
 
-                variables.svc.setValuesForTicket(
-                    ticketId : ticket.getId(),
-                    values   : {
+                variables.svc.setValuesFor(
+                    entityType : "ticket",
+                    entityId   : ticket.getId(),
+                    values     : {
                         "#textDefId#" : "hello",
                         "#numDefId#"  : "42.5",
                         "#boolDefId#" : "true"
                     }
                 );
 
-                var loaded = variables.svc.getValuesForTicket( ticket.getId() );
+                var loaded = variables.svc.getValuesFor( entityType : "ticket", entityId : ticket.getId() );
                 expect( loaded.len() ).toBeGTE( 3 );
                 for ( var row in loaded ) {
                     if ( row.definition.id == textDefId ) {
@@ -111,11 +174,12 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
                 // Second call updates rather than duplicates (the unique
                 // index would also reject duplicates).
-                variables.svc.setValuesForTicket(
-                    ticketId : ticket.getId(),
-                    values   : { "#textDefId#" : "world" }
+                variables.svc.setValuesFor(
+                    entityType : "ticket",
+                    entityId   : ticket.getId(),
+                    values     : { "#textDefId#" : "world" }
                 );
-                loaded = variables.svc.getValuesForTicket( ticket.getId() );
+                loaded = variables.svc.getValuesFor( entityType : "ticket", entityId : ticket.getId() );
                 for ( var row in loaded ) {
                     if ( row.definition.id == textDefId ) expect( row.value.valueText ).toBe( "world" );
                 }
@@ -137,8 +201,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     label      : "Clr",
                     fieldType  : "text"
                 );
-                variables.svc.setValuesForTicket( ticketId : ticket.getId(), values : { "#defId#" : "first" } );
-                variables.svc.setValuesForTicket( ticketId : ticket.getId(), values : { "#defId#" : "" } );
+                variables.svc.setValuesFor( entityType : "ticket", entityId : ticket.getId(), values : { "#defId#" : "first" } );
+                variables.svc.setValuesFor( entityType : "ticket", entityId : ticket.getId(), values : { "#defId#" : "" } );
 
                 var rows = queryExecute(
                     "SELECT value_text FROM ticket_custom_field_values WHERE ticket_id = :tid AND definition_id = :did",

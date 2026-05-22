@@ -1,10 +1,13 @@
 <bx:output>
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="h5 mb-0">
-        <bx:if prc.isNew>New custom field
-        <bx:else>Edit: #encodeForHTML( prc.def.label )#</bx:if>
-    </h2>
-    <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/custom-fields"><i class="bi bi-arrow-left"></i> Back</a>
+    <div>
+        <h2 class="h5 mb-0">
+            <bx:if prc.isNew>New custom field
+            <bx:else>Edit: #encodeForHTML( prc.def.label )#</bx:if>
+        </h2>
+        <p class="text-body-secondary small mb-0">Attaches to: <strong>#encodeForHTML( prc.entityLabel )#</strong></p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/custom-fields?entityType=#encodeForHTMLAttribute( prc.entityType )#"><i class="bi bi-arrow-left"></i> Back</a>
 </div>
 
 <div class="card">
@@ -19,6 +22,7 @@
               textarea content arrives newline-collapsed.
             -->
             <input type="hidden" id="optionsJson" name="options_json" value="">
+            <input type="hidden" name="entityType" value="#encodeForHTMLAttribute( prc.entityType )#">
 
             <div class="row g-3">
                 <div class="col-md-6">

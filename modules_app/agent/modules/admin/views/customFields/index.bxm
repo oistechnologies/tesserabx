@@ -1,17 +1,28 @@
 <bx:output>
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-start mb-3">
     <div>
         <h2 class="h5 mb-0">Custom fields</h2>
-        <p class="text-body-secondary small mb-0">Extra fields attached to every ticket. Agents see them on the ticket detail page.</p>
+        <p class="text-body-secondary small mb-0">Extra fields attached to every #encodeForHTML( lcase( prc.entityLabel ) )#. Agents see them on the entity detail page.</p>
     </div>
     <div>
         <form method="get" action="/agent/admin/custom-fields" class="form-check form-switch d-inline-block mb-0 me-2">
+            <input type="hidden" name="entityType" value="#encodeForHTMLAttribute( prc.entityType )#">
             <input class="form-check-input" type="checkbox" id="includeInactive" name="includeInactive" value="true" onchange="this.form.submit()"<bx:if ( prc.includeInactive ?: "" ) eq "true" or ( prc.includeInactive ?: false ) eq true> checked</bx:if>>
             <label class="form-check-label small" for="includeInactive">Show inactive</label>
         </form>
-        <a class="btn btn-primary btn-sm" href="/agent/admin/custom-fields/new"><i class="bi bi-plus-lg"></i> New field</a>
+        <a class="btn btn-primary btn-sm" href="/agent/admin/custom-fields/new?entityType=#encodeForHTMLAttribute( prc.entityType )#"><i class="bi bi-plus-lg"></i> New field</a>
     </div>
 </div>
+
+<ul class="nav nav-pills mb-3">
+    <bx:loop array="#prc.supportedEntities#" item="ent">
+        <li class="nav-item">
+            <a class="nav-link<bx:if ent.key eq prc.entityType> active</bx:if>" href="/agent/admin/custom-fields?entityType=#encodeForHTMLAttribute( ent.key )#">
+                #encodeForHTML( ent.label )#
+            </a>
+        </li>
+    </bx:loop>
+</ul>
 
 <div class="card">
     <div class="card-body p-0">
@@ -29,7 +40,7 @@
             </thead>
             <tbody>
                 <bx:if !arrayLen( prc.definitions )>
-                    <tr><td colspan="7" class="text-center text-body-secondary py-4">No custom fields yet. Create one to surface extra data on every ticket.</td></tr>
+                    <tr><td colspan="7" class="text-center text-body-secondary py-4">No custom fields yet for #encodeForHTML( lcase( prc.entityLabel ) )#. Create one to surface extra data on every record.</td></tr>
                 </bx:if>
                 <bx:loop array="#prc.definitions#" item="d">
                     <tr>
@@ -53,13 +64,15 @@
                             </bx:if>
                         </td>
                         <td class="text-end">
-                            <a class="btn btn-sm btn-outline-primary" href="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#">Edit</a>
+                            <a class="btn btn-sm btn-outline-primary" href="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#?entityType=#encodeForHTMLAttribute( prc.entityType )#">Edit</a>
                             <bx:if d.isActive>
                                 <form method="post" action="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#/deactivate" class="d-inline ms-1" onsubmit="return confirm('Deactivate this field? Existing values stay but agents will not see the input.');">
+                                    <input type="hidden" name="entityType" value="#encodeForHTMLAttribute( prc.entityType )#">
                                     <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
                                 </form>
                             <bx:else>
                                 <form method="post" action="/agent/admin/custom-fields/#encodeForHTMLAttribute( d.id )#/activate" class="d-inline ms-1">
+                                    <input type="hidden" name="entityType" value="#encodeForHTMLAttribute( prc.entityType )#">
                                     <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
                                 </form>
                             </bx:if>

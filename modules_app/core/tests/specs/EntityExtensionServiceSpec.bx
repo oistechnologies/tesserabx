@@ -1,0 +1,270 @@
+/**
+ * EntityExtensionServiceSpec: convention helper for add-on tables
+ * that extend a core entity. Exercises the public surface
+ * (tableNameFor, fkColumnFor, supportedCoreEntities, getRow,
+ * upsertRow, deleteRow) plus tenancy enforcement and the per-
+ * request cache.
+ *
+ * To exercise the read/write path without depending on a real
+ * add-on schema, the spec creates and drops a throwaway extension
+ * table named `tickets_spec_ext` in beforeAll / afterAll.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.svc  = getController().getWireBox().getInstance( "EntityExtensionService@core" );
+        variables.tsvc = getController().getWireBox().getInstance( "TicketsService@tickets" );
+
+        // Throwaway extension table: one row per ticket, two columns
+        // beyond the FK + organization_id. Mirrors the recommended
+        // add-on shape from the docs.
+        queryExecute(
+            "CREATE TABLE IF NOT EXISTS tickets_spec_ext (
+                ticket_id       VARCHAR(36) PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+                organization_id VARCHAR(36) NULL REFERENCES organizations(id),
+                external_key    VARCHAR(100),
+                payload         TEXT NULL
+            )"
+        );
+    }
+
+    function afterAll(){
+        queryExecute( "DROP TABLE IF EXISTS tickets_spec_ext" );
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "EntityExtensionService", function(){
+
+            it( "supportedCoreEntities maps each core entity to a parent table + FK", function(){
+                var keys = variables.svc.supportedCoreEntities().map( ( e ) => e.key );
+                expect( keys ).toInclude( "ticket" );
+                expect( keys ).toInclude( "contact" );
+                expect( keys ).toInclude( "organization" );
+                expect( keys ).toInclude( "article" );
+                expect( variables.svc.fkColumnFor( "ticket" ) ).toBe( "ticket_id" );
+                expect( variables.svc.fkColumnFor( "article" ) ).toBe( "article_id" );
+            } );
+
+            it( "tableNameFor normalizes hyphens in the add-on id", function(){
+                expect( variables.svc.tableNameFor( "ticket",  "example-jira" ) ).toBe( "tickets_example_jira" );
+                expect( variables.svc.tableNameFor( "contact", "example_sync" ) ).toBe( "contacts_example_sync" );
+            } );
+
+            it( "tableNameFor rejects an invalid add-on id", function(){
+                expect( function(){
+                    variables.svc.tableNameFor( "ticket", "1-bad-start" );
+                } ).toThrow( type : "EntityExtensionService.InvalidAddonId" );
+                expect( function(){
+                    variables.svc.tableNameFor( "ticket", "Has Spaces" );
+                } ).toThrow( type : "EntityExtensionService.InvalidAddonId" );
+            } );
+
+            it( "tableNameFor rejects an unknown core entity type", function(){
+                expect( function(){
+                    variables.svc.tableNameFor( "made_up", "example_jira" );
+                } ).toThrow( type : "EntityExtensionService.UnknownEntityType" );
+            } );
+
+            it( "upsertRow inserts and getRow reads it back", function(){
+                var ticket = variables.tsvc.createAccountlessTicket( {
+                    subject          : "ext-spec-" & createUUID(),
+                    originatingEmail : "ext-spec-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+                try {
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticket.getId(),
+                        addonId        : "spec_ext",
+                        data           : { external_key : "SPEC-1", payload : "first" }
+                    );
+                    structDelete( request, "tbxExtensionCache" );
+                    var row = variables.svc.getRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticket.getId(),
+                        addonId        : "spec_ext"
+                    );
+                    expect( row ).notToBeNull();
+                    expect( row.external_key ).toBe( "SPEC-1" );
+                    expect( row.payload ).toBe( "first" );
+                } finally {
+                    variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
+                }
+            } );
+
+            it( "upsertRow overwrites on a second call", function(){
+                var ticket = variables.tsvc.createAccountlessTicket( {
+                    subject          : "ext-spec-2-" & createUUID(),
+                    originatingEmail : "ext-spec-2-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+                try {
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticket.getId(),
+                        addonId        : "spec_ext",
+                        data           : { external_key : "A", payload : "first" }
+                    );
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticket.getId(),
+                        addonId        : "spec_ext",
+                        data           : { external_key : "B", payload : "second" }
+                    );
+                    structDelete( request, "tbxExtensionCache" );
+                    var row = variables.svc.getRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    expect( row.external_key ).toBe( "B" );
+                    expect( row.payload ).toBe( "second" );
+                } finally {
+                    variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
+                }
+            } );
+
+            it( "deleteRow removes the row", function(){
+                var ticket = variables.tsvc.createAccountlessTicket( {
+                    subject          : "ext-spec-3-" & createUUID(),
+                    originatingEmail : "ext-spec-3-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+                try {
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticket.getId(),
+                        addonId        : "spec_ext",
+                        data           : { external_key : "X", payload : "" }
+                    );
+                    variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    structDelete( request, "tbxExtensionCache" );
+                    // var x = <null returning call> gets dropped by the
+                    // BoxLang scope walker; assert directly on the call.
+                    expect( variables.svc.getRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" ) ).toBeNull();
+                } finally {
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
+                }
+            } );
+
+            it( "getRow returns the row when organizationId matches", function(){
+                var orgId = createUUID();
+                queryExecute(
+                    "INSERT INTO organizations ( id, name, slug, created_at, updated_at )
+                     VALUES ( :id, 'Ext Spec Org', :slug, NOW(), NOW() )",
+                    { id : orgId, slug : "ext-spec-" & lCase( replace( orgId, "-", "", "all" ) ) }
+                );
+                var ticketId = createUUID();
+                queryExecute(
+                    "INSERT INTO tickets ( id, organization_id, subject, status, priority, ticket_number, created_at, updated_at )
+                     VALUES ( :tid, :oid, 'ext tenancy', 'new', 'normal', cast( :tn as integer ), NOW(), NOW() )",
+                    { tid : ticketId, oid : orgId, tn : toString( randRange( 900000, 999999 ) ) }
+                );
+                try {
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticketId,
+                        addonId        : "spec_ext",
+                        organizationId : orgId,
+                        data           : { external_key : "T1", payload : "tenant data" }
+                    );
+                    structDelete( request, "tbxExtensionCache" );
+                    var ok = variables.svc.getRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticketId,
+                        addonId        : "spec_ext",
+                        organizationId : orgId
+                    );
+                    expect( ok ).notToBeNull();
+                    expect( ok.external_key ).toBe( "T1" );
+                } finally {
+                    queryExecute( "DELETE FROM tickets_spec_ext WHERE ticket_id = :tid", { tid : ticketId } );
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
+                }
+            } );
+
+            it( "getRow returns null when the caller's organizationId does not match", function(){
+                var ownerOrg   = createUUID();
+                var foreignOrg = createUUID();
+                queryExecute(
+                    "INSERT INTO organizations ( id, name, slug, created_at, updated_at )
+                     VALUES ( :a, 'Owner', :as, NOW(), NOW() ), ( :b, 'Foreign', :bs, NOW(), NOW() )",
+                    {
+                        a  : ownerOrg,
+                        as : "ext-spec-owner-"   & lCase( replace( ownerOrg,   "-", "", "all" ) ),
+                        b  : foreignOrg,
+                        bs : "ext-spec-foreign-" & lCase( replace( foreignOrg, "-", "", "all" ) )
+                    }
+                );
+                var ticketId = createUUID();
+                queryExecute(
+                    "INSERT INTO tickets ( id, organization_id, subject, status, priority, ticket_number, created_at, updated_at )
+                     VALUES ( :tid, :oid, 'ext tenancy 2', 'new', 'normal', cast( :tn as integer ), NOW(), NOW() )",
+                    { tid : ticketId, oid : ownerOrg, tn : toString( randRange( 900000, 999999 ) ) }
+                );
+                try {
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticketId,
+                        addonId        : "spec_ext",
+                        organizationId : ownerOrg,
+                        data           : { external_key : "T2", payload : "" }
+                    );
+                    structDelete( request, "tbxExtensionCache" );
+                    // var x = <null returning call> gets dropped by the
+                    // BoxLang scope walker; assert directly on the call.
+                    expect(
+                        variables.svc.getRow(
+                            coreEntityType : "ticket",
+                            entityId       : ticketId,
+                            addonId        : "spec_ext",
+                            organizationId : foreignOrg
+                        )
+                    ).toBeNull();
+                } finally {
+                    queryExecute( "DELETE FROM tickets_spec_ext WHERE ticket_id = :tid", { tid : ticketId } );
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM organizations WHERE id IN ( :a, :b )", { a : ownerOrg, b : foreignOrg } );
+                }
+            } );
+
+            it( "the per-request cache returns the same row across two reads", function(){
+                var ticket = variables.tsvc.createAccountlessTicket( {
+                    subject          : "ext-cache-" & createUUID(),
+                    originatingEmail : "ext-cache-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+                try {
+                    variables.svc.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticket.getId(),
+                        addonId        : "spec_ext",
+                        data           : { external_key : "CACHE", payload : "" }
+                    );
+                    structDelete( request, "tbxExtensionCache" );
+                    var first = variables.svc.getRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    // Mutate the row out from under the cache; the
+                    // second read should still see the cached struct.
+                    queryExecute(
+                        "UPDATE tickets_spec_ext SET external_key = 'CHANGED' WHERE ticket_id = :tid",
+                        { tid : ticket.getId() }
+                    );
+                    var second = variables.svc.getRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    expect( second.external_key ).toBe( first.external_key );
+                    expect( second.external_key ).toBe( "CACHE" );
+                } finally {
+                    variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
+                }
+            } );
+
+        } );
+    }
+
+}

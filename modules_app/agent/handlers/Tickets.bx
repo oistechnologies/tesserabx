@@ -413,8 +413,9 @@ class {
                 values[ mid( key, 4, len( key ) - 3 ) ] = rc[ key ];
             }
         }
-        customFieldsService.setValuesForTicket(
-            ticketId     : t.getId(),
+        customFieldsService.setValuesFor(
+            entityType   : "ticket",
+            entityId     : t.getId(),
             values       : values,
             actorAgentId : currentAgentId()
         );
@@ -724,7 +725,10 @@ class {
         // Custom fields (active definitions + saved values folded
         // in). Empty when no definitions are configured, so the
         // ticket view simply does not render the card.
-        arguments.prc.customFields = customFieldsService.getValuesForTicket( arguments.ticket.getId() );
+        arguments.prc.customFields = customFieldsService.getValuesFor(
+            entityType : "ticket",
+            entityId   : arguments.ticket.getId()
+        );
     }
 
     private string function currentAgentId(){

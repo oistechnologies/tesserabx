@@ -1,9 +1,14 @@
 /**
  * /agent/admin/custom-fields handler.
  *
- * CRUD over CustomFieldDefinition (ticket scope for now).
- * Admin-only via the cbSecurity rule on /agent/admin/*. All
- * writes route through CustomFieldsService.
+ * CRUD over CustomFieldDefinition. Phase 9 generalized definitions
+ * across four entity types (ticket | contact | organization |
+ * article). The current entity type comes from `rc.entityType` and
+ * defaults to "ticket" so existing bookmarks still land somewhere
+ * sensible.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*. All writes
+ * route through CustomFieldsService.
  */
 class {
 
@@ -13,13 +18,18 @@ class {
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
+        // Make the current entity type + the supported catalog
+        // available to every view without each action repeating it.
+        prc.supportedEntities = customFields.supportedEntities();
+        prc.entityType        = resolveEntityType( rc.entityType ?: "" );
+        prc.entityLabel       = labelFor( prc.entityType, prc.supportedEntities );
     }
 
     function index( event, rc, prc ){
         param rc.includeInactive = false;
         prc.pageTitle       = "Custom fields";
         prc.definitions     = customFields.listDefinitions(
-            entityType : "ticket",
+            entityType : prc.entityType,
             activeOnly : !( rc.includeInactive == "true" || rc.includeInactive == "1" || rc.includeInactive == true )
         );
         prc.includeInactive = rc.includeInactive;
@@ -29,7 +39,7 @@ class {
 
     function newForm( event, rc, prc ){
         prc.pageTitle  = "New custom field";
-        prc.def        = { id : "", entityType : "ticket", key : "", label : "", fieldType : "text", options : "", helpText : "", isRequired : false, sortOrder : 0, isActive : true };
+        prc.def        = { id : "", entityType : prc.entityType, key : "", label : "", fieldType : "text", options : "", helpText : "", isRequired : false, sortOrder : 0, isActive : true };
         prc.isNew      = true;
         prc.fieldTypes = customFields.fieldTypes();
         event.setView( "customFields/edit" );
@@ -38,7 +48,7 @@ class {
     function create( event, rc, prc ){
         try {
             customFields.createDefinition(
-                entityType   : "ticket",
+                entityType   : prc.entityType,
                 key          : rc.key ?: "",
                 label        : rc.label ?: "",
                 fieldType    : rc.fieldType ?: "text",
@@ -49,10 +59,10 @@ class {
                 actorAgentId : currentAgentId()
             );
             messagebox.info( "Field created." );
-            relocate( uri = "/agent/admin/custom-fields" );
+            relocate( uri = backUrl( prc.entityType ) );
         } catch ( any e ) {
             messagebox.error( "Could not create field: " & e.message );
-            relocate( uri = "/agent/admin/custom-fields/new" );
+            relocate( uri = "/agent/admin/custom-fields/new?entityType=" & prc.entityType );
         }
     }
 
@@ -61,18 +71,24 @@ class {
         var def = customFields.findDefinition( rc.id );
         if ( isNull( def ) ) {
             messagebox.error( "Field not found." );
-            relocate( uri = "/agent/admin/custom-fields" );
+            relocate( uri = backUrl( prc.entityType ) );
             return;
         }
-        prc.pageTitle  = "Edit custom field";
-        prc.def        = def;
-        prc.isNew      = false;
-        prc.fieldTypes = customFields.fieldTypes();
+        // Pin the in-page entity type to the definition's owning type
+        // so the back-link, picker highlight, and form action match.
+        prc.entityType  = def.entityType;
+        prc.entityLabel = labelFor( prc.entityType, prc.supportedEntities );
+        prc.pageTitle   = "Edit custom field";
+        prc.def         = def;
+        prc.isNew       = false;
+        prc.fieldTypes  = customFields.fieldTypes();
         event.setView( "customFields/edit" );
     }
 
     function update( event, rc, prc ){
         param rc.id = "";
+        var def = customFields.findDefinition( rc.id );
+        var et  = ( !isNull( def ) ) ? def.entityType : prc.entityType;
         customFields.updateDefinition(
             id           : rc.id,
             label        : rc.label ?: "",
@@ -84,24 +100,47 @@ class {
             actorAgentId : currentAgentId()
         );
         messagebox.info( "Field saved." );
-        relocate( uri = "/agent/admin/custom-fields" );
+        relocate( uri = backUrl( et ) );
     }
 
     function activate( event, rc, prc ){
         param rc.id = "";
+        var def = customFields.findDefinition( rc.id );
         customFields.setDefinitionActive( id : rc.id, active : true, actorAgentId : currentAgentId() );
         messagebox.info( "Field activated." );
-        relocate( uri = "/agent/admin/custom-fields?includeInactive=true" );
+        var et = ( !isNull( def ) ) ? def.entityType : prc.entityType;
+        relocate( uri = backUrl( et ) & "&includeInactive=true" );
     }
 
     function deactivate( event, rc, prc ){
         param rc.id = "";
+        var def = customFields.findDefinition( rc.id );
         customFields.setDefinitionActive( id : rc.id, active : false, actorAgentId : currentAgentId() );
         messagebox.info( "Field deactivated." );
-        relocate( uri = "/agent/admin/custom-fields" );
+        var et = ( !isNull( def ) ) ? def.entityType : prc.entityType;
+        relocate( uri = backUrl( et ) );
     }
 
     // ---------- internals ----------
+
+    private string function resolveEntityType( required string requested ){
+        var supported = customFields.supportedEntities();
+        for ( var entry in supported ) {
+            if ( entry.key == arguments.requested ) return entry.key;
+        }
+        return "ticket";
+    }
+
+    private string function labelFor( required string entityType, required array supported ){
+        for ( var entry in arguments.supported ) {
+            if ( entry.key == arguments.entityType ) return entry.label;
+        }
+        return arguments.entityType;
+    }
+
+    private string function backUrl( required string entityType ){
+        return "/agent/admin/custom-fields?entityType=" & arguments.entityType;
+    }
 
     /**
      * The select-options textarea is shipped through a hidden
@@ -117,7 +156,7 @@ class {
             try {
                 // The view base64-encodes the JSON to ferry it past
                 // cbantisamy, which rewrites raw " as &quot; in form
-                // values. Decode → JSON → array → newline-joined string.
+                // values. Decode -> JSON -> array -> newline-joined string.
                 var jsonRaw = toString( toBinary( b64 ), "UTF-8" );
                 var arr     = jsonDeserialize( jsonRaw );
                 if ( isArray( arr ) ) {

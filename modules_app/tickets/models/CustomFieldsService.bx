@@ -1,11 +1,15 @@
 /**
- * CustomFieldsService: definitions + per-ticket values.
+ * CustomFieldsService: definitions + per-entity values.
  *
  * The admin UI calls these to manage the schema (listDefinitions,
  * createDefinition, updateDefinition, deactivateDefinition). The
- * ticket show/edit pages call getValuesForTicket and
- * setValuesForTicket. Reporting hits getValuesForTicket directly
- * when slicing tickets by custom field.
+ * entity show/edit pages call getValuesFor and setValuesFor.
+ * Reporting hits getValuesFor directly when slicing entities by
+ * custom field.
+ *
+ * Supported entity types (Phase 9): ticket | contact | organization
+ * | article. Each entity type has its own typed-column value table
+ * (see supportedEntities() for the table-name mapping).
  *
  * Field types: text | textarea | number | date | select | boolean.
  * Selects keep their option list in CustomFieldDefinition.options
@@ -25,6 +29,22 @@ class singleton=true {
             { key : "date",     label : "Date"             },
             { key : "select",   label : "Dropdown (select)" },
             { key : "boolean",  label : "Checkbox"         }
+        ];
+    }
+
+    /**
+     * The catalog of entity types custom fields can attach to. Each
+     * entry declares the human label, the value table, and the
+     * foreign-key column inside that table. The admin UI uses this
+     * to render the entity-type picker; the value methods use it to
+     * route writes/reads to the right table.
+     */
+    public array function supportedEntities(){
+        return [
+            { key : "ticket",       label : "Tickets",       valueTable : "ticket_custom_field_values",       fkColumn : "ticket_id"       },
+            { key : "contact",      label : "Contacts",      valueTable : "contact_custom_field_values",      fkColumn : "contact_id"      },
+            { key : "organization", label : "Organizations", valueTable : "organization_custom_field_values", fkColumn : "organization_id" },
+            { key : "article",      label : "KB articles",   valueTable : "kb_article_custom_field_values",   fkColumn : "article_id"      }
         ];
     }
 
@@ -182,19 +202,23 @@ class singleton=true {
     // ---------------- Values ----------------
 
     /**
-     * One row per active definition, with the saved value (if any)
-     * folded in. Drives the ticket-side render so missing values
-     * still surface the field with its placeholder.
+     * One row per active definition for the given entity, with the
+     * saved value (if any) folded in. Drives the entity-side render
+     * so missing values still surface the field with its placeholder.
      */
-    public array function getValuesForTicket( required string ticketId ){
-        var defs = listDefinitions( entityType : "ticket", activeOnly : true );
+    public array function getValuesFor(
+        required string entityType,
+        required string entityId
+    ){
+        var spec = entitySpec( arguments.entityType );
+        var defs = listDefinitions( entityType : arguments.entityType, activeOnly : true );
         if ( !defs.len() ) return [];
 
         var rows = queryExecute(
             "SELECT definition_id, value_text, value_number, value_date, value_boolean
-             FROM   ticket_custom_field_values
-             WHERE  ticket_id = :tid",
-            { tid : arguments.ticketId }
+             FROM   " & spec.valueTable & "
+             WHERE  " & spec.fkColumn & " = :eid",
+            { eid : arguments.entityId }
         );
         var byDef = {};
         for ( var i = 1; i <= rows.recordCount; i++ ) {
@@ -225,19 +249,21 @@ class singleton=true {
     }
 
     /**
-     * Batch upsert of all known values for one ticket. `values` is
+     * Batch upsert of all known values for one entity. `values` is
      * a struct keyed by definition id. The shape is opinionated:
      * each entry is the raw string from the form; the service
      * decides which column to write based on the definition's
      * field_type. Empty strings are treated as "clear this value"
      * and result in a NULL across all typed columns.
      */
-    public void function setValuesForTicket(
-        required string ticketId,
+    public void function setValuesFor(
+        required string entityType,
+        required string entityId,
         required struct values,
         string actorAgentId = ""
     ){
-        var defs = listDefinitions( entityType : "ticket", activeOnly : true );
+        var spec = entitySpec( arguments.entityType );
+        var defs = listDefinitions( entityType : arguments.entityType, activeOnly : true );
         for ( var def in defs ) {
             if ( !structKeyExists( arguments.values, def.id ) ) continue;
             var raw = toString( arguments.values[ def.id ] ?: "" );
@@ -248,7 +274,7 @@ class singleton=true {
             // others default to null below.
             var binds = {
                 id  : createUUID(),
-                tid : arguments.ticketId,
+                eid : arguments.entityId,
                 did : def.id
             };
             if ( len( raw ) ) {
@@ -275,16 +301,16 @@ class singleton=true {
             if ( !structKeyExists( binds, "vb" ) ) binds.vb = javaCast( "null", "" );
 
             queryExecute(
-                "INSERT INTO ticket_custom_field_values
-                    ( id, ticket_id, definition_id, value_text, value_number, value_date, value_boolean, updated_at )
+                "INSERT INTO " & spec.valueTable & "
+                    ( id, " & spec.fkColumn & ", definition_id, value_text, value_number, value_date, value_boolean, updated_at )
                  VALUES
-                    ( :id, :tid, :did,
+                    ( :id, :eid, :did,
                       :vt,
                       cast( :vn as numeric ),
                       cast( :vd as timestamp ),
                       cast( :vb as boolean ),
                       NOW() )
-                 ON CONFLICT ( ticket_id, definition_id )
+                 ON CONFLICT ( " & spec.fkColumn & ", definition_id )
                  DO UPDATE SET value_text    = EXCLUDED.value_text,
                                value_number  = EXCLUDED.value_number,
                                value_date    = EXCLUDED.value_date,
@@ -293,10 +319,30 @@ class singleton=true {
                 binds
             );
         }
-        recordAudit( "custom_field.values_updated", arguments.ticketId, arguments.actorAgentId, {} );
+        recordAudit(
+            "custom_field.values_updated",
+            arguments.entityId,
+            arguments.actorAgentId,
+            { "entityType" : arguments.entityType }
+        );
     }
 
     // ---------------- internals ----------------
+
+    /**
+     * Resolve an entity type key to its value-table and FK-column
+     * specification. Throws on unknown types so a typo at a call
+     * site fails loudly rather than writing to the wrong table.
+     */
+    private struct function entitySpec( required string entityType ){
+        for ( var entry in supportedEntities() ) {
+            if ( entry.key == arguments.entityType ) return entry;
+        }
+        throw(
+            type    : "CustomFieldsService.UnknownEntityType",
+            message : "Unknown entity type: " & arguments.entityType & ". Supported: " & supportedEntities().map( ( e ) => e.key ).toList( ", " )
+        );
+    }
 
     private struct function rowToStruct( required query rows, required numeric i ){
         return {
