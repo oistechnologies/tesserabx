@@ -1,0 +1,240 @@
+/**
+ * Phase 13 hardening spec: the cross-cutting safety nets across the
+ * extension surface.
+ *
+ * Three concerns covered:
+ *
+ *   1. AI-off invariant. Every UI registry (Navigation, AdminPages,
+ *      TicketPanel, DashboardWidget) honors a `requiresAi` flag on
+ *      entries by inheriting the `aiEnabled` capability flag at
+ *      filter time. An add-on can mark its UI contributions
+ *      `requiresAi : true` and rely on core to hide them when
+ *      AI_ENABLED=false. (Pre-Phase-13 this flag was documented but
+ *      not consulted.)
+ *
+ *   2. Tenancy guard sanity. EntityExtensionService.getRow with a
+ *      foreign organizationId returns null. This is the cross-org
+ *      leak test from the plan's Phase 13.1 "deliberate leak"
+ *      fixture, scoped to the registry path the example-sync add-on
+ *      uses.
+ *
+ *   3. Help audience server-side enforcement. The Download.extensions
+ *      endpoint rejects non-developer viewers BEFORE streaming the
+ *      file. Verified via the audience resolver.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.nav          = wb.getInstance( "NavigationRegistry@core" );
+        variables.adminPages   = wb.getInstance( "AdminPagesRegistry@admin" );
+        variables.ticketPanels = wb.getInstance( "TicketPanelRegistry@tickets" );
+        variables.widgets      = wb.getInstance( "DashboardWidgetRegistry@reporting" );
+        variables.audience     = wb.getInstance( "HelpAudienceResolver@help" );
+        variables.entityExt    = wb.getInstance( "EntityExtensionService@core" );
+    }
+
+    function run(){
+
+        describe( "Phase 13: AI-off invariant flows through every UI registry", function(){
+
+            it( "NavigationRegistry hides entries with requiresAi=true when AI is off", function(){
+                var probeId = "spec-nav-ai-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.nav.register( {
+                    id                 : probeId,
+                    surface            : "agent",
+                    menu               : "main",
+                    label              : "Spec AI feature " & probeId,
+                    route              : "/agent/spec-ai",
+                    icon               : "bi bi-robot",
+                    sortWeight         : 999,
+                    requiresAuth       : true,
+                    requiresAi         : true,
+                    requiredPermission : ""
+                } );
+                // Test app forces AiCapability.isEnabled()=false via
+                // application._tesserabx_test_mode (see tests/Application.bx).
+                // The aiEnabled setting itself may be the literal string
+                // "true" or "false" from .env; what matters is the
+                // requiresAi gate is consulted by the registry.
+                var labels = [];
+                for ( var item in variables.nav.listForZone( "agent", "main", adminViewer() ) ) labels.append( item.label );
+                if ( isCapabilityOn( "aiEnabled" ) ) {
+                    expect( labels ).toInclude( "Spec AI feature " & probeId );
+                } else {
+                    expect( labels ).notToInclude( "Spec AI feature " & probeId );
+                }
+            } );
+
+            it( "AdminPagesRegistry hides cards with requiresAi=true when AI is off", function(){
+                var probeId = "spec-admin-ai-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.adminPages.register( {
+                    id                 : probeId,
+                    title              : "Spec AI card " & probeId,
+                    description        : "Phase 13 invariant probe.",
+                    route              : "/agent/admin/spec-ai",
+                    icon               : "bi bi-robot",
+                    sortWeight         : 999,
+                    requiresAi         : true,
+                    requiredPermission : "admin.access"
+                } );
+                var titles = [];
+                for ( var card in variables.adminPages.listForViewer( adminViewer() ) ) titles.append( card.title );
+                if ( isCapabilityOn( "aiEnabled" ) ) {
+                    expect( titles ).toInclude( "Spec AI card " & probeId );
+                } else {
+                    expect( titles ).notToInclude( "Spec AI card " & probeId );
+                }
+            } );
+
+            it( "TicketPanelRegistry hides panels with requiresAi=true when AI is off", function(){
+                var probeId = "spec-panel-ai-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.ticketPanels.register( {
+                    id                 : probeId,
+                    label              : "Spec AI panel " & probeId,
+                    partial            : "panels/non-existent",
+                    module             : "spec",
+                    position           : "right",
+                    sortWeight         : 999,
+                    requiresAi         : true,
+                    requiredPermission : ""
+                } );
+                var labels = [];
+                for ( var p in variables.ticketPanels.listForViewer( "right", adminViewer() ) ) labels.append( p.label );
+                if ( isCapabilityOn( "aiEnabled" ) ) {
+                    expect( labels ).toInclude( "Spec AI panel " & probeId );
+                } else {
+                    expect( labels ).notToInclude( "Spec AI panel " & probeId );
+                }
+            } );
+
+            it( "DashboardWidgetRegistry hides widgets with requiresAi=true when AI is off", function(){
+                var probeId = "spec-widget-ai-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id                 : probeId,
+                    title              : "Spec AI widget " & probeId,
+                    partial            : "widgets/non-existent",
+                    module             : "spec",
+                    sortWeight         : 999,
+                    requiresAi         : true,
+                    requiredPermission : ""
+                } );
+                var titles = [];
+                for ( var w in variables.widgets.listForViewer( adminViewer() ) ) titles.append( w.title );
+                if ( isCapabilityOn( "aiEnabled" ) ) {
+                    expect( titles ).toInclude( "Spec AI widget " & probeId );
+                } else {
+                    expect( titles ).notToInclude( "Spec AI widget " & probeId );
+                }
+            } );
+
+        } );
+
+        describe( "Phase 13: tenancy enforcement on the entity-extension path", function(){
+
+            it( "EntityExtensionService.getRow returns null when the caller's organizationId does not match", function(){
+                // Two orgs, an extension row written into org A; org B's
+                // viewer asks for it and must get null. This is the
+                // canonical cross-org leak test from Phase 13.1.
+                var ownerOrg   = createUUID();
+                var foreignOrg = createUUID();
+                queryExecute(
+                    "INSERT INTO organizations ( id, name, slug, created_at, updated_at )
+                     VALUES ( :a, 'Phase13 Owner', :as, NOW(), NOW() ), ( :b, 'Phase13 Foreign', :bs, NOW(), NOW() )",
+                    {
+                        a  : ownerOrg,
+                        as : "ph13-own-"   & lcase( replace( ownerOrg,   "-", "", "all" ) ),
+                        b  : foreignOrg,
+                        bs : "ph13-fore-"  & lcase( replace( foreignOrg, "-", "", "all" ) )
+                    }
+                );
+                var ticketId = createUUID();
+                queryExecute(
+                    "INSERT INTO tickets ( id, organization_id, subject, status, priority, ticket_number, created_at, updated_at )
+                     VALUES ( :tid, :oid, 'phase13 leak probe', 'new', 'normal', cast( :tn as integer ), NOW(), NOW() )",
+                    { tid : ticketId, oid : ownerOrg, tn : toString( randRange( 900000, 999999 ) ) }
+                );
+                // Reuse the example-sync extension table that ships with
+                // the sample add-on (tickets_example_sync). The migration
+                // already exists; no schema work in this spec.
+                try {
+                    variables.entityExt.upsertRow(
+                        coreEntityType : "ticket",
+                        entityId       : ticketId,
+                        addonId        : "example_sync",
+                        organizationId : ownerOrg,
+                        data           : { external_issue_key : "PH13-1", external_project_key : "PH13" }
+                    );
+                    structDelete( request, "tbxExtensionCache" );
+                    expect(
+                        variables.entityExt.getRow(
+                            coreEntityType : "ticket",
+                            entityId       : ticketId,
+                            addonId        : "example_sync",
+                            organizationId : foreignOrg
+                        )
+                    ).toBeNull();
+                } finally {
+                    queryExecute( "DELETE FROM tickets_example_sync WHERE ticket_id = :tid", { tid : ticketId } );
+                    queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM organizations WHERE id IN ( :a, :b )", { a : ownerOrg, b : foreignOrg } );
+                }
+            } );
+
+        } );
+
+        describe( "Phase 13: help audience filter is server-side", function(){
+
+            it( "anonymous viewer is rejected from the developer audience", function(){
+                expect( variables.audience.canSeeAudience( { signedIn : false }, "developer" ) ).toBeFalse();
+            } );
+
+            it( "signed-in agent WITHOUT help.developer is rejected from the developer audience", function(){
+                var viewer = { signedIn : true, userType : "agent", permissions : [ "tickets.view" ] };
+                expect( variables.audience.canSeeAudience( viewer, "developer" ) ).toBeFalse();
+            } );
+
+            it( "signed-in agent WITH help.developer is allowed", function(){
+                var viewer = { signedIn : true, userType : "agent", permissions : [ "help.developer" ] };
+                expect( variables.audience.canSeeAudience( viewer, "developer" ) ).toBeTrue();
+            } );
+
+            it( "contact viewer is rejected from agent and developer audiences", function(){
+                var viewer = { signedIn : true, userType : "contact", permissions : [] };
+                expect( variables.audience.canSeeAudience( viewer, "agent" ) ).toBeFalse();
+                expect( variables.audience.canSeeAudience( viewer, "developer" ) ).toBeFalse();
+            } );
+
+        } );
+
+    }
+
+    // ---------- helpers ----------
+
+    private struct function adminViewer(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "phase13-spec",
+            roles          : [ "agent-admin" ],
+            permissions    : [
+                "admin.access", "admin.users.manage", "admin.teams.manage",
+                "admin.workflow.manage", "admin.settings.manage", "admin.audit.view",
+                "admin.addons.manage", "tickets.view", "tickets.assign", "tickets.bulk"
+            ],
+            organizationId : ""
+        };
+    }
+
+    private boolean function isCapabilityOn( required string flag ){
+        try {
+            var raw = getController().getSetting( arguments.flag );
+            if ( isBoolean( raw ) ) return raw;
+            if ( isSimpleValue( raw ) ) return ( toString( raw ) == "true" );
+        } catch ( any e ) {}
+        return false;
+    }
+
+}

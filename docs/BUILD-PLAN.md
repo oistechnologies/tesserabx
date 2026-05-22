@@ -6,7 +6,7 @@ This file is the "what to do next." The companion file `CLAUDE.md` at the reposi
 
 A note on content: do not use em dashes in anything written into the repository, including code comments meant as documentation, README files, and migration notes. This plan itself follows that rule.
 
-A companion document, [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md), describes the phased work to make TesseraBX extensible by third-party BoxLang ColdBox modules (the add-on contract, registries, service interfaces, and the in-app help system). It is a separate phased plan that runs alongside or after the build plan in this file; the hard constraints in `CLAUDE.md` still govern both.
+A companion document, [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md), describes the phased work to make TesseraBX extensible by third-party BoxLang ColdBox modules (the add-on contract, registries, service interfaces, and the in-app help system). **All 14 phases (0-13) shipped as of 2026-05-22.** The live contract for add-on authors lives in [`docs/EXTENSIONS.md`](EXTENSIONS.md); a worked reference add-on lives at [`sample-addons/example-sync/`](../sample-addons/example-sync/). The hard constraints in `CLAUDE.md` still govern both this plan and the extensibility one.
 
 ---
 

@@ -4,7 +4,7 @@ Items the original build plan called for or implied that are not in the shipped 
 
 Do not improvise any of these into the product without checking with the human. The plan governs; this file records the gap.
 
-Related: [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md) describes the phased work to open TesseraBX to third-party add-ons. Several items below (live chat as a channel adapter, Jira / GitHub / billing connectors as add-ons, approval workflows as a registered automation action) are unblocked once the extension surface lands.
+Related: [`docs/EXTENSIBILITY-PLAN.md`](EXTENSIBILITY-PLAN.md) is the phased plan to open TesseraBX to third-party add-ons. **Phases 0-13 have shipped as of 2026-05-22.** Items below that the extension surface unblocks (live chat as a channel adapter, Jira / GitHub / billing connectors as add-ons, approval workflows as a registered automation action) are now buildable as ColdBox add-on modules; see [`docs/EXTENSIONS.md`](EXTENSIONS.md) for the manifest contract and the [`sample-addons/example-sync/`](../sample-addons/example-sync/) reference for a worked example.
 
 ---
 

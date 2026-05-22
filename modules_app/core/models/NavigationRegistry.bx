@@ -171,6 +171,7 @@ class singleton=true {
             requiresAnonymous  : !!( arguments.raw.requiresAnonymous ?: false ),
             requiredPermission : arguments.raw.requiredPermission    ?: "",
             capabilityFlag     : arguments.raw.capabilityFlag        ?: "",
+            requiresAi         : !!( arguments.raw.requiresAi        ?: false ),
             source             : arguments.source
         };
     }
@@ -179,6 +180,12 @@ class singleton=true {
         if ( arguments.entry.requiresAuth      && !arguments.viewer.signedIn ) return false;
         if ( arguments.entry.requiresAnonymous &&  arguments.viewer.signedIn ) return false;
         if ( len( arguments.entry.capabilityFlag ) && !isCapabilityOn( arguments.entry.capabilityFlag ) ) return false;
+        // Phase 13: every entry that contributes an AI surface inherits
+        // the AI_ENABLED capability flag automatically. Without this
+        // check an add-on could declare requiresAi : true and the
+        // entry would still leak when AI is off, violating the
+        // Phase 7 AI-off invariant.
+        if ( arguments.entry.requiresAi && !isCapabilityOn( "aiEnabled" ) ) return false;
         if ( len( arguments.entry.requiredPermission ) ) {
             if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
         }

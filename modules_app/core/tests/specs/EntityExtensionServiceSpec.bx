@@ -19,10 +19,14 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
         // Throwaway extension table: one row per ticket, two columns
         // beyond the FK + organization_id. Mirrors the recommended
-        // add-on shape from the docs.
+        // add-on shape from the docs. Drop first in case a prior
+        // run left a stale table around with the older schema (no
+        // surrogate id column).
+        queryExecute( "DROP TABLE IF EXISTS tickets_spec_ext" );
         queryExecute(
             "CREATE TABLE IF NOT EXISTS tickets_spec_ext (
-                ticket_id       VARCHAR(36) PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+                id              VARCHAR(36) PRIMARY KEY,
+                ticket_id       VARCHAR(36) UNIQUE NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
                 organization_id VARCHAR(36) NULL REFERENCES organizations(id),
                 external_key    VARCHAR(100),
                 payload         TEXT NULL

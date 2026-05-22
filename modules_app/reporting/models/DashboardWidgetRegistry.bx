@@ -129,12 +129,15 @@ class singleton=true {
             sortWeight         : isNumeric( arguments.raw.sortWeight ?: "" ) ? arguments.raw.sortWeight : 500,
             requiredPermission : arguments.raw.requiredPermission ?: "",
             capabilityFlag     : arguments.raw.capabilityFlag     ?: "",
+            requiresAi         : !!( arguments.raw.requiresAi     ?: false ),
             source             : arguments.source
         };
     }
 
     private boolean function isVisible( required struct entry, required struct viewer ){
         if ( len( arguments.entry.capabilityFlag ) && !isCapabilityOn( arguments.entry.capabilityFlag ) ) return false;
+        // Phase 13: requiresAi inherits the AI_ENABLED capability flag.
+        if ( arguments.entry.requiresAi && !isCapabilityOn( "aiEnabled" ) ) return false;
         if ( len( arguments.entry.requiredPermission ) ) {
             if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
         }

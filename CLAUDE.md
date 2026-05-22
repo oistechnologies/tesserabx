@@ -117,7 +117,9 @@ This is settled. Do not substitute components without an explicit instruction fr
 
 ## Modules
 
-Seventeen custom modules. Each owns its routes, handlers, models (including its own Quick entities), views, CBWire components, config, and specs.
+Seventeen custom modules plus a first-party `help` module added in extensibility Phase 11. Each owns its routes, handlers, models (including its own Quick entities), views, CBWire components, config, and specs.
+
+**Add-ons.** Third-party BoxLang ColdBox modules can ship into a TesseraBX deployment at the `modules/` location (the standard ForgeBox install path) or in-tree under `sample-addons/` for first-party demos. Add-ons contribute via a `settings.tesserabx` block in their `ModuleConfig.bx` (manifest declarations for navigation, admin pages, ticket panels, dashboard widgets, channel adapters, automation actions, AI features, API resources, webhook events, notification templates + channels, custom field types, audit event types, per-tenant settings, help pages, roles, and permissions). The live contract is in [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md); a worked reference add-on lives at [`sample-addons/example-sync/`](sample-addons/example-sync/). Add-ons must respect every hard constraint above, especially the tenant isolation rule (no add-on entity table without `organization_id`) and the AI-off invariant (UI contributions with `requiresAi : true` are hidden centrally by the four UI registries when `AI_ENABLED=false`).
 
 | Module | Owns | Responsibility |
 |---|---|---|

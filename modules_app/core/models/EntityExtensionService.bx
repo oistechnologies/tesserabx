@@ -126,17 +126,27 @@ class singleton=true {
         var table = tableNameFor( arguments.coreEntityType, arguments.addonId );
         var fk    = fkColumnFor( arguments.coreEntityType );
 
-        // The data struct should not name FK or organization_id; they
-        // are computed here. If the add-on accidentally includes them
-        // we let the DB-level error surface; better than silently
+        // The data struct should not name FK, id, or organization_id;
+        // they are computed here. If the add-on accidentally includes
+        // them we let the DB-level error surface; better than silently
         // ignoring the override.
-        var cols   = [ fk, "organization_id" ];
-        var binds  = { eid : arguments.entityId, org : len( arguments.organizationId ) ? arguments.organizationId : javaCast( "null", "" ) };
-        var values = [ ":eid", ":org" ];
+        //
+        // Phase 13: extension tables have a surrogate `id` PK + UNIQUE
+        // on the FK column (qb's .primaryKey().references() chain
+        // doesn't make the FK the PK directly), so upsertRow generates
+        // a UUID for the insert path and lets the UNIQUE constraint
+        // drive the ON CONFLICT update path.
+        var cols   = [ "id", fk, "organization_id" ];
+        var binds  = {
+            newId : createUUID(),
+            eid   : arguments.entityId,
+            org   : len( arguments.organizationId ) ? arguments.organizationId : javaCast( "null", "" )
+        };
+        var values = [ ":newId", ":eid", ":org" ];
         var sets   = [ "organization_id = EXCLUDED.organization_id" ];
         var i      = 0;
         for ( var col in arguments.data ) {
-            i &= 1;
+            i += 1;
             var bind = "d" & i;
             cols.append( col );
             values.append( ":" & bind );
