@@ -64,6 +64,12 @@ logs/
 # Database backups
 /backups/
 
+# Staged add-on migrations (see tasks/Migrate.cfc). The canonical
+# source lives in each add-on's own migrations/ folder; staged copies
+# under the central dir are a runtime artifact, not version-controlled.
+resources/database/migrations/_addon_*.cfc
+resources/database/migrations/.staged.json
+
 # IDE
 .idea/
 .vscode/

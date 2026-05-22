@@ -270,16 +270,47 @@ wirebox.getInstance( "TenancyGuard@contacts" )
 
 ## Add-on migrations
 
-`cfmigrations` is configured as a single-directory runner (see `.cfmigrations.json`). Add-ons ship their migrations into the same global directory as core: `resources/database/migrations/`.
+Add-ons ship migrations in their own tree. The `tasks/Migrate.cfc` CommandBox task discovers them and stages each file into the central directory that `cfmigrations` scans, so the standard runner picks them up without any cfmigrations config changes.
 
-To avoid name collisions across add-ons and core:
+**Where to put migrations in an add-on:**
 
-1. Prefix every migration filename with your `addonId`. Example: `exampleJira_2026_06_01_000010_create_jira_links.cfc`.
-2. Use the same timestamped sortable format core uses (`YYYY_MM_DD_HHmmss`). The slug prefix sorts before the timestamp, so all of your add-on's migrations run as a block in declared order.
-3. Use the same component declaration core uses: `component { function up( schema, qb ){...}; function down( schema, qb ){...}; }`.
-4. Every per-tenant table MUST include an `organization_id` column with a FK and CASCADE on delete, and the entity that fronts the table MUST apply `TenantScope@contacts`. Migrations that introduce a per-tenant table without `organization_id` are wrong and will fail the tenancy review in later phases.
+```text
+modules/<slug>/migrations/<timestamp>_<name>.cfc          (canonical for ForgeBox add-ons)
+modules/<slug>/resources/migrations/<timestamp>_<name>.cfc
+sample-addons/<slug>/migrations/<timestamp>_<name>.cfc    (in-tree sample add-ons)
+modules_app/<slug>/migrations/<timestamp>_<name>.cfc      (first-party split-outs)
+modules_app/<slug>/resources/migrations/<timestamp>_<name>.cfc
+```
 
-A future phase may extend the migration runner to discover per-module migration folders automatically; until then, the slug-prefix convention is the supported approach.
+The task walks all of these and stages every `.cfc` it finds.
+
+**Running migrations:**
+
+```text
+box run-script migrate:up        # stage then run pending migrations
+box run-script migrate:down      # stage then roll back one
+box run-script migrate:fresh     # stage, drop everything, then re-run
+box run-script migrate:refresh   # stage, down all, then up all
+box run-script migrate:stage     # stage only (dry-run; no migrations executed)
+```
+
+These are aliases in `box.json` that delegate to `box task run tasks/Migrate <subcommand>`. Plain `box migrate up` still works against the central dir, but you have to remember to run the stager first.
+
+**Staging convention:**
+
+Each discovered file is copied into `resources/database/migrations/_addon_<slug>_<originalFilename>.cfc`. The `_addon_` prefix:
+
+- is matched by `.gitignore`, so staged copies are runtime artifacts, never committed
+- uniquely namespaces the component name in the global `cfmigrations` table when two add-ons happen to pick the same timestamp
+- is left alone on re-stage (idempotent)
+
+The stager writes `resources/database/migrations/.staged.json` listing every staged file plus its source, so an operator can audit what came from where.
+
+**Conventions you still own:**
+
+1. Use the timestamped sortable format core uses (`YYYY_MM_DD_HHmmss_<name>.cfc`). The timestamp drives cfmigrations sort order.
+2. Use the standard component declaration: `component { function up( schema, qb ){...}; function down( schema, qb ){...}; }`.
+3. Every per-tenant table MUST include an `organization_id` column with a FK and `ON DELETE CASCADE`, and the entity that fronts the table MUST apply `TenantScope@contacts`.
 
 ---
 

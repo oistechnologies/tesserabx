@@ -6,15 +6,13 @@
  * the qb migration shape used elsewhere; the unique index on
  * ticket_id enforces one row per ticket.
  *
- * In a real add-on the migration would ship with the add-on. For this
- * sample it lives in the core migrations folder because cfmigrations
- * only scans resources/database/migrations/. A near-term improvement
- * is to let cfmigrations follow per-add-on migrations folders too.
- *
- * The canonical copy of this file lives at
- *   sample-addons/example-sync/migrations/<timestamp>_create_tickets_example_sync.cfc
- * and a real add-on would carry it there. This duplicate exists only
- * because of the cfmigrations scanning limit above.
+ * This file is the canonical source. The Migrate task
+ * (tasks/Migrate.cfc, follow-up A7) discovers add-on migrations
+ * under sample-addons/, modules_app/, and TesseraBX-marked modules/,
+ * then stages each into resources/database/migrations/ with an
+ * `_addon_` prefix so the standard cfmigrations runner picks them
+ * up. Staged copies are gitignored; only this source is
+ * version-controlled.
  */
 component {
 
