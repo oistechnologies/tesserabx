@@ -54,35 +54,28 @@ class singleton=true {
     }
 
     /**
-     * Direct chat completion. AiMiddleware currently does not call
-     * this method; it calls aiChat() inline. When the middleware
-     * refactor lands, this becomes the canonical entry point and
-     * the inline aiChat call is removed.
+     * Direct chat completion. Called from AiMiddleware.complete()
+     * after the middleware has applied redaction, capability check,
+     * and message-shape construction.
+     *
+     * Returns the canonical provider-result envelope:
+     *   { outcome, text, tokensIn, tokensOut, latencyMs, error }.
+     *
+     * Parses the raw aiChat response across every shape we have
+     * historically seen: OpenAI-style choices[1].message.content,
+     * choices[1].text, top-level content / text. Other providers
+     * fall back to a best-effort scan.
      */
     public struct function complete( required array messages, required struct params, struct options = {} ){
         var startMs = getTickCount();
         try {
             var raw = aiChat( arguments.messages, arguments.params, arguments.options );
-            var text = "";
-            var tokensIn = 0;
-            var tokensOut = 0;
-            if ( isStruct( raw ) ) {
-                if ( structKeyExists( raw, "choices" ) && isArray( raw.choices ) && arrayLen( raw.choices ) ) {
-                    var first = raw.choices[ 1 ];
-                    if ( isStruct( first ) && structKeyExists( first, "message" ) && isStruct( first.message ) ) {
-                        text = first.message.content ?: "";
-                    }
-                }
-                if ( structKeyExists( raw, "usage" ) && isStruct( raw.usage ) ) {
-                    tokensIn  = val( raw.usage.prompt_tokens ?: 0 );
-                    tokensOut = val( raw.usage.completion_tokens ?: 0 );
-                }
-            }
+            var parsed = parseAiChatResponse( raw );
             return {
                 outcome   : "ok",
-                text      : text,
-                tokensIn  : tokensIn,
-                tokensOut : tokensOut,
+                text      : parsed.text,
+                tokensIn  : parsed.tokensIn,
+                tokensOut : parsed.tokensOut,
                 latencyMs : getTickCount() - startMs,
                 error     : ""
             };
@@ -96,6 +89,44 @@ class singleton=true {
                 error     : e.message
             };
         }
+    }
+
+    /**
+     * Normalize bx-ai's raw response shape into our flat result.
+     * The raw struct shape varies by provider; the keys we look at
+     * (`choices[1].message.content`, `usage.prompt_tokens`,
+     * `usage.completion_tokens`) match every OpenAI-compatible
+     * provider, which is OpenRouter's protocol. Other providers
+     * fall back to a best-effort scan.
+     */
+    private struct function parseAiChatResponse( required any raw ){
+        var out = { "text" : "", "tokensIn" : 0, "tokensOut" : 0 };
+        if ( isSimpleValue( arguments.raw ) ) {
+            out.text = toString( arguments.raw );
+            return out;
+        }
+        if ( isStruct( arguments.raw ) ) {
+            if ( structKeyExists( arguments.raw, "choices" )
+                 && isArray( arguments.raw.choices )
+                 && arguments.raw.choices.len() ) {
+                var choice = arguments.raw.choices[ 1 ];
+                if ( structKeyExists( choice, "message" ) && structKeyExists( choice.message, "content" ) ) {
+                    out.text = toString( choice.message.content );
+                } else if ( structKeyExists( choice, "text" ) ) {
+                    out.text = toString( choice.text );
+                }
+            } else if ( structKeyExists( arguments.raw, "content" ) ) {
+                out.text = toString( arguments.raw.content );
+            } else if ( structKeyExists( arguments.raw, "text" ) ) {
+                out.text = toString( arguments.raw.text );
+            }
+            if ( structKeyExists( arguments.raw, "usage" ) ) {
+                var usage = arguments.raw.usage;
+                out.tokensIn  = int( usage.prompt_tokens     ?: usage.input_tokens  ?: 0 );
+                out.tokensOut = int( usage.completion_tokens ?: usage.output_tokens ?: 0 );
+            }
+        }
+        return out;
     }
 
     /**

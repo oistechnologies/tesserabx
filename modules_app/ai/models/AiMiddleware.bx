@@ -29,8 +29,15 @@
  */
 class singleton=true {
 
-    property name="wirebox"     inject="wirebox";
-    property name="capability"  inject="AiCapability@ai";
+    property name="wirebox"          inject="wirebox";
+    property name="capability"       inject="AiCapability@ai";
+    // Follow-up A1: the middleware now routes through the provider
+    // registry so add-ons can ship alternate providers (Anthropic
+    // direct, Azure OpenAI, in-house, offline stub). BxAiProvider
+    // is the built-in wrapper around the aiChat / aiEmbed BIFs and
+    // the default fallback when no other provider is registered or
+    // the requested id is unknown.
+    property name="providerRegistry" inject="AiProviderRegistry@ai";
 
     /**
      * complete: the one-shot completion entry point.
@@ -88,115 +95,97 @@ class singleton=true {
         var modelToUse = arguments.options.model ?: capability.getModel();
         var providerToUse = capability.getProvider();
 
-        try {
-            var params = { "model" : modelToUse };
-            if ( structKeyExists( arguments.options, "temperature" ) ) params[ "temperature" ] = arguments.options.temperature;
-            if ( structKeyExists( arguments.options, "maxTokens" )   ) params[ "max_tokens"  ] = arguments.options.maxTokens;
+        var params = { "model" : modelToUse };
+        if ( structKeyExists( arguments.options, "temperature" ) ) params[ "temperature" ] = arguments.options.temperature;
+        if ( structKeyExists( arguments.options, "maxTokens" )   ) params[ "max_tokens"  ] = arguments.options.maxTokens;
 
-            var providerOptions = {
-                "provider"     : providerToUse,
-                "apiKey"       : capability.getApiKey(),
-                "timeout"      : capability.getTimeoutSeconds(),
-                "returnFormat" : "raw"
-            };
-            if ( len( capability.getBaseUrl() ) ) providerOptions[ "baseUrl" ] = capability.getBaseUrl();
+        var providerOptions = {
+            "provider"     : providerToUse,
+            "apiKey"       : capability.getApiKey(),
+            "timeout"      : capability.getTimeoutSeconds(),
+            "returnFormat" : "raw"
+        };
+        if ( len( capability.getBaseUrl() ) ) providerOptions[ "baseUrl" ] = capability.getBaseUrl();
 
-            // Build the messages payload. When a systemPrompt is
-            // present we send a two-message conversation (system +
-            // user); otherwise a single user message preserves the
-            // earlier behavior for any caller that does not yet
-            // supply a template.
-            var messages = len( systemPrompt )
-                ? [
-                    { "role" : "system", "content" : systemPrompt },
-                    { "role" : "user",   "content" : redacted }
-                  ]
-                : redacted;
+        // Build the messages payload. When a systemPrompt is present
+        // we send a two-message conversation (system + user);
+        // otherwise a single-element user message preserves the
+        // earlier behavior for any caller that does not yet supply
+        // a template.
+        var messages = len( systemPrompt )
+            ? [
+                { "role" : "system", "content" : systemPrompt },
+                { "role" : "user",   "content" : redacted }
+              ]
+            : [ { "role" : "user", "content" : redacted } ];
 
-            // bx-ai BIF: aiChat( messages, params, options ). The
-            // facade is the only place that calls bx-ai directly,
-            // per CLAUDE.md's "ai module is the only code that
-            // imports bx-ai" rule.
-            var raw = aiChat( messages, params, providerOptions );
+        // Follow-up A1: resolve the active provider through the
+        // registry instead of calling aiChat() inline. BxAiProvider
+        // is the built-in fallback; an add-on can register an
+        // alternate via settings.tesserabx.aiProviders.
+        var provider     = resolveProvider( arguments.options );
+        var providerResp = provider.complete( messages, params, providerOptions );
+        var latency      = getTickCount() - startMs;
 
-            var result   = parseAiChatResponse( raw );
-            var latency  = getTickCount() - startMs;
+        if ( providerResp.outcome == "ok" ) {
             recordInteraction(
                 feature    : arguments.feature,
                 outcome    : "ok",
                 options    : arguments.options,
                 latency    : latency,
                 promptHash : hash,
-                tokensIn   : result.tokensIn,
-                tokensOut  : result.tokensOut
+                tokensIn   : providerResp.tokensIn,
+                tokensOut  : providerResp.tokensOut
             );
             return {
                 "outcome"   : "ok",
-                "text"      : result.text,
-                "tokensIn"  : result.tokensIn,
-                "tokensOut" : result.tokensOut,
+                "text"      : providerResp.text,
+                "tokensIn"  : providerResp.tokensIn,
+                "tokensOut" : providerResp.tokensOut,
                 "latencyMs" : latency,
                 "error"     : ""
             };
-        } catch ( any e ) {
-            var latency = getTickCount() - startMs;
-            recordInteraction(
-                feature      : arguments.feature,
-                outcome      : "error",
-                options      : arguments.options,
-                latency      : latency,
-                promptHash   : hash,
-                errorMessage : e.message
-            );
-            return {
-                "outcome"   : "error",
-                "text"      : "",
-                "tokensIn"  : 0,
-                "tokensOut" : 0,
-                "latencyMs" : latency,
-                "error"     : e.message
-            };
         }
+        recordInteraction(
+            feature      : arguments.feature,
+            outcome      : "error",
+            options      : arguments.options,
+            latency      : latency,
+            promptHash   : hash,
+            errorMessage : providerResp.error ?: ""
+        );
+        return {
+            "outcome"   : "error",
+            "text"      : "",
+            "tokensIn"  : 0,
+            "tokensOut" : 0,
+            "latencyMs" : latency,
+            "error"     : providerResp.error ?: ""
+        };
     }
 
     /**
-     * Normalize bx-ai's raw response shape into our flat result.
-     * The raw struct shape varies by provider; the keys we look at
-     * (`choices[1].message.content`, `usage.prompt_tokens`,
-     * `usage.completion_tokens`) match every OpenAI-compatible
-     * provider, which is OpenRouter's protocol. Other providers fall
-     * back to a best-effort scan.
+     * Resolve the AI provider this call should run against. The
+     * caller may pass `options.aiProviderId` to override; otherwise
+     * we use `AI_PROVIDER_BACKEND` (a system property), and finally
+     * fall back to "bx-ai" which is the always-registered built-in
+     * that wraps the aiChat / aiEmbed BIFs.
      */
-    private struct function parseAiChatResponse( required any raw ){
-        var out = { "text" : "", "tokensIn" : 0, "tokensOut" : 0 };
-        if ( isSimpleValue( arguments.raw ) ) {
-            out.text = toString( arguments.raw );
-            return out;
+    private any function resolveProvider( required struct options ){
+        var requested = arguments.options.aiProviderId ?: getSystemSetting( "AI_PROVIDER_BACKEND", "bx-ai" );
+        if ( !len( requested ) ) requested = "bx-ai";
+        var resolved = providerRegistry.providerFor( requested );
+        if ( isNull( resolved ) ) {
+            // Unknown id: fall through to the built-in so a misconfig
+            // doesn't silently break every AI feature.
+            resolved = providerRegistry.providerFor( "bx-ai" );
         }
-        if ( isStruct( arguments.raw ) ) {
-            // OpenAI-shaped: choices[1].message.content + usage.*
-            if ( structKeyExists( arguments.raw, "choices" )
-                 && isArray( arguments.raw.choices )
-                 && arguments.raw.choices.len() ) {
-                var choice = arguments.raw.choices[ 1 ];
-                if ( structKeyExists( choice, "message" ) && structKeyExists( choice.message, "content" ) ) {
-                    out.text = toString( choice.message.content );
-                } else if ( structKeyExists( choice, "text" ) ) {
-                    out.text = toString( choice.text );
-                }
-            } else if ( structKeyExists( arguments.raw, "content" ) ) {
-                out.text = toString( arguments.raw.content );
-            } else if ( structKeyExists( arguments.raw, "text" ) ) {
-                out.text = toString( arguments.raw.text );
-            }
-            if ( structKeyExists( arguments.raw, "usage" ) ) {
-                var usage = arguments.raw.usage;
-                out.tokensIn  = int( usage.prompt_tokens     ?: usage.input_tokens  ?: 0 );
-                out.tokensOut = int( usage.completion_tokens ?: usage.output_tokens ?: 0 );
-            }
-        }
-        return out;
+        return resolved;
     }
+
+    // Follow-up A1: parseAiChatResponse moved to BxAiProvider (every
+    // provider owns its own response normalization). Keeping this
+    // comment as a breadcrumb for anyone following the contract.
 
     /**
      * Generate an embedding vector for `text`.
@@ -244,14 +233,14 @@ class singleton=true {
         };
         if ( len( capability.getBaseUrl() ) ) providerOptions[ "baseUrl" ] = capability.getBaseUrl();
 
-        try {
-            var raw = aiEmbed( redacted, { "model" : modelToUse }, providerOptions );
-            // returnFormat "embeddings" returns an array of vectors;
-            // for a single-input call there is exactly one entry.
-            var vector = ( isArray( raw ) && raw.len() ) ? raw[ 1 ] : raw;
-            if ( !isArray( vector ) ) vector = [];
+        // Follow-up A1: route through the provider registry instead
+        // of calling aiEmbed() inline. Add-ons can supply alternate
+        // embedding backends via settings.tesserabx.aiProviders.
+        var provider     = resolveProvider( arguments.options );
+        var providerResp = provider.embed( redacted, { "model" : modelToUse }, providerOptions );
+        var latency      = getTickCount() - startMs;
 
-            var latency = getTickCount() - startMs;
+        if ( providerResp.outcome == "ok" ) {
             recordInteraction(
                 feature    : arguments.feature,
                 outcome    : "ok",
@@ -262,29 +251,27 @@ class singleton=true {
             );
             return {
                 "outcome"   : "ok",
-                "vector"    : vector,
-                "dimension" : vector.len(),
+                "vector"    : providerResp.vector,
+                "dimension" : providerResp.dimension,
                 "latencyMs" : latency,
                 "error"     : ""
             };
-        } catch ( any e ) {
-            var latency = getTickCount() - startMs;
-            recordInteraction(
-                feature      : arguments.feature,
-                outcome      : "error",
-                options      : arguments.options,
-                latency      : latency,
-                promptHash   : hash,
-                errorMessage : e.message
-            );
-            return {
-                "outcome"   : "error",
-                "vector"    : [],
-                "dimension" : 0,
-                "latencyMs" : latency,
-                "error"     : e.message
-            };
         }
+        recordInteraction(
+            feature      : arguments.feature,
+            outcome      : "error",
+            options      : arguments.options,
+            latency      : latency,
+            promptHash   : hash,
+            errorMessage : providerResp.error ?: ""
+        );
+        return {
+            "outcome"   : "error",
+            "vector"    : [],
+            "dimension" : 0,
+            "latencyMs" : latency,
+            "error"     : providerResp.error ?: ""
+        };
     }
 
     /**

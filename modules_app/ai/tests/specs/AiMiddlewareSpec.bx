@@ -91,6 +91,50 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
         } );
+
+        describe( "Follow-up A1: AiProviderRegistry dispatch", function(){
+
+            it( "the registry resolves 'bx-ai' to the BxAiProvider singleton", function(){
+                var reg = getController().getWireBox().getInstance( "AiProviderRegistry@ai" );
+                var p   = reg.providerFor( "bx-ai" );
+                expect( p ).notToBeNull();
+                expect( p.getProviderId() ).toBe( "bx-ai" );
+                expect( p.getDisplayName() ).toBeString();
+            } );
+
+            it( "listProviderIds includes the built-in bx-ai", function(){
+                var reg = getController().getWireBox().getInstance( "AiProviderRegistry@ai" );
+                expect( reg.listProviderIds() ).toInclude( "bx-ai" );
+            } );
+
+            it( "providerFor returns null for an unknown id (caller decides fallback)", function(){
+                var reg = getController().getWireBox().getInstance( "AiProviderRegistry@ai" );
+                expect( reg.providerFor( "made-up-" & createUUID() ) ).toBeNull();
+            } );
+
+            it( "BxAiProvider.complete returns the canonical envelope shape", function(){
+                // The provider's try/catch will swallow the real
+                // aiChat() call (no provider configured in the test
+                // env) and return outcome=error. What we're asserting
+                // is the shape of the result envelope, which the
+                // middleware now relies on instead of catching
+                // exceptions itself.
+                var p = getController().getWireBox().getInstance( "BxAiProvider@ai" );
+                var r = p.complete(
+                    messages : [ { role : "user", content : "ping" } ],
+                    params   : { model : "test-model" },
+                    options  : { provider : "openrouter", apiKey : "", timeout : 1 }
+                );
+                expect( r ).toHaveKey( "outcome" );
+                expect( r ).toHaveKey( "text" );
+                expect( r ).toHaveKey( "tokensIn" );
+                expect( r ).toHaveKey( "tokensOut" );
+                expect( r ).toHaveKey( "latencyMs" );
+                expect( r ).toHaveKey( "error" );
+                expect( r.outcome ).toBeIn( [ "ok", "error" ] );
+            } );
+
+        } );
     }
 
 }
