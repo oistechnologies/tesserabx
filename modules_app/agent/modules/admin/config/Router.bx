@@ -63,6 +63,22 @@ class {
         } );
         route( "webhooks" ).to( "Webhooks.index" );
 
+        // Automation rules (trigger / condition / action editor).
+        // Most-specific routes first so /rules/new and /rules/:id/*
+        // do not get swallowed by /rules/:id.
+        route( "rules/new" ).withHandler( "Rules" ).toAction( {
+            "GET"  : "newForm",
+            "POST" : "create"
+        } );
+        route( "rules/:id/activate" ).withVerbs( "POST" ).to( "Rules.activate" );
+        route( "rules/:id/deactivate" ).withVerbs( "POST" ).to( "Rules.deactivate" );
+        route( "rules/:id/delete" ).withVerbs( "POST" ).to( "Rules.remove" );
+        route( "rules/:id" ).withHandler( "Rules" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "rules" ).to( "Rules.index" );
+
         // Ticket workflow (status catalog + transitions).
         route( "workflow/new" ).withHandler( "Workflow" ).toAction( {
             "GET"  : "newForm",

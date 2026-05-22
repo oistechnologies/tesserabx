@@ -91,6 +91,7 @@ class singleton=true {
             { id : "admin.users.manage", label : "Manage agent accounts and roles",     description : "Includes creating, editing, deactivating agents." },
             { id : "admin.teams.manage", label : "Manage teams",                        description : "Create, rename, dissolve teams; manage memberships." },
             { id : "admin.workflow.manage", label : "Edit ticket workflow",             description : "Change statuses and transitions." },
+            { id : "admin.automation.manage", label : "Manage automation rules",        description : "Create, edit, enable, and delete trigger / condition / action rules." },
             { id : "admin.settings.manage", label : "Edit application settings",        description : "App-wide settings, branding, integrations." },
             { id : "admin.audit.view",   label : "View the audit log",                  description : "Read-only access to the central compliance log." },
             { id : "admin.addons.manage", label : "Enable, disable, configure add-ons", description : "Drives the Add-ons admin page." },

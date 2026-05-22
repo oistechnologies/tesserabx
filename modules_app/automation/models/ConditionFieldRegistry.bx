@@ -22,6 +22,20 @@
  *           appliesTo   : []
  *       }
  *   ];
+ *
+ * A field may also declare a fixed value set so the rule editor
+ * renders a picker instead of a free-text input. The shape mirrors
+ * the action parameter schema:
+ *   - `options`         : static array of strings OR `{ value, label }`
+ *                         structs. Use this when the values are known
+ *                         and stable.
+ *   - `optionsProvider` : "Mapping@module.methodName" reference. The
+ *                         editor resolves the call at render time, so
+ *                         a provider can return the live status list
+ *                         or organization roster.
+ * For boolean fields the canonical option list is
+ *   `[ { value : "true", label : "Yes" }, { value : "false", label : "No" } ]`
+ * because `AutomationService.readField` compares value strings.
  */
 class singleton=true {
 
@@ -93,25 +107,38 @@ class singleton=true {
         // Mirrors the fields AutomationService.conditionPasses already
         // resolves. Keep this list in sync with that switch when a new
         // ticket field is added to the engine.
+        // Static option lists declared once so the seeds stay terse.
+        var priorityOptions = [ "low", "normal", "high", "urgent" ];
+        var ticketTypeOptions = [ "incident", "question", "request" ];
+        var sourceOptions = [ "agent", "contact-form", "email", "portal", "widget", "scheduler" ];
+        var yesNoOptions = [
+            { value : "true",  label : "Yes" },
+            { value : "false", label : "No"  }
+        ];
+        // Dynamic providers populated through Rules.bx at editor-render time.
+        var statusProvider = "WorkflowService@tickets.listStatusOptions";
+        var orgProvider    = "ContactsService@contacts.listOrganizationOptions";
+
         var seeds = [
-            // Ticket direct (any trigger)
-            { id : "priority",                    label : "Priority",                       type : "string"  },
-            { id : "status",                      label : "Status",                         type : "string"  },
-            { id : "ticketType",                  label : "Ticket type",                    type : "string"  },
-            { id : "source",                      label : "Source",                         type : "string"  },
+            // Ticket direct (any trigger). Fields with known value sets
+            // ship as pickers; free-form fields stay as strings.
+            { id : "priority",                    label : "Priority",                       type : "string",  options : priorityOptions   },
+            { id : "status",                      label : "Status",                         type : "string",  optionsProvider : statusProvider },
+            { id : "ticketType",                  label : "Ticket type",                    type : "string",  options : ticketTypeOptions },
+            { id : "source",                      label : "Source",                         type : "string",  options : sourceOptions     },
             { id : "subject",                     label : "Subject",                        type : "string"  },
-            { id : "organizationId",              label : "Organization ID",                type : "string"  },
+            { id : "organizationId",              label : "Organization",                   type : "string",  optionsProvider : orgProvider },
             { id : "requesterContactId",          label : "Requester contact ID",           type : "string"  },
             { id : "originatingEmail",            label : "Originating email",              type : "string"  },
-            { id : "isAccountless",               label : "Is accountless",                 type : "boolean" },
+            { id : "isAccountless",               label : "Is accountless",                 type : "boolean", options : yesNoOptions },
             // Event-context (status-change triggers)
-            { id : "from",                        label : "Previous status (for status_changed)", type : "string",  appliesTo : [ "ticket.status_changed" ] },
-            { id : "to",                          label : "Next status (for status_changed)",     type : "string",  appliesTo : [ "ticket.status_changed" ] },
+            { id : "from",                        label : "Previous status (for status_changed)", type : "string", optionsProvider : statusProvider, appliesTo : [ "ticket.status_changed" ] },
+            { id : "to",                          label : "Next status (for status_changed)",     type : "string", optionsProvider : statusProvider, appliesTo : [ "ticket.status_changed" ] },
             // Time-based (escalation trigger)
             { id : "minutesSinceCreated",         label : "Minutes since created",          type : "number", appliesTo : [ "ticket.escalation" ] },
             { id : "minutesSinceFirstResponseDue", label : "Minutes since first-response due", type : "number", appliesTo : [ "ticket.escalation" ] },
             { id : "minutesSinceResolutionDue",   label : "Minutes since resolution due",   type : "number", appliesTo : [ "ticket.escalation" ] },
-            { id : "hasFirstResponse",            label : "Has first response",             type : "boolean", appliesTo : [ "ticket.escalation" ] }
+            { id : "hasFirstResponse",            label : "Has first response",             type : "boolean", options : yesNoOptions, appliesTo : [ "ticket.escalation" ] }
         ];
         for ( var s in seeds ) addEntry( s, "core" );
     }
@@ -120,12 +147,14 @@ class singleton=true {
         if ( !isStruct( arguments.raw ) ) return;
         if ( !structKeyExists( arguments.raw, "id" ) || !len( arguments.raw.id ?: "" ) ) return;
         variables.cache[ arguments.raw.id ] = {
-            id          : arguments.raw.id,
-            label       : arguments.raw.label       ?: arguments.raw.id,
-            description : structKeyExists( arguments.raw, "description" ) ? arguments.raw.description : "",
-            type        : structKeyExists( arguments.raw, "type" )        ? arguments.raw.type        : "string",
-            appliesTo   : ( structKeyExists( arguments.raw, "appliesTo" ) && isArray( arguments.raw.appliesTo ) ) ? arguments.raw.appliesTo : [],
-            source      : arguments.source
+            id              : arguments.raw.id,
+            label           : arguments.raw.label       ?: arguments.raw.id,
+            description     : structKeyExists( arguments.raw, "description" ) ? arguments.raw.description : "",
+            type            : structKeyExists( arguments.raw, "type" )        ? arguments.raw.type        : "string",
+            options         : ( structKeyExists( arguments.raw, "options" ) && isArray( arguments.raw.options ) ) ? arguments.raw.options : [],
+            optionsProvider : structKeyExists( arguments.raw, "optionsProvider" ) ? arguments.raw.optionsProvider : "",
+            appliesTo       : ( structKeyExists( arguments.raw, "appliesTo" ) && isArray( arguments.raw.appliesTo ) ) ? arguments.raw.appliesTo : [],
+            source          : arguments.source
         };
     }
 

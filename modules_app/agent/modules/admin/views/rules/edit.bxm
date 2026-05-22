@@ -1,0 +1,460 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">
+        <bx:if prc.isNew>New rule
+        <bx:else>Edit: #encodeForHTML( prc.rule.name )#</bx:if>
+    </h2>
+    <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/rules"><i class="bi bi-arrow-left"></i> Back</a>
+</div>
+
+<form id="ruleForm" method="post" action="<bx:if prc.isNew>/agent/admin/rules/new<bx:else>/agent/admin/rules/#encodeForHTMLAttribute( prc.rule.id )#</bx:if>">
+    <input type="hidden" id="conditionsJson" name="conditionsJson" value="">
+    <input type="hidden" id="actionsJson"    name="actionsJson"    value="">
+
+    <div class="card mb-3">
+        <div class="card-header"><strong>Rule details</strong></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label" for="name">Name</label>
+                    <input type="text" id="name" name="name" class="form-control" required value="#encodeForHTMLAttribute( prc.rule.name )#">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="precedence">Precedence</label>
+                    <input type="number" id="precedence" name="precedence" class="form-control" value="#encodeForHTMLAttribute( prc.rule.precedence )#">
+                    <div class="form-text small">Higher runs first.</div>
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="isActive" name="isActive" value="1"<bx:if prc.rule.isActive> checked</bx:if>>
+                        <label class="form-check-label" for="isActive">Active</label>
+                    </div>
+                </div>
+                <div class="col-md-12">
+                    <label class="form-label" for="description">Description</label>
+                    <textarea id="description" name="description" class="form-control" rows="2">#encodeForHTML( prc.rule.description )#</textarea>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="trigger">Trigger</label>
+                    <select id="trigger" name="trigger" class="form-select" required>
+                        <option value="">Choose trigger...</option>
+                        <bx:loop array="#prc.triggerList#" item="t">
+                            <option value="#encodeForHTMLAttribute( t.id )#"<bx:if prc.rule.trigger eq t.id> selected</bx:if>>
+                                #encodeForHTML( t.label )# (#encodeForHTML( t.id )#)
+                            </option>
+                        </bx:loop>
+                    </select>
+                    <div class="form-text small" id="triggerHelp"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>Conditions <span class="text-body-secondary small">(all must match; empty list = always)</span></strong>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addCondition"><i class="bi bi-plus-lg"></i> Add condition</button>
+        </div>
+        <div class="card-body">
+            <div id="conditionRows" class="vstack gap-2"></div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>Actions <span class="text-body-secondary small">(executed in order on match)</span></strong>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addAction"><i class="bi bi-plus-lg"></i> Add action</button>
+        </div>
+        <div class="card-body">
+            <div id="actionRows" class="vstack gap-2"></div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">
+            <bx:if prc.isNew>Create rule<bx:else>Save changes</bx:if>
+        </button>
+        <a class="btn btn-outline-secondary" href="/agent/admin/rules">Cancel</a>
+    </div>
+</form>
+
+<script>
+(function(){
+    var registry = #jsonSerialize( {
+        triggers        : prc.triggerList,
+        operators       : prc.operatorList,
+        actions         : prc.actionList,
+        fieldsByTrigger : prc.fieldsByTrigger
+    } )#;
+    var initial = {
+        trigger    : #jsonSerialize( prc.rule.trigger )#,
+        conditions : #jsonSerialize( prc.rule.conditions )#,
+        actions    : #jsonSerialize( prc.rule.actions )#
+    };
+
+    var triggerSelect      = document.getElementById('trigger');
+    var triggerHelp        = document.getElementById('triggerHelp');
+    var conditionsContainer = document.getElementById('conditionRows');
+    var actionsContainer    = document.getElementById('actionRows');
+    var conditionsJson     = document.getElementById('conditionsJson');
+    var actionsJson        = document.getElementById('actionsJson');
+    var form               = document.getElementById('ruleForm');
+
+    function indexBy(list, key){
+        var out = {};
+        for (var i = 0; i < list.length; i++) out[ list[i][key] ] = list[i];
+        return out;
+    }
+    var triggersById  = indexBy(registry.triggers,  'id');
+    var operatorsById = indexBy(registry.operators, 'id');
+    var actionsById   = indexBy(registry.actions,   'id');
+
+    function fieldsForCurrentTrigger(){
+        var t = triggerSelect.value || '';
+        return registry.fieldsByTrigger[t] || [];
+    }
+
+    function el(tag, attrs, children){
+        var node = document.createElement(tag);
+        if (attrs) Object.keys(attrs).forEach(function(k){
+            if (k === 'class') node.className = attrs[k];
+            else if (k === 'text') node.textContent = attrs[k];
+            else node.setAttribute(k, attrs[k]);
+        });
+        if (children) children.forEach(function(c){ if (c) node.appendChild(c); });
+        return node;
+    }
+
+    // ---------- conditions ----------
+
+    function renderConditionRow(cond){
+        cond = cond || { field: '', op: 'eq', value: '' };
+        var row = el('div', { class: 'row g-2 align-items-end condition-row p-2 border rounded' });
+
+        var fieldCol = el('div', { class: 'col-md-4' });
+        fieldCol.appendChild(el('label', { class: 'form-label small', text: 'Field' }));
+        var fieldSelect = el('select', { class: 'form-select form-select-sm cond-field' });
+        fieldSelect.appendChild(el('option', { value: '', text: 'Choose field...' }));
+        var fields = fieldsForCurrentTrigger();
+        var hasField = false;
+        fields.forEach(function(f){
+            var opt = el('option', { value: f.id, text: f.label + ' (' + f.id + ')' });
+            if (f.id === cond.field) { opt.selected = true; hasField = true; }
+            fieldSelect.appendChild(opt);
+        });
+        // If saved field is not in trigger's list, still show it so we don't silently drop.
+        if (!hasField && cond.field) {
+            var opt = el('option', { value: cond.field, text: cond.field + ' (field unknown for this trigger)' });
+            opt.selected = true;
+            fieldSelect.appendChild(opt);
+        }
+        fieldCol.appendChild(fieldSelect);
+        row.appendChild(fieldCol);
+
+        var opCol = el('div', { class: 'col-md-3' });
+        opCol.appendChild(el('label', { class: 'form-label small', text: 'Operator' }));
+        var opSelect = el('select', { class: 'form-select form-select-sm cond-op' });
+        registry.operators.forEach(function(o){
+            var opt = el('option', { value: o.id, text: o.label });
+            if (o.id === cond.op) opt.selected = true;
+            opSelect.appendChild(opt);
+        });
+        opCol.appendChild(opSelect);
+        row.appendChild(opCol);
+
+        var valCol = el('div', { class: 'col-md-4 cond-value-wrap' });
+        valCol.appendChild(el('label', { class: 'form-label small', text: 'Value' }));
+        var valWrap = el('div', { class: 'cond-value-slot' });
+        valCol.appendChild(valWrap);
+        row.appendChild(valCol);
+
+        var rmCol = el('div', { class: 'col-md-1 text-end' });
+        var rmBtn = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary' });
+        rmBtn.innerHTML = '<i class="bi bi-x"></i>';
+        rmBtn.addEventListener('click', function(){ row.remove(); });
+        rmCol.appendChild(rmBtn);
+        row.appendChild(rmCol);
+
+        function currentFieldDef(){
+            var list = fieldsForCurrentTrigger();
+            for (var i = 0; i < list.length; i++) {
+                if (list[i].id === fieldSelect.value) return list[i];
+            }
+            return null;
+        }
+
+        function appendOptionEntry(parent, entry, isSelected){
+            var v, l;
+            if (entry && typeof entry === 'object') { v = entry.value; l = entry.label || entry.value; }
+            else                                    { v = entry;       l = entry; }
+            var opt = el('option', { value: v, text: l });
+            if (isSelected) opt.selected = true;
+            parent.appendChild(opt);
+        }
+
+        function readExistingValue(){
+            // Preserve user input across operator/field re-renders.
+            var existing = valWrap.querySelector('.cond-value');
+            if (!existing) return null;
+            if (existing.tagName === 'SELECT' && existing.multiple) {
+                return Array.prototype.map.call(existing.selectedOptions, function(o){ return o.value; });
+            }
+            return existing.value;
+        }
+
+        function renderValueInput(){
+            var op = operatorsById[opSelect.value] || { valueShape: 'string' };
+            var prior = readExistingValue();
+            var current = (prior !== null && prior !== undefined) ? prior : cond.value;
+            valWrap.innerHTML = '';
+            if (op.valueShape === 'none') {
+                valWrap.appendChild(el('span', { class: 'text-body-secondary small', text: 'no value needed' }));
+                return;
+            }
+            var fieldDef = currentFieldDef();
+            var fieldOptions = (fieldDef && fieldDef.options && fieldDef.options.length) ? fieldDef.options : null;
+
+            if (fieldOptions) {
+                if (op.valueShape === 'list') {
+                    var sel = el('select', { class: 'form-select form-select-sm cond-value' });
+                    sel.multiple = true;
+                    sel.size = Math.min(fieldOptions.length, 5);
+                    var picked = Array.isArray(current)
+                        ? current
+                        : (typeof current === 'string' && current.length ? current.split(',').map(function(x){ return x.trim(); }) : []);
+                    fieldOptions.forEach(function(o){
+                        var v = (o && typeof o === 'object') ? o.value : o;
+                        appendOptionEntry(sel, o, picked.indexOf(v) >= 0);
+                    });
+                    valWrap.appendChild(sel);
+                } else {
+                    var sel = el('select', { class: 'form-select form-select-sm cond-value' });
+                    sel.appendChild(el('option', { value: '', text: '--' }));
+                    fieldOptions.forEach(function(o){
+                        var v = (o && typeof o === 'object') ? o.value : o;
+                        appendOptionEntry(sel, o, v === current);
+                    });
+                    valWrap.appendChild(sel);
+                }
+                return;
+            }
+
+            var input = el('input', { class: 'form-control form-control-sm cond-value' });
+            input.type = (op.valueShape === 'number') ? 'number' : 'text';
+            input.value = (current !== undefined && current !== null) ? current : '';
+            if (op.valueShape === 'list') input.placeholder = 'comma-separated values';
+            valWrap.appendChild(input);
+        }
+        opSelect.addEventListener('change', renderValueInput);
+        fieldSelect.addEventListener('change', renderValueInput);
+        renderValueInput();
+
+        conditionsContainer.appendChild(row);
+    }
+
+    function rebuildConditionFieldLists(){
+        // Trigger changed; refresh field options in each condition row,
+        // preserving selected ids where the new trigger supports them.
+        var rows = conditionsContainer.querySelectorAll('.condition-row');
+        rows.forEach(function(row){
+            var fieldSelect = row.querySelector('.cond-field');
+            var current = fieldSelect.value;
+            while (fieldSelect.firstChild) fieldSelect.removeChild(fieldSelect.firstChild);
+            fieldSelect.appendChild(el('option', { value: '', text: 'Choose field...' }));
+            var fields = fieldsForCurrentTrigger();
+            var has = false;
+            fields.forEach(function(f){
+                var opt = el('option', { value: f.id, text: f.label + ' (' + f.id + ')' });
+                if (f.id === current) { opt.selected = true; has = true; }
+                fieldSelect.appendChild(opt);
+            });
+            if (!has && current) {
+                var opt = el('option', { value: current, text: current + ' (not valid for this trigger)' });
+                opt.selected = true;
+                fieldSelect.appendChild(opt);
+            }
+            // The value input may need to re-render because the
+            // selected field's option list (or absence thereof) just
+            // changed. Synthesizing a change event keeps the closure
+            // wiring intact without us reaching into row state.
+            fieldSelect.dispatchEvent(new Event('change'));
+        });
+    }
+
+    // ---------- actions ----------
+
+    function renderActionRow(action){
+        action = action || { type: '', params: {} };
+        if (!action.params) action.params = {};
+        var row = el('div', { class: 'row g-2 align-items-start action-row p-2 border rounded' });
+
+        var typeCol = el('div', { class: 'col-md-4' });
+        typeCol.appendChild(el('label', { class: 'form-label small', text: 'Action' }));
+        var typeSelect = el('select', { class: 'form-select form-select-sm act-type' });
+        typeSelect.appendChild(el('option', { value: '', text: 'Choose action...' }));
+        registry.actions.forEach(function(a){
+            var opt = el('option', { value: a.id, text: a.label });
+            if (a.id === action.type) opt.selected = true;
+            typeSelect.appendChild(opt);
+        });
+        typeCol.appendChild(typeSelect);
+        var descNote = el('div', { class: 'form-text small act-desc' });
+        typeCol.appendChild(descNote);
+        row.appendChild(typeCol);
+
+        var paramsCol = el('div', { class: 'col-md-7 act-params' });
+        row.appendChild(paramsCol);
+
+        var rmCol = el('div', { class: 'col-md-1 text-end' });
+        var rmBtn = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary' });
+        rmBtn.innerHTML = '<i class="bi bi-x"></i>';
+        rmBtn.addEventListener('click', function(){ row.remove(); });
+        rmCol.appendChild(rmBtn);
+        row.appendChild(rmCol);
+
+        function renderParamsForm(){
+            paramsCol.innerHTML = '';
+            descNote.textContent = '';
+            var def = actionsById[typeSelect.value];
+            if (!def) return;
+            descNote.textContent = def.description || '';
+            var schema = def.parameterSchema || [];
+            if (!schema.length) {
+                paramsCol.appendChild(el('div', { class: 'text-body-secondary small', text: 'No parameters.' }));
+                return;
+            }
+            var grid = el('div', { class: 'row g-2' });
+            schema.forEach(function(field){
+                var col = el('div', { class: 'col-md-6' });
+                col.appendChild(el('label', { class: 'form-label small', text: field.label || field.name }));
+                var current = action.params[field.name];
+                if (current === undefined || current === null) current = '';
+                var input;
+                if (field.type === 'select') {
+                    input = el('select', { class: 'form-select form-select-sm act-param', 'data-name': field.name });
+                    if (field.allowEmpty) {
+                        var blank = el('option', { value: '', text: field.emptyLabel || '--' });
+                        if (current === '' || current === undefined || current === null) blank.selected = true;
+                        input.appendChild(blank);
+                    }
+                    (field.options || []).forEach(function(o){
+                        var v, l;
+                        if (o && typeof o === 'object') { v = o.value; l = o.label || o.value; }
+                        else                            { v = o;       l = o; }
+                        var opt = el('option', { value: v, text: l });
+                        if (v === current) opt.selected = true;
+                        input.appendChild(opt);
+                    });
+                } else if (field.type === 'boolean') {
+                    var wrap = el('div', { class: 'form-check' });
+                    input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.className = 'form-check-input act-param';
+                    input.dataset.name = field.name;
+                    input.dataset.shape = 'boolean';
+                    if (current === true || current === 'true' || current === 1 || current === '1') input.checked = true;
+                    wrap.appendChild(input);
+                    col.appendChild(wrap);
+                    if (field.description) col.appendChild(el('div', { class: 'form-text small', text: field.description }));
+                    grid.appendChild(col);
+                    return;
+                } else if (field.type === 'textarea') {
+                    input = el('textarea', { class: 'form-control form-control-sm act-param', 'data-name': field.name, rows: '2' });
+                    input.value = current;
+                } else if (field.type === 'number') {
+                    input = el('input', { type: 'number', class: 'form-control form-control-sm act-param', 'data-name': field.name });
+                    input.value = current;
+                } else {
+                    input = el('input', { type: 'text', class: 'form-control form-control-sm act-param', 'data-name': field.name });
+                    input.value = current;
+                    if (field.placeholder) input.placeholder = field.placeholder;
+                }
+                col.appendChild(input);
+                if (field.description) col.appendChild(el('div', { class: 'form-text small', text: field.description }));
+                grid.appendChild(col);
+            });
+            paramsCol.appendChild(grid);
+        }
+        typeSelect.addEventListener('change', renderParamsForm);
+        renderParamsForm();
+
+        actionsContainer.appendChild(row);
+    }
+
+    // ---------- collection on submit ----------
+
+    function collectConditions(){
+        var out = [];
+        var rows = conditionsContainer.querySelectorAll('.condition-row');
+        rows.forEach(function(row){
+            var field = row.querySelector('.cond-field').value;
+            var op    = row.querySelector('.cond-op').value;
+            if (!field) return;
+            var valEl = row.querySelector('.cond-value');
+            var opDef = operatorsById[op] || { valueShape: 'string' };
+            var value = '';
+            if (opDef.valueShape === 'none' || !valEl) {
+                value = '';
+            } else if (valEl.tagName === 'SELECT' && valEl.multiple) {
+                // Multi-select for in / notIn: pass as an array; the
+                // engine's asArray helper handles either shape.
+                value = Array.prototype.map.call(valEl.selectedOptions, function(o){ return o.value; });
+            } else {
+                value = valEl.value;
+            }
+            out.push({ field: field, op: op, value: value });
+        });
+        return out;
+    }
+
+    function collectActions(){
+        var out = [];
+        var rows = actionsContainer.querySelectorAll('.action-row');
+        rows.forEach(function(row){
+            var type = row.querySelector('.act-type').value;
+            if (!type) return;
+            var params = {};
+            row.querySelectorAll('.act-param').forEach(function(input){
+                var name = input.dataset.name;
+                if (!name) return;
+                if (input.dataset.shape === 'boolean') params[name] = input.checked;
+                else                                   params[name] = input.value;
+            });
+            out.push({ type: type, params: params });
+        });
+        return out;
+    }
+
+    // ---------- wire up ----------
+
+    triggerSelect.addEventListener('change', function(){
+        var t = triggersById[triggerSelect.value];
+        triggerHelp.textContent = t ? (t.description || '') : '';
+        rebuildConditionFieldLists();
+    });
+
+    document.getElementById('addCondition').addEventListener('click', function(){
+        if (!triggerSelect.value) {
+            alert('Pick a trigger first; the available fields depend on it.');
+            return;
+        }
+        renderConditionRow();
+    });
+
+    document.getElementById('addAction').addEventListener('click', function(){
+        renderActionRow();
+    });
+
+    form.addEventListener('submit', function(){
+        conditionsJson.value = JSON.stringify(collectConditions());
+        actionsJson.value    = JSON.stringify(collectActions());
+    });
+
+    // Initial render
+    var triggerInit = triggersById[initial.trigger];
+    if (triggerInit) triggerHelp.textContent = triggerInit.description || '';
+    initial.conditions.forEach(function(c){ renderConditionRow(c); });
+    initial.actions.forEach(function(a){ renderActionRow(a); });
+})();
+</script>
+</bx:output>

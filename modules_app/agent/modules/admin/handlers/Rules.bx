@@ -1,0 +1,296 @@
+/**
+ * /agent/admin/rules handler.
+ *
+ * CRUD over automation rules. Admin-only via the cbSecurity rule
+ * on /agent/admin/*. All writes route through
+ * AutomationService@automation. The editor view drives its trigger,
+ * field, operator, and action pickers from the Phase 6 registries so
+ * add-on contributions surface automatically. Action params persist
+ * in the new `{ type, params : { ... } }` shape; legacy `{ type, value }`
+ * rows stored before the editor shipped are normalized at read time
+ * by AutomationService.normalizeAction.
+ */
+class {
+
+    property name="automation" inject="AutomationService@automation";
+    property name="triggers"   inject="TriggerRegistry@automation";
+    property name="operators"  inject="OperatorRegistry@automation";
+    property name="fields"     inject="ConditionFieldRegistry@automation";
+    property name="actions"    inject="ActionRegistry@automation";
+    property name="wirebox"    inject="wirebox";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+    property name="auth"       inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle    = "Automation rules";
+        prc.rules        = automation.listRules();
+        prc.triggerIndex = triggerIndex();
+        event.setView( "rules/index" );
+    }
+
+    function newForm( event, rc, prc ){
+        prc.pageTitle = "New rule";
+        prc.rule      = blankRuleForView();
+        prc.isNew     = true;
+        seedEditorMetadata( prc );
+        event.setView( "rules/edit" );
+    }
+
+    function create( event, rc, prc ){
+        try {
+            var data = parseRuleForm( rc );
+            automation.createRule( data );
+            messagebox.info( "Rule created." );
+            relocate( uri = "/agent/admin/rules" );
+        } catch ( any e ) {
+            messagebox.error( "Could not create rule: " & e.message );
+            relocate( uri = "/agent/admin/rules/new" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        param rc.id = "";
+        var rule = automation.getRule( rc.id );
+        if ( isNull( rule ) ) {
+            messagebox.error( "Rule not found." );
+            relocate( uri = "/agent/admin/rules" );
+            return;
+        }
+        prc.pageTitle = "Edit rule";
+        prc.rule      = ruleToView( rule );
+        prc.isNew     = false;
+        seedEditorMetadata( prc );
+        event.setView( "rules/edit" );
+    }
+
+    function update( event, rc, prc ){
+        param rc.id = "";
+        try {
+            var data = parseRuleForm( rc );
+            automation.updateRule( id : rc.id, data : data );
+            messagebox.info( "Rule saved." );
+            relocate( uri = "/agent/admin/rules" );
+        } catch ( any e ) {
+            messagebox.error( "Could not save rule: " & e.message );
+            relocate( uri = "/agent/admin/rules/" & rc.id );
+        }
+    }
+
+    function activate( event, rc, prc ){
+        param rc.id = "";
+        automation.updateRule( id : rc.id, data : { isActive : true } );
+        messagebox.info( "Rule activated." );
+        relocate( uri = "/agent/admin/rules" );
+    }
+
+    function deactivate( event, rc, prc ){
+        param rc.id = "";
+        automation.updateRule( id : rc.id, data : { isActive : false } );
+        messagebox.info( "Rule deactivated." );
+        relocate( uri = "/agent/admin/rules" );
+    }
+
+    function remove( event, rc, prc ){
+        param rc.id = "";
+        automation.deleteRule( rc.id );
+        messagebox.info( "Rule deleted." );
+        relocate( uri = "/agent/admin/rules" );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Pull the four registries into a single struct the edit view
+     * serializes to JSON for the client-side row builder. The view
+     * iterates these to populate dropdowns and to render parameter
+     * schemas; the JS keeps everything driven by the registry, never
+     * by hard-coded option lists.
+     *
+     * Action parameter schemas may declare `optionsProvider` instead of
+     * a static `options` array. Resolution happens here so the view
+     * receives a uniform `options` array on every select field, no
+     * matter where the values came from.
+     */
+    private void function seedEditorMetadata( required struct prc ){
+        // Resolve option providers once per render, then reuse the
+        // resolved list across the per-trigger field map. Otherwise
+        // an organization-picker provider would run N+1 times.
+        var resolvedFields = resolveFieldOptionProviders( fields.listAll() );
+        var fieldsById = {};
+        for ( var f in resolvedFields ) fieldsById[ f.id ] = f;
+
+        arguments.prc.triggerList   = triggers.listAll();
+        arguments.prc.operatorList  = operators.listAll();
+        arguments.prc.fieldList     = resolvedFields;
+        arguments.prc.actionList    = resolveActionOptionProviders( actions.listAll() );
+        // The field list per trigger; the editor narrows the field
+        // picker as the trigger changes. Filter the already-resolved
+        // list rather than re-resolving providers per trigger.
+        arguments.prc.fieldsByTrigger = {};
+        for ( var t in arguments.prc.triggerList ) {
+            var perTrigger = [];
+            for ( var raw in fields.listForTrigger( t.id ) ) {
+                if ( structKeyExists( fieldsById, raw.id ) ) perTrigger.append( fieldsById[ raw.id ] );
+                else                                         perTrigger.append( raw );
+            }
+            arguments.prc.fieldsByTrigger[ t.id ] = perTrigger;
+        }
+    }
+
+    /**
+     * Walk every action's parameterSchema and replace any field with an
+     * `optionsProvider` by an `options` array resolved through
+     * WireBox. Providers are declared as "MappingName@module.methodName"
+     * and must return either `[ "value1", ... ]` (flat strings used as
+     * both value and label) or `[ { value, label } ]` structs. A
+     * provider that errors yields an empty option list and a log line
+     * rather than failing the editor render.
+     */
+    private array function resolveActionOptionProviders( required array list ){
+        var out = [];
+        for ( var entry in arguments.list ) {
+            var copy = duplicate( entry );
+            var schema = copy.parameterSchema ?: [];
+            var resolved = [];
+            for ( var field in schema ) {
+                if ( !isStruct( field ) ) { resolved.append( field ); continue; }
+                if ( ( field.type ?: "" ) != "select" || !len( field.optionsProvider ?: "" ) ) {
+                    resolved.append( field );
+                    continue;
+                }
+                var copied = duplicate( field );
+                copied.options = invokeOptionsProvider( field.optionsProvider );
+                resolved.append( copied );
+            }
+            copy.parameterSchema = resolved;
+            out.append( copy );
+        }
+        return out;
+    }
+
+    /**
+     * Condition fields can also carry `options` / `optionsProvider`.
+     * Resolve any provider into a concrete options array so the editor
+     * JS only needs to look at one key.
+     */
+    private array function resolveFieldOptionProviders( required array list ){
+        var out = [];
+        for ( var entry in arguments.list ) {
+            var copy = duplicate( entry );
+            if ( len( copy.optionsProvider ?: "" ) ) {
+                copy.options = invokeOptionsProvider( copy.optionsProvider );
+            }
+            out.append( copy );
+        }
+        return out;
+    }
+
+    private array function invokeOptionsProvider( required string spec ){
+        // spec format: "Mapping@module.methodName"
+        var lastDot = arguments.spec.lastIndexOf( "." );
+        if ( lastDot <= 0 ) return [];
+        var mapping = left( arguments.spec, lastDot );
+        var method  = mid( arguments.spec, lastDot + 2, len( arguments.spec ) - lastDot - 1 );
+        try {
+            var target = wirebox.getInstance( mapping );
+            var result = invoke( target, method );
+            if ( !isArray( result ) ) return [];
+            return result;
+        } catch ( any e ) {
+            // The editor stays usable even if a provider blows up; the
+            // selected field just loses its option list. A real
+            // production deploy will surface the underlying error
+            // through structured logging once that lands.
+            writeLog( file = "Rules", text = "optionsProvider [#arguments.spec#] failed: #e.message#", type = "error" );
+            return [];
+        }
+    }
+
+    private struct function blankRuleForView(){
+        return {
+            id          : "",
+            name        : "",
+            description : "",
+            trigger     : "",
+            precedence  : 0,
+            isActive    : true,
+            conditions  : [],
+            actions     : []
+        };
+    }
+
+    private struct function ruleToView( required any rule ){
+        var conditions = jsonDeserialize( arguments.rule.getConditions() ?: "[]" );
+        var actionsRaw = jsonDeserialize( arguments.rule.getActions()    ?: "[]" );
+        if ( !isArray( conditions ) ) conditions = [];
+        if ( !isArray( actionsRaw  ) ) actionsRaw  = [];
+        var normalizedActions = [];
+        for ( var a in actionsRaw ) {
+            if ( !isStruct( a ) ) continue;
+            normalizedActions.append( automation.normalizeAction( a ) );
+        }
+        return {
+            id          : arguments.rule.getId(),
+            name        : arguments.rule.getName() ?: "",
+            description : arguments.rule.getDescription() ?: "",
+            trigger     : arguments.rule.getTrigger() ?: "",
+            precedence  : val( arguments.rule.getPrecedence() ?: 0 ),
+            isActive    : !!arguments.rule.getIsActive(),
+            conditions  : conditions,
+            actions     : normalizedActions
+        };
+    }
+
+    /**
+     * Build the data struct AutomationService.createRule / updateRule
+     * expects from the request collection. The JS row-builder posts
+     * the conditions and actions as JSON-encoded hidden fields named
+     * `conditionsJson` and `actionsJson`; the rest of the rule lives
+     * on plain inputs.
+     */
+    private struct function parseRuleForm( required struct rc ){
+        var conditions = [];
+        var actionsArr = [];
+        if ( len( arguments.rc.conditionsJson ?: "" ) ) {
+            try {
+                var parsed = jsonDeserialize( arguments.rc.conditionsJson );
+                if ( isArray( parsed ) ) conditions = parsed;
+            } catch ( any e ) {
+                throw( type = "Rules.MalformedConditions", message = "Conditions JSON could not be parsed." );
+            }
+        }
+        if ( len( arguments.rc.actionsJson ?: "" ) ) {
+            try {
+                var parsedA = jsonDeserialize( arguments.rc.actionsJson );
+                if ( isArray( parsedA ) ) actionsArr = parsedA;
+            } catch ( any e ) {
+                throw( type = "Rules.MalformedActions", message = "Actions JSON could not be parsed." );
+            }
+        }
+        return {
+            name        : arguments.rc.name ?: "",
+            description : arguments.rc.description ?: "",
+            trigger     : arguments.rc.trigger ?: "",
+            precedence  : val( arguments.rc.precedence ?: 0 ),
+            isActive    : structKeyExists( arguments.rc, "isActive" ) && len( arguments.rc.isActive ) > 0,
+            conditions  : conditions,
+            actions     : actionsArr
+        };
+    }
+
+    /**
+     * id-keyed map of trigger label/description, for the index view
+     * to render a friendly trigger name without iterating the array
+     * on every row.
+     */
+    private struct function triggerIndex(){
+        var out = {};
+        for ( var t in triggers.listAll() ) out[ t.id ] = t;
+        return out;
+    }
+
+}

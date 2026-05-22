@@ -1,0 +1,77 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h5 mb-0">Automation rules</h2>
+        <p class="text-body-secondary small mb-0">
+            Trigger / condition / action rules that fire automatically. Higher precedence runs first; ties run by name.
+        </p>
+    </div>
+    <a class="btn btn-primary btn-sm" href="/agent/admin/rules/new"><i class="bi bi-plus-lg"></i> New rule</a>
+</div>
+
+<div class="card">
+    <div class="card-header"><strong>Rules</strong></div>
+    <div class="card-body p-0">
+        <bx:if !prc.rules.len()>
+            <div class="p-3 text-body-secondary">No rules yet. Click <em>New rule</em> to add one.</div>
+        <bx:else>
+            <table class="table table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Trigger</th>
+                        <th class="text-center">Precedence</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:loop array="#prc.rules#" item="r">
+                        <bx:set ruleId        = r.getId()>
+                        <bx:set ruleName      = r.getName() ?: "">
+                        <bx:set ruleTrigger   = r.getTrigger() ?: "">
+                        <bx:set ruleIsActive  = !!r.getIsActive()>
+                        <bx:set rulePrecedence = val( r.getPrecedence() ?: 0 )>
+                        <bx:set triggerLabel  = ruleTrigger>
+                        <bx:if structKeyExists( prc.triggerIndex, ruleTrigger )>
+                            <bx:set triggerLabel = prc.triggerIndex[ ruleTrigger ].label>
+                        </bx:if>
+                        <tr>
+                            <td>
+                                <a href="/agent/admin/rules/#encodeForHTMLAttribute( ruleId )#">#encodeForHTML( ruleName )#</a>
+                                <bx:if len( r.getDescription() ?: "" )>
+                                    <div class="text-body-secondary small">#encodeForHTML( r.getDescription() )#</div>
+                                </bx:if>
+                            </td>
+                            <td><code>#encodeForHTML( ruleTrigger )#</code> <span class="text-body-secondary small">#encodeForHTML( triggerLabel )#</span></td>
+                            <td class="text-center">#rulePrecedence#</td>
+                            <td>
+                                <bx:if ruleIsActive>
+                                    <span class="badge text-bg-success">Active</span>
+                                <bx:else>
+                                    <span class="badge text-bg-light text-black">Inactive</span>
+                                </bx:if>
+                            </td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-outline-primary" href="/agent/admin/rules/#encodeForHTMLAttribute( ruleId )#">Edit</a>
+                                <bx:if ruleIsActive>
+                                    <form method="post" action="/agent/admin/rules/#encodeForHTMLAttribute( ruleId )#/deactivate" class="d-inline ms-1">
+                                        <button class="btn btn-sm btn-outline-danger" type="submit">Deactivate</button>
+                                    </form>
+                                <bx:else>
+                                    <form method="post" action="/agent/admin/rules/#encodeForHTMLAttribute( ruleId )#/activate" class="d-inline ms-1">
+                                        <button class="btn btn-sm btn-outline-success" type="submit">Activate</button>
+                                    </form>
+                                </bx:if>
+                                <form method="post" action="/agent/admin/rules/#encodeForHTMLAttribute( ruleId )#/delete" class="d-inline ms-1" onsubmit="return confirm('Delete this rule and its fire history?');">
+                                    <button class="btn btn-sm btn-outline-secondary" type="submit">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

@@ -126,7 +126,7 @@ class singleton=true {
                 surface     : "agent",
                 permissions : [
                     "admin.access", "admin.users.manage", "admin.teams.manage",
-                    "admin.workflow.manage", "admin.settings.manage", "admin.audit.view",
+                    "admin.workflow.manage", "admin.automation.manage", "admin.settings.manage", "admin.audit.view",
                     "admin.addons.manage",
                     "tickets.view", "tickets.assign", "tickets.bulk",
                     "help.developer"

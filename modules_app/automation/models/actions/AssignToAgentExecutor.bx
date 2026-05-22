@@ -1,7 +1,10 @@
 /**
  * AssignToAgentExecutor: action executor for "assignToAgent".
  *
- * Action shape: { type : "assignToAgent", value : "<agent-uuid>" }
+ * Action shape: { type : "assignToAgent", params : { value : "<agent-uuid>" } }
+ *
+ * Reads `params.value`. AutomationService.normalizeAction maps the
+ * legacy `{ type, value }` shape into the new params struct.
  *
  * Delegates to TicketsService.assignToAgent for the full assignment
  * flow (audit + ticket event + announcement). Empty agent id means
@@ -12,7 +15,8 @@ class singleton=true {
     property name="ticketsService" inject="TicketsService@tickets";
 
     public struct function execute( required struct action, required any ticket, required any rule ){
-        var value = arguments.action.value ?: "";
+        var params = arguments.action.params ?: {};
+        var value  = params.value ?: "";
         ticketsService.assignToAgent( {
             ticketId  : arguments.ticket.getId(),
             agentId   : value,

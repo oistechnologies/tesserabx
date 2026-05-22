@@ -268,7 +268,38 @@ class singleton=true {
         // add-ons declare additional executors via the manifest's
         // settings.tesserabx.automationActions = [...]. The previous
         // switch-case has been removed.
-        return actionRegistry.dispatch( arguments.action, arguments.ticket, arguments.rule );
+        //
+        // Follow-up A4: action storage moved from { type, value } to
+        // { type, params : { ... } }. Legacy rows are normalized here
+        // so existing DB content and existing test fixtures keep
+        // working; executors read params.<name>.
+        return actionRegistry.dispatch( normalizeAction( arguments.action ), arguments.ticket, arguments.rule );
+    }
+
+    /**
+     * Coerce a stored action struct into the new
+     * `{ type, params : { ... } }` shape. Accepts:
+     *   - new shape (returned untouched)
+     *   - legacy `{ type, value }` (wraps value into params.value)
+     *   - legacy with extra top-level keys (each non-type key copied
+     *     into params unless params is already populated)
+     *
+     * Public so add-on executors that want to read raw actions can
+     * reuse the normalization rather than re-implementing it.
+     */
+    public struct function normalizeAction( required struct action ){
+        var out = { type : arguments.action.type ?: "" };
+        if ( structKeyExists( arguments.action, "params" ) && isStruct( arguments.action.params ) ) {
+            out.params = arguments.action.params;
+            return out;
+        }
+        var params = {};
+        for ( var key in arguments.action ) {
+            if ( key == "type" ) continue;
+            params[ key ] = arguments.action[ key ];
+        }
+        out.params = params;
+        return out;
     }
 
     // ---------------- Interceptor handlers ----------------

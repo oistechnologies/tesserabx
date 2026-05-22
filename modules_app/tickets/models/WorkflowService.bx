@@ -61,6 +61,21 @@ class singleton=true {
     }
 
     /**
+     * `{ value, label }` rows for every active status, in sort order.
+     * Used by any dropdown that needs a status picker (e.g. the
+     * automation rule editor's setStatus action). Inactive statuses
+     * are excluded so an admin can not pick a status the rule would
+     * later fail to transition to.
+     */
+    public array function listStatusOptions(){
+        var out = [];
+        for ( var s in listStatuses( activeOnly : true ) ) {
+            out.append( { value : s.key, label : s.label & " (" & s.key & ")" } );
+        }
+        return out;
+    }
+
+    /**
      * Just the keys, in sort order. The hot path for view code
      * that just needs the dropdown values.
      */

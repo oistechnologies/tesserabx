@@ -51,6 +51,22 @@ class singleton=true {
             .get();
     }
 
+    /**
+     * `{ value, label }` rows for every organization, sorted by name.
+     * Used by any dropdown that needs an organization picker (e.g. the
+     * automation rule editor's organizationId condition field).
+     */
+    public array function listOrganizationOptions(){
+        var rows = queryExecute(
+            "SELECT id, name FROM organizations ORDER BY name"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( { value : rows.id[ i ], label : rows.name[ i ] } );
+        }
+        return out;
+    }
+
     public any function createOrganization( required struct data ){
         var org = wirebox.getInstance( "Organization@contacts" );
         org.setId( newId() );

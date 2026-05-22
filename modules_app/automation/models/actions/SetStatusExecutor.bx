@@ -1,7 +1,10 @@
 /**
  * SetStatusExecutor: action executor for "setStatus".
  *
- * Action shape: { type : "setStatus", value : "<status-key>" }
+ * Action shape: { type : "setStatus", params : { value : "<status-key>" } }
+ *
+ * Reads `params.value`. AutomationService.normalizeAction maps the
+ * legacy `{ type, value }` shape into the new params struct.
  *
  * Delegates to TicketsService.changeStatus so the full status
  * transition (workflow validation, ticket events, announcements)
@@ -13,7 +16,8 @@ class singleton=true {
     property name="ticketsService" inject="TicketsService@tickets";
 
     public struct function execute( required struct action, required any ticket, required any rule ){
-        var value = arguments.action.value ?: "";
+        var params = arguments.action.params ?: {};
+        var value  = params.value ?: "";
         ticketsService.changeStatus( {
             ticketId  : arguments.ticket.getId(),
             status    : value,

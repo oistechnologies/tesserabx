@@ -26,20 +26,32 @@
  *
  * The parameter schema is a list of field descriptors. Each
  * descriptor has:
- *   - name        the rc key the form submits
- *   - label       human label
- *   - type        "string" | "select" | "boolean" | "textarea" | "number"
- *   - required    boolean (default false)
- *   - options     array<string>           (for type=select)
- *   - placeholder string                  (optional)
- *   - description string                  (optional)
+ *   - name            the rc key the form submits (becomes a key under params on disk)
+ *   - label           human label
+ *   - type            "string" | "select" | "boolean" | "textarea" | "number"
+ *   - required        boolean (default false)
+ *   - options         array<string|struct>    (for type=select; string =
+ *                     both value and label, or { value, label } for distinct)
+ *   - optionsProvider string                  (for type=select; a
+ *                     "MappingName@module.methodName" reference that
+ *                     resolves at editor-render time to options. Use
+ *                     this when the option list is dynamic, e.g. the
+ *                     current agent roster or the workflow status keys.)
+ *   - allowEmpty      boolean                  (for type=select; prepend
+ *                     a blank "" option labelled "emptyLabel" or "--")
+ *   - emptyLabel      string                  (label for the blank option)
+ *   - placeholder     string                  (optional)
+ *   - description     string                  (optional)
  *
- * Storage note: rules persist a single `value` per action. The plan
- * envisions schemas with multiple fields (Slack: channel + message);
- * those land as the rule editor migrates from `{ type, value }` to
- * `{ type, params : { ... } }`. Until then add-on schemas should
- * stick to a single `name : "value"` descriptor so they round-trip
- * through the existing storage.
+ * Storage shape: rules persist actions as
+ * `[ { type : "...", params : { ... } } ]`. `params` is a flat struct
+ * keyed by the parameter schema's `name` values. Multiple fields are
+ * fully supported (Slack: channel + message lands as
+ * `{ type : "slack.postToChannel", params : { channel : "##incidents",
+ * message : "..." } }`). The legacy `{ type, value }` shape that
+ * predates the admin editor is normalized into the new shape by
+ * `AutomationService.normalizeAction` on read, so add-on executors
+ * only need to read `arguments.action.params.<name>`.
  */
 class singleton=true {
 
@@ -133,16 +145,32 @@ class singleton=true {
                 description     : "Transition the ticket to a new status (workflow validation still applies).",
                 executor        : "SetStatusExecutor@automation",
                 parameterSchema : [
-                    { name : "value", label : "Status key", type : "string", required : true, description : "Must be a status key from the workflow editor (e.g., 'open', 'closed')." }
+                    {
+                        name            : "value",
+                        label           : "Status",
+                        type            : "select",
+                        required        : true,
+                        optionsProvider : "WorkflowService@tickets.listStatusOptions",
+                        description     : "Picked from the active statuses defined in the workflow editor."
+                    }
                 ]
             },
             {
                 id              : "assignToAgent",
                 label           : "Assign to specific agent",
-                description     : "Assign the ticket to a known agent id. Empty value unassigns.",
+                description     : "Assign the ticket to a known agent. Empty selection unassigns.",
                 executor        : "AssignToAgentExecutor@automation",
                 parameterSchema : [
-                    { name : "value", label : "Agent id", type : "string", required : false, description : "UUID of the agent. Empty unassigns." }
+                    {
+                        name            : "value",
+                        label           : "Agent",
+                        type            : "select",
+                        required        : false,
+                        allowEmpty      : true,
+                        emptyLabel      : "Unassigned",
+                        optionsProvider : "AgentService@agent.listAssignableAgentOptions",
+                        description     : "Pick an active agent. Empty unassigns the ticket."
+                    }
                 ]
             },
             {

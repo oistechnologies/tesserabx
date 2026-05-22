@@ -268,6 +268,31 @@ class singleton=true {
     }
 
     /**
+     * `{ value, label }` rows for every active agent, sorted by
+     * display label. Used by any dropdown that needs an agent picker
+     * (e.g. the automation rule editor's assignToAgent action).
+     * Labels are "First Last <email>" with fallbacks so an agent who
+     * has not filled in their name still renders something useful.
+     */
+    public array function listAssignableAgentOptions(){
+        var rows = queryExecute(
+            "SELECT id, email, first_name, last_name
+             FROM   agents
+             WHERE  is_active = true
+             ORDER BY first_name NULLS LAST, last_name NULLS LAST, email"
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var first = rows.first_name[ i ] ?: "";
+            var last  = rows.last_name[ i ]  ?: "";
+            var name  = trim( first & " " & last );
+            var label = len( name ) ? ( name & " <" & rows.email[ i ] & ">" ) : rows.email[ i ];
+            out.append( { value : rows.id[ i ], label : label } );
+        }
+        return out;
+    }
+
+    /**
      * Distinct non-null departments currently in use. Powers the
      * admin list's Department filter dropdown.
      */

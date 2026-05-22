@@ -1,7 +1,11 @@
 /**
  * SetPriorityExecutor: action executor for "setPriority".
  *
- * Action shape: { type : "setPriority", value : "<priority-key>" }
+ * Action shape: { type : "setPriority", params : { value : "<priority-key>" } }
+ *
+ * Reads `params.value`. AutomationService.normalizeAction maps the
+ * legacy `{ type, value }` shape into the new params struct so this
+ * executor never sees the old layout.
  *
  * Sets the ticket's priority column directly and saves. Does NOT
  * go through TicketsService.assignToAgent / changeStatus because
@@ -11,7 +15,8 @@
 class singleton=true {
 
     public struct function execute( required struct action, required any ticket, required any rule ){
-        var value = arguments.action.value ?: "";
+        var params = arguments.action.params ?: {};
+        var value  = params.value ?: "";
         arguments.ticket.setPriority( value );
         arguments.ticket.save();
         return { type : arguments.action.type, value : value };
