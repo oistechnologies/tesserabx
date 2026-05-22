@@ -191,6 +191,30 @@
     </div>
 </div>
 
+<!--
+    Add-on dashboard widgets. Renders every widget an add-on
+    contributed via settings.tesserabx.dashboardWidgets that the
+    current viewer is allowed to see. Widgets render after the core
+    inline tiles + charts above. The registry resolves each widget's
+    dataProvider/dataMethod and passes the result through prc.widgetData
+    so the partial can render data without doing its own queries.
+-->
+<bx:set local.addonWidgets = tbxDashboardWidgets() >
+<bx:if arrayLen( local.addonWidgets )>
+    <div class="row g-3 mt-3">
+        <bx:loop array="#local.addonWidgets#" item="local.w">
+            <bx:if len( local.w.partial )>
+                <bx:set prc.widgetData = application.wirebox
+                    .getInstance( "DashboardWidgetRegistry@reporting" )
+                    .fetchWidgetData( local.w ) >
+                <div class="#encodeForHTMLAttribute( local.w.defaultGridSize )# d-flex">
+                    #view( view = local.w.partial, module = local.w.module )#
+                </div>
+            </bx:if>
+        </bx:loop>
+    </div>
+</bx:if>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function(){

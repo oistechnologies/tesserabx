@@ -818,6 +818,21 @@
             </div>
         </div>
 
+        <!--
+            Add-on right-column panels. Renders every panel an add-on
+            contributed via settings.tesserabx.ticketPanels with
+            position="right" that the current viewer is allowed to
+            see. Panels render after the core inline cards above.
+            The contributing module owns its view; we pass the ticket
+            and its custom fields through prc so the panel partial
+            can read them.
+        -->
+        <bx:loop array="#tbxTicketPanels( "right" )#" item="local.p">
+            <bx:if len( local.p.partial )>
+                #view( view = local.p.partial, module = local.p.module )#
+            </bx:if>
+        </bx:loop>
+
     </div>
 </div>
 </bx:output>

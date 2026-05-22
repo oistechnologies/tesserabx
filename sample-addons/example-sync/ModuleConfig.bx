@@ -104,7 +104,11 @@ class {
                     { id : "exampleSync.connection", title : "Example Sync connection", description : "Configure the connection to the external system.", route : "/example-sync/admin", icon : "bi bi-arrow-repeat", sortWeight : 620, requiredPermission : "exampleSync.manage" }
                 ],
                 ticketPanels : [
-                    { id : "exampleSync.linkedIssue", title : "External link", view : "panels/linked_issue", module : "example-sync", position : "right", sortWeight : 700, requiredPermission : "exampleSync.view", defaultCollapsed : true }
+                    // TicketPanelRegistry uses `partial:` (not `view:`)
+                    // for the module-relative view path, and `label:`
+                    // (not `title:`). Get the keys right or the entry
+                    // is silently dropped.
+                    { id : "exampleSync.linkedIssue", label : "External link", partial : "panels/linked_issue", module : "example-sync", position : "right", sortWeight : 700, requiredPermission : "exampleSync.view", defaultCollapsed : true }
                 ],
                 dashboardWidgets : [
                     { id : "exampleSync.syncStatus", title : "Example Sync status", partial : "widgets/sync_status", module : "example-sync", dataProvider : "SyncService@example-sync", dataMethod : "statusForDashboard", defaultGridSize : "col-12 col-md-6", sortWeight : 500, requiredPermission : "exampleSync.view" }
