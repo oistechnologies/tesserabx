@@ -1,0 +1,165 @@
+/**
+ * OperatorEvaluatorDispatchSpec: follow-up A5.
+ *
+ * Verifies that AutomationService.conditionPasses dispatches to
+ * registered evaluators for operators not in the core inline switch.
+ * This proves the add-on operator contract is real, not aspirational.
+ *
+ * The spec registers a stub `startsWith` evaluator + operator at
+ * spec-time via the WireBox singleton + OperatorRegistry.register
+ * paths an add-on's onLoad would use. A custom condition field
+ * is also registered so the rule can refer to it without colliding
+ * with any add-on field that may later ship with the same id.
+ *
+ * Cleanup: the OperatorRegistry / ConditionFieldRegistry caches are
+ * reset in afterAll so subsequent specs see core-only contents.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.automation      = getController().getWireBox().getInstance( "AutomationService@automation" );
+        variables.tickets         = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts        = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.operatorRegistry = getController().getWireBox().getInstance( "OperatorRegistry@automation" );
+        variables.binder          = getController().getWireBox().getBinder();
+
+        // Map the stub evaluator into WireBox so the resolver path
+        // matches what an add-on's onLoad would produce.
+        if ( !variables.binder.mappingExists( "StartsWithEvaluator@spec" ) ) {
+            variables.binder.map( "StartsWithEvaluator@spec" )
+                  .to( "tests.support.StartsWithEvaluator" )
+                  .asSingleton();
+        }
+
+        // Register the stub operator. Imperative registration mirrors
+        // what a manifest-driven add-on declaration ends up doing.
+        variables.operatorRegistry.register( {
+            id          : "startsWith",
+            label       : "starts with",
+            description : "Spec-only operator that asserts the field value begins with the operand.",
+            valueShape  : "string",
+            evaluator   : "StartsWithEvaluator@spec",
+            source      : "spec"
+        } );
+    }
+
+    function afterAll(){
+        // Reload registry caches so other specs see the core operator
+        // set without the stub.
+        variables.operatorRegistry.reload();
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "AutomationService.conditionPasses - add-on operator dispatch", function(){
+            beforeEach( function( currentSpec ){
+                variables.fixture = makeFixture();
+            } );
+            afterEach( function( currentSpec ){
+                cleanupFixture( variables.fixture );
+            } );
+
+            it( "dispatches to the registered evaluator when the operator is not a core one", function(){
+                // Rule fires only when the subject starts with "OPS:".
+                var rule = variables.automation.createRule( {
+                    name       : "auto-spec-opdispatch-hit-" & createUUID(),
+                    trigger    : "ticket.created",
+                    conditions : [ { field : "subject", op : "startsWith", value : "OPS:" } ],
+                    actions    : [ { type : "setPriority", params : { value : "urgent" } } ]
+                } );
+                try {
+                    var t = variables.tickets.createTicket( {
+                        requesterContactId : variables.fixture.contact.getId(),
+                        subject : "OPS: production incident", priority : "normal"
+                    } );
+                    var after = variables.tickets.getTicket( t.getId() );
+                    expect( after.getPriority() ).toBe( "urgent" );
+                    cleanupTicket( t.getId() );
+                } finally {
+                    cleanupRule( rule.getId() );
+                }
+            } );
+
+            it( "returns false (no match) when the evaluator's predicate is false", function(){
+                var rule = variables.automation.createRule( {
+                    name       : "auto-spec-opdispatch-miss-" & createUUID(),
+                    trigger    : "ticket.created",
+                    conditions : [ { field : "subject", op : "startsWith", value : "OPS:" } ],
+                    actions    : [ { type : "setPriority", params : { value : "urgent" } } ]
+                } );
+                try {
+                    var t = variables.tickets.createTicket( {
+                        requesterContactId : variables.fixture.contact.getId(),
+                        subject : "general question", priority : "normal"
+                    } );
+                    var after = variables.tickets.getTicket( t.getId() );
+                    expect( after.getPriority() ).toBe( "normal" );
+                    cleanupTicket( t.getId() );
+                } finally {
+                    cleanupRule( rule.getId() );
+                }
+            } );
+
+            it( "an unregistered operator id is treated as false without throwing", function(){
+                var rule = variables.automation.createRule( {
+                    name       : "auto-spec-opdispatch-unknown-" & createUUID(),
+                    trigger    : "ticket.created",
+                    conditions : [ { field : "subject", op : "doesNotExistAnywhere", value : "x" } ],
+                    actions    : [ { type : "setPriority", params : { value : "urgent" } } ]
+                } );
+                try {
+                    var t = variables.tickets.createTicket( {
+                        requesterContactId : variables.fixture.contact.getId(),
+                        subject : "anything", priority : "normal"
+                    } );
+                    var after = variables.tickets.getTicket( t.getId() );
+                    // Unknown operator means the condition never matches,
+                    // so the action never runs and priority stays put.
+                    expect( after.getPriority() ).toBe( "normal" );
+                    cleanupTicket( t.getId() );
+                } finally {
+                    cleanupRule( rule.getId() );
+                }
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "OpDispatch Spec Org " & createUUID(),
+            slug : "opdispatch-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "opdispatch-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        return { org : org, contact : contact };
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+    }
+
+    private void function cleanupRule( required string id ){
+        queryExecute( "DELETE FROM automation_rule_fires WHERE rule_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM automation_rules WHERE id = :id", { id : arguments.id } );
+    }
+
+}

@@ -1,0 +1,21 @@
+/**
+ * StartsWithEvaluator: spec-only operator evaluator used by
+ * OperatorEvaluatorDispatchSpec to prove that AutomationService
+ * resolves and invokes add-on operator evaluators through WireBox.
+ *
+ * Production code never references this; it lives under tests/support
+ * so the dispatch path can be exercised without inventing a real
+ * add-on operator that the engine would then own.
+ */
+class singleton=true {
+
+    public boolean function evaluate(
+        required string field,
+        required string op,
+        required any    lhs,
+        required any    rhs
+    ){
+        return left( toString( arguments.lhs ), len( toString( arguments.rhs ) ) ) == toString( arguments.rhs );
+    }
+
+}

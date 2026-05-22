@@ -207,7 +207,41 @@ class singleton=true {
             case "gte":          return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) >= val( want ) );
             case "lt":           return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) <  val( want ) );
             case "lte":          return ( isNumeric( actual ) && isNumeric( want ) && val( actual ) <= val( want ) );
-            default: return false;
+        }
+        // Follow-up A5: not a core operator. Look up the entry in the
+        // registry and dispatch to its registered evaluator. Add-ons
+        // register operators via settings.tesserabx.automationOperators
+        // declaring an `evaluator` WireBox mapping; the mapped
+        // singleton implements `evaluate( field, op, lhs, rhs )` and
+        // returns boolean. An unknown operator id, or a known operator
+        // with no evaluator, returns false (matches the prior default
+        // behavior) but also logs once so silent mis-registrations
+        // surface in operator logs.
+        return dispatchAddonOperator( op, field, actual, want );
+    }
+
+    private boolean function dispatchAddonOperator(
+        required string op,
+        required string field,
+        required any    actual,
+        required any    want
+    ){
+        var entry = operatorRegistry.findById( arguments.op );
+        if ( isNull( entry ) ) {
+            writeLog( file = "Automation", text = "Unknown operator [#arguments.op#]; condition treated as false.", type = "warning" );
+            return false;
+        }
+        if ( !len( entry.evaluator ?: "" ) ) {
+            writeLog( file = "Automation", text = "Operator [#arguments.op#] is registered but has no evaluator mapping; condition treated as false.", type = "warning" );
+            return false;
+        }
+        try {
+            var evaluator = wirebox.getInstance( entry.evaluator );
+            var result = evaluator.evaluate( arguments.field, arguments.op, arguments.actual, arguments.want );
+            return !!result;
+        } catch ( any e ) {
+            writeLog( file = "Automation", text = "Operator [#arguments.op#] evaluator [#entry.evaluator#] threw: #e.message#", type = "error" );
+            return false;
         }
     }
 

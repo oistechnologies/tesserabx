@@ -1,0 +1,64 @@
+/**
+ * IOperatorEvaluator: documented contract for add-on automation
+ * operators.
+ *
+ * The 12 core operators (eq / neq / contains / notContains / in /
+ * notIn / isEmpty / isNotEmpty / gt / gte / lt / lte) are inlined in
+ * AutomationService.conditionPasses for speed. Anything beyond that
+ * is dispatched through this contract: the OperatorRegistry entry
+ * declares an `evaluator` WireBox mapping name, AutomationService
+ * resolves that mapping at evaluation time and calls evaluate().
+ *
+ * Add-on registration:
+ *
+ *   settings.tesserabx.automationOperators = [
+ *       {
+ *           id          : "matchesRegex",
+ *           label       : "matches regex",
+ *           description : "RHS is treated as a regular expression matched against the field's string value.",
+ *           valueShape  : "string",
+ *           evaluator   : "RegexOperatorEvaluator@compliance"
+ *       }
+ *   ];
+ *
+ * The evaluator class must expose a public `evaluate` function with
+ * the signature documented below. WireBox singletons are the standard
+ * shape; nothing prevents transient evaluators but they will be
+ * instantiated on every condition check.
+ *
+ * Failure modes:
+ *   - A registered operator with no evaluator mapping: the condition
+ *     resolves to false; AutomationService logs a warning.
+ *   - An evaluator that throws: the condition resolves to false;
+ *     AutomationService logs an error with the exception message.
+ * Both modes are silent at the rule level so a broken add-on
+ * operator cannot crash the engine, but they surface in the
+ * Automation log file (see CommandBox / docker compose logs).
+ *
+ * --- Method contract ---
+ */
+class {
+
+    /**
+     * Evaluate a condition.
+     *
+     *   field   : the condition's field id (e.g. "subject")
+     *   op      : the operator id (e.g. "matchesRegex")
+     *   lhs     : the value AutomationService.readField returned for
+     *             that field on the ticket being evaluated
+     *   rhs     : the operand the rule stored alongside the field/op
+     *             pair (the `value` key from the condition struct)
+     *
+     * Return a boolean. Anything truthy / falsy is accepted; the
+     * service coerces with `!!`.
+     */
+    public boolean function evaluate(
+        required string field,
+        required string op,
+        required any    lhs,
+        required any    rhs
+    ){
+        throw( type = "ContractClass.NotImplemented", message = "IOperatorEvaluator is a contract; resolve the concrete evaluator via WireBox" );
+    }
+
+}
