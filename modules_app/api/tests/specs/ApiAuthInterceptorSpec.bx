@@ -1,0 +1,132 @@
+/**
+ * ApiAuthInterceptorSpec: follow-up A9.
+ *
+ * Verifies the blanket /api/v1/* JWT enforcement. Like ApiAuthSpec,
+ * this spec stays out of ColdBox's execute() helper to avoid the
+ * cross-bundle routing-state pollution documented there. Instead we
+ * call preProcess directly on the interceptor with a stub event and
+ * assert the side effects (renderData status code + noExecution
+ * flag).
+ *
+ * The JwtService dependency is replaced with a stub that the spec
+ * configures per-test to simulate missing-token, invalid-token, and
+ * valid-token paths.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        // Interceptors registered via variables.interceptors in
+        // ModuleConfig are owned by the interceptor service and do
+        // not necessarily have a WireBox mapping. Instantiate the
+        // class directly and inject the jwtService by hand, then
+        // call configure() so the interceptor is fully initialized.
+        variables.interceptor = new tesserabx.modules.api.interceptors.ApiAuthInterceptor();
+        variables.interceptor.setJwtService( getController().getWireBox().getInstance( "JwtService@cbsecurity" ) );
+        variables.interceptor.configure();
+    }
+
+    function run(){
+        describe( "ApiAuthInterceptor", function(){
+
+            it( "lets non-API requests pass through without touching the JWT service", function(){
+                var ev = stubEvent( "agent/tickets" );
+                useStubJwt( "throw" );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+                expect( ev.state.rendered ).toBeFalse();
+            } );
+
+            it( "lets /api/v1/auth/login through unauthenticated (whitelisted)", function(){
+                var ev = stubEvent( "api/v1/auth/login" );
+                useStubJwt( "throw" );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+                expect( ev.state.rendered ).toBeFalse();
+            } );
+
+            it( "lets /api/v1/auth/refresh through unauthenticated (whitelisted)", function(){
+                var ev = stubEvent( "api/v1/auth/refresh" );
+                useStubJwt( "throw" );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+            } );
+
+            it( "lets /api/swagger through unauthenticated (whitelisted)", function(){
+                var ev = stubEvent( "api/swagger" );
+                useStubJwt( "throw" );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+            } );
+
+            it( "rejects /api/v1/tickets with 401 when the JWT service throws (no/invalid token)", function(){
+                var ev = stubEvent( "api/v1/tickets" );
+                useStubJwt( "throw" );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeFalse();
+                expect( ev.state.rendered ).toBeTrue();
+                expect( ev.state.statusCode ).toBe( 401 );
+                expect( ev.state.data.error ?: "" ).toInclude( "Token" );
+            } );
+
+            it( "rejects /api/v1/tickets with 403 when token lacks the agent scope", function(){
+                var ev = stubEvent( "api/v1/tickets" );
+                useStubJwt( "payload", { scope : "contact" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeFalse();
+                expect( ev.state.rendered ).toBeTrue();
+                expect( ev.state.statusCode ).toBe( 403 );
+            } );
+
+            it( "allows /api/v1/tickets when token carries the agent scope", function(){
+                var ev = stubEvent( "api/v1/tickets" );
+                useStubJwt( "payload", { scope : "agent" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+                expect( ev.state.rendered ).toBeFalse();
+            } );
+
+            it( "allows a deep add-on path /api/v1/example-sync/whatever when token is valid", function(){
+                var ev = stubEvent( "api/v1/example-sync/whatever/deep" );
+                useStubJwt( "payload", { scope : "agent" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+            } );
+
+            it( "rejects a deep add-on path /api/v1/example-sync/whatever when no token", function(){
+                var ev = stubEvent( "api/v1/example-sync/whatever/deep" );
+                useStubJwt( "throw" );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeFalse();
+                expect( ev.state.statusCode ).toBe( 401 );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    /**
+     * Build a stub event class that captures renderData + noExecution
+     * side effects. BoxLang does not invoke struct-key closures via
+     * method syntax, so the stub must be a real class with real
+     * methods.
+     */
+    private any function stubEvent( required string routedUrl ){
+        return new tests.support.StubRequestContext( arguments.routedUrl );
+    }
+
+    /**
+     * Swap the interceptor's JwtService for the lifetime of the next
+     * preProcess call. Two modes:
+     *   - "throw"   : getPayload() raises like cbsecurity does for
+     *                 missing/invalid tokens
+     *   - "payload" : getPayload() returns the provided struct
+     */
+    private void function useStubJwt( required string behaviour, struct payload = {} ){
+        var stub = new tests.support.StubJwtService( arguments.behaviour, arguments.payload );
+        variables.interceptor.setJwtService( stub );
+    }
+
+}

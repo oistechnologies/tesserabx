@@ -1,0 +1,29 @@
+/**
+ * StubJwtService: minimal stand-in for cbsecurity's JwtService used
+ * by ApiAuthInterceptorSpec to simulate missing-token / invalid-token
+ * / valid-token paths without driving real JWT cryptography.
+ *
+ * `behaviour`:
+ *   - "throw"   : getPayload() raises a TokenNotFoundException like
+ *                 the real service does when no bearer is present
+ *   - "payload" : getPayload() returns the provided struct
+ */
+class accessors=true {
+
+    property name="behaviour";
+    property name="payload";
+
+    function init( required string behaviour, struct payload = {} ){
+        variables.behaviour = arguments.behaviour;
+        variables.payload   = arguments.payload;
+        return this;
+    }
+
+    public any function getPayload(){
+        if ( variables.behaviour == "throw" ) {
+            throw( type = "TokenNotFoundException", message = "Token not found in authorization header" );
+        }
+        return variables.payload;
+    }
+
+}

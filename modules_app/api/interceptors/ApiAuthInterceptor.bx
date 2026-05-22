@@ -1,0 +1,102 @@
+/**
+ * ApiAuthInterceptor: blanket JWT enforcement on /api/v1/* (follow-up
+ * A9).
+ *
+ * Every API request lands here in preProcess BEFORE handler dispatch.
+ * The interceptor:
+ *   - skips non-API requests entirely (no overhead),
+ *   - lets the documented whitelist (login, refresh, swagger) through
+ *     unauthenticated,
+ *   - parses the bearer JWT through cbSecurity's JwtService and
+ *     rejects with 401 if missing / invalid / expired,
+ *   - asserts the token carries the "agent" scope and rejects with
+ *     403 otherwise,
+ *   - calls event.noExecution() on rejection so the handler never
+ *     runs.
+ *
+ * Why this exists:
+ *   ApiResourceRegistry is metadata-only; `requiresAuth : true` on an
+ *   entry is descriptive (used by cbswagger and admin diagnostics).
+ *   Without a centralized check an add-on that ships an API handler
+ *   has to know about the per-action `ensureAgent()` convention or
+ *   its endpoint is anonymously accessible. This interceptor closes
+ *   that gap: an add-on can register a resource under /api/v1/<slug>
+ *   and inherit JWT + agent-scope protection automatically.
+ *
+ * Backwards compatibility:
+ *   Existing core handlers (Tickets, Auth, Swagger) keep their inline
+ *   ensureAgent() guards as defense in depth. The double-check is
+ *   cheap because the JWT is already parsed by the time the handler
+ *   runs.
+ *
+ * What this does NOT do:
+ *   Per-permission gating from JWT claims. Today's tokens carry roles
+ *   in `scope` (e.g. "agent"), not permissions. The registry entry's
+ *   `requiredPermission` field stays descriptive until tokens include
+ *   permission claims (separate refactor).
+ */
+class accessors=true {
+
+    property name="jwtService" inject="JwtService@cbsecurity";
+
+    // Paths under /api that may be reached without a bearer token.
+    // The leading "api/" prefix matches event.getCurrentRoutedURL()'s
+    // shape (no leading slash, no trailing slash unless path is "/").
+    variables.WHITELIST = [
+        "api/v1/auth/login",
+        "api/v1/auth/refresh",
+        "api/swagger"
+    ];
+
+    function configure(){}
+
+    /**
+     * Fires before every event. We narrow to /api/v1/* requests inside
+     * the function so non-API traffic pays no cost beyond the prefix
+     * check.
+     */
+    function preProcess( event, interceptData, rc, prc ){
+        // NOTE: `url` is a reserved BoxLang scope name (the query-string
+        // struct). A local named `url` silently resolves to the scope
+        // on later references, breaking string operations. Use
+        // `routedPath` instead. See user CLAUDE.md gotcha log.
+        var routedPath = lcase( arguments.event.getCurrentRoutedURL() );
+        if ( !len( routedPath ) || left( routedPath, 7 ) != "api/v1/" ) {
+            // Also let /api/swagger through without checking; everything
+            // else under /api/* that isn't /api/v1/* is unmatched today
+            // and reaches ColdBox's 404 naturally.
+            return;
+        }
+        for ( var allowed in variables.WHITELIST ) {
+            if ( routedPath == allowed ) return;
+            if ( left( routedPath, len( allowed ) + 1 ) == allowed & "/" ) return;
+        }
+
+        var payload = "";
+        try {
+            payload = jwtService.getPayload();
+        } catch ( any e ) {
+            arguments.event.renderData(
+                type       = "json",
+                statusCode = 401,
+                data       = { error : ( e.type ?: "TokenError" ) & ": " & ( e.message ?: "missing or invalid bearer token" ) }
+            );
+            arguments.event.noExecution();
+            return;
+        }
+
+        if ( !len( payload.scope ?: "" ) || !listFindNoCase( payload.scope ?: "", "agent", " " ) ) {
+            arguments.event.renderData(
+                type       = "json",
+                statusCode = 403,
+                data       = { error : "Token does not carry the agent role." }
+            );
+            arguments.event.noExecution();
+            return;
+        }
+
+        // Token is valid and carries the agent role. The handler still
+        // runs its own ensureAgent() guard for defense in depth.
+    }
+
+}

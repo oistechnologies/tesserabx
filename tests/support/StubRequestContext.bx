@@ -1,0 +1,40 @@
+/**
+ * StubRequestContext: a minimal stand-in for ColdBox's RequestContext
+ * used by ApiAuthInterceptorSpec to drive the preProcess code path
+ * without dragging in the full event lifecycle.
+ *
+ * Captures noExecution + renderData into `state` so the spec can
+ * assert outcomes.
+ */
+class accessors=true {
+
+    property name="url";
+    property name="state";
+
+    function init( required string url ){
+        variables.url   = arguments.url;
+        variables.state = { executed : true, rendered : false, statusCode : 0, data : {} };
+        return this;
+    }
+
+    public string function getCurrentRoutedURL(){
+        return variables.url;
+    }
+
+    public any function noExecution(){
+        variables.state.executed = false;
+        return this;
+    }
+
+    public any function renderData(
+        string type       = "html",
+        numeric statusCode = 200,
+        any    data       = {}
+    ){
+        variables.state.rendered   = true;
+        variables.state.statusCode = arguments.statusCode;
+        variables.state.data       = arguments.data;
+        return this;
+    }
+
+}

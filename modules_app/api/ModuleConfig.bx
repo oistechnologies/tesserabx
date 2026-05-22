@@ -30,6 +30,15 @@ class {
         ];
         variables.interceptorSettings = { customInterceptionPoints : [] };
         variables.interceptors = [
+            // Follow-up A9: blanket JWT + agent-scope enforcement on
+            // every /api/v1/* request. Registered FIRST so the
+            // rejection happens before any other api-side interceptor
+            // (and certainly before handler dispatch).
+            {
+                class      : "#moduleMapping#.interceptors.ApiAuthInterceptor",
+                name       : "ApiAuthInterceptor",
+                properties : {}
+            },
             {
                 class      : "#moduleMapping#.interceptors.WebhookDispatchInterceptor",
                 name       : "WebhookDispatchInterceptor",
