@@ -1,0 +1,137 @@
+/**
+ * HelpRenderCacheSpec: follow-up A10.
+ *
+ * Verifies that HelpRenderCache:
+ *   1. Renders a page's markdown source to HTML on first access.
+ *   2. Returns the cached HTML on subsequent access (hits counter
+ *      moves; misses does not).
+ *   3. Re-renders when the source file's mtime changes (file edit
+ *      transparently invalidates the entry).
+ *   4. Returns an empty string for pages with no source AND does
+ *      not populate the cache.
+ *   5. invalidate() drops all entries and increments the
+ *      invalidations counter.
+ *   6. invalidatePage() drops one entry and leaves others.
+ *
+ * Fixtures live under a per-spec temp directory so concurrent runs
+ * cannot stomp each other.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.cache = getController().getWireBox().getInstance( "HelpRenderCache@help" );
+        // The cache resolves a page's module path through the
+        // coldbox modules struct. We need a real module path so the
+        // file resolution works; the `help` module's own path is
+        // perfect (and stable).
+        variables.modulePath = getController().getSetting( "modules" )[ "help" ].path;
+    }
+
+    function run(){
+        describe( "HelpRenderCache", function(){
+
+            beforeEach( function( currentSpec ){
+                variables.cache.invalidate();
+                variables.fixturePath = setupFixture();
+            } );
+
+            afterEach( function( currentSpec ){
+                if ( fileExists( variables.fixturePath ) ) fileDelete( variables.fixturePath );
+            } );
+
+            it( "renders markdown to HTML on first access", function(){
+                var page = pageStruct( "spec.cache.first" );
+                var html = variables.cache.render( page );
+                expect( html ).toInclude( "Hello" );
+                // Some kind of HTML wrapping should have happened
+                // (paragraph or heading tag).
+                expect( html ).toMatch( "<[a-zA-Z]" );
+            } );
+
+            it( "returns from cache on a second call without re-parsing", function(){
+                var page = pageStruct( "spec.cache.hit" );
+                variables.cache.render( page );    // miss
+                var baseline = variables.cache.stats();
+                variables.cache.render( page );    // expect hit
+                var after = variables.cache.stats();
+                expect( after.hits ).toBe( baseline.hits + 1 );
+                expect( after.misses ).toBe( baseline.misses );
+            } );
+
+            it( "re-renders when the source file's mtime changes", function(){
+                var page = pageStruct( "spec.cache.touch" );
+                variables.cache.render( page );    // miss
+                var baseline = variables.cache.stats();
+                // Sleep one second so the filesystem-level mtime
+                // resolution can distinguish the rewrite. Most
+                // filesystems carry second-level granularity.
+                sleep( 1100 );
+                fileWrite( variables.fixturePath, "## Updated content" & char( 10 ) & "Fresh body." );
+                variables.cache.render( page );    // expect miss again
+                var after = variables.cache.stats();
+                expect( after.misses ).toBe( baseline.misses + 1 );
+            } );
+
+            it( "returns empty string for a page with no source AND does not cache", function(){
+                var page = { id : "spec.cache.empty", module : "help", source : "" };
+                var html = variables.cache.render( page );
+                expect( html ).toBe( "" );
+                expect( variables.cache.stats().entries ).toBe( 0 );
+            } );
+
+            it( "returns empty string for a page whose source file does not exist", function(){
+                var page = { id : "spec.cache.missing", module : "help", source : "resources/help/__nope__" & createUUID() & ".md" };
+                expect( variables.cache.render( page ) ).toBe( "" );
+            } );
+
+            it( "invalidate() clears every entry and bumps the counter", function(){
+                variables.cache.render( pageStruct( "spec.cache.inv-a" ) );
+                expect( variables.cache.stats().entries ).toBeGT( 0 );
+                var before = variables.cache.stats().invalidations;
+                variables.cache.invalidate();
+                var after = variables.cache.stats();
+                expect( after.entries ).toBe( 0 );
+                expect( after.invalidations ).toBe( before + 1 );
+            } );
+
+            it( "invalidatePage() drops one entry and leaves others", function(){
+                var a = pageStruct( "spec.cache.one" );
+                var b = pageStruct( "spec.cache.two" );
+                variables.cache.render( a );
+                variables.cache.render( b );
+                expect( variables.cache.stats().entries ).toBe( 2 );
+                variables.cache.invalidatePage( a.id );
+                expect( variables.cache.stats().entries ).toBe( 1 );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    /**
+     * Build a real fixture markdown file under the help module's
+     * resources/help directory so the cache's module-path resolver
+     * finds it the same way a real page would.
+     */
+    private string function setupFixture(){
+        var name = "spec_renderc_" & lcase( replace( createUUID(), "-", "", "all" ) ) & ".md";
+        var dir  = variables.modulePath & "/resources/help";
+        if ( !directoryExists( dir ) ) directoryCreate( dir, true );
+        var path = dir & "/" & name;
+        fileWrite( path, "## Hello" & char( 10 ) & "Spec body." );
+        variables.fixtureRelativeSource = "resources/help/" & name;
+        return path;
+    }
+
+    private struct function pageStruct( required string pageId ){
+        return {
+            id     : arguments.pageId,
+            module : "help",
+            source : variables.fixtureRelativeSource
+        };
+    }
+
+}

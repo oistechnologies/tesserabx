@@ -1,0 +1,118 @@
+/**
+ * HelpRenderCache: in-memory cache of rendered help-page HTML
+ * (follow-up A10).
+ *
+ * Help pages are markdown sources read from disk and converted on
+ * every request through BoxLang's markdown() BIF. The conversion is
+ * cheap individually but redundant for hot pages like the help
+ * landing and the EXTENSIONS overview chapter. This singleton caches
+ * the rendered HTML keyed by page id and invalidates per-page when
+ * the source file's mtime changes.
+ *
+ * Invalidation:
+ *   - The mtime stat is cheap (one syscall) and runs on every render
+ *     call. A file edit on disk transparently invalidates the entry.
+ *   - invalidate() drops everything; useful when the help-pages
+ *     registry reloads or for tests.
+ *   - invalidatePage(pageId) drops a single entry.
+ *
+ * What this is NOT:
+ *   - No TTL. The mtime check is the only invalidator; a stable
+ *     page lives forever.
+ *   - No size cap. Help pages are tiny strings; thousands fit
+ *     comfortably in heap.
+ *   - No cross-process invalidation. Each container has its own
+ *     cache; a deploy that touches files makes every container's
+ *     mtime check fire independently.
+ */
+class singleton=true {
+
+    property name="wirebox" inject="wirebox";
+
+    variables.entries = {};
+    // { hits, misses, invalidations }
+    variables.counters = { hits : 0, misses : 0, invalidations : 0 };
+
+    /**
+     * Resolve the rendered HTML for a page. Pages with empty / missing
+     * source bypass the cache and return an empty string so the
+     * handler can render its "no content" placeholder.
+     */
+    public string function render( required struct page ){
+        if ( !len( arguments.page.id ?: "" ) || !len( arguments.page.source ?: "" ) ) return "";
+        var sourcePath = resolveSourcePath( arguments.page );
+        if ( !len( sourcePath ) || !fileExists( sourcePath ) ) return "";
+        var currentMtime = getMtime( sourcePath );
+
+        if ( structKeyExists( variables.entries, arguments.page.id ) ) {
+            var existing = variables.entries[ arguments.page.id ];
+            if ( existing.fileMtime == currentMtime ) {
+                variables.counters.hits += 1;
+                return existing.html;
+            }
+        }
+
+        var body = "";
+        try {
+            body = fileRead( sourcePath );
+        } catch ( any e ) {
+            return "";
+        }
+        var html = markdown( body );
+        variables.entries[ arguments.page.id ] = {
+            fileMtime : currentMtime,
+            html      : html,
+            cachedAt  : now()
+        };
+        variables.counters.misses += 1;
+        return html;
+    }
+
+    public void function invalidate(){
+        variables.entries  = {};
+        variables.counters.invalidations += 1;
+    }
+
+    public void function invalidatePage( required string pageId ){
+        if ( structKeyExists( variables.entries, arguments.pageId ) ) {
+            structDelete( variables.entries, arguments.pageId );
+            variables.counters.invalidations += 1;
+        }
+    }
+
+    public struct function stats(){
+        return {
+            entries       : structCount( variables.entries ),
+            hits          : variables.counters.hits,
+            misses        : variables.counters.misses,
+            invalidations : variables.counters.invalidations
+        };
+    }
+
+    // ---------- internals ----------
+
+    private string function resolveSourcePath( required struct page ){
+        var modulePath = resolveModulePath( arguments.page.module ?: "" );
+        if ( !len( modulePath ) ) return "";
+        return modulePath & "/" & arguments.page.source;
+    }
+
+    private string function resolveModulePath( required string moduleName ){
+        if ( !len( arguments.moduleName ) ) return "";
+        var moduleConfig = wirebox.getInstance( "coldbox" ).getSetting( "modules" );
+        if ( structKeyExists( moduleConfig, arguments.moduleName ) ) {
+            return moduleConfig[ arguments.moduleName ].path ?: "";
+        }
+        return "";
+    }
+
+    private any function getMtime( required string path ){
+        try {
+            var info = getFileInfo( arguments.path );
+            return info.lastModified ?: "";
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+}

@@ -14,6 +14,7 @@ class {
     property name="sectionRegistry"   inject="HelpSectionRegistry@help";
     property name="audienceResolver"  inject="HelpAudienceResolver@help";
     property name="embeddingConsumer" inject="HelpEmbeddingConsumer@help";
+    property name="renderCache"       inject="HelpRenderCache@help";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         var viewer = tbxViewer();
@@ -41,8 +42,8 @@ class {
         }
 
         prc.pageTitle = prc.page.title;
-        var body      = embeddingConsumer.readPageBody( prc.page );
-        prc.bodyHtml  = len( body ) ? markdown( body ) : "<p class=""text-body-secondary"">(no content)</p>";
+        var rendered = renderCache.render( prc.page );
+        prc.bodyHtml = len( rendered ) ? rendered : "<p class=""text-body-secondary"">(no content)</p>";
         event.setView( "page/show" );
     }
 

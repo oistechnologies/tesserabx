@@ -133,6 +133,9 @@ class {
         binder.map( "HelpSearchService@help" )
               .to( "#moduleMapping#.models.HelpSearchService" )
               .asSingleton();
+        binder.map( "HelpRenderCache@help" )
+              .to( "#moduleMapping#.models.HelpRenderCache" )
+              .asSingleton();
     }
     function onUnload(){}
 
