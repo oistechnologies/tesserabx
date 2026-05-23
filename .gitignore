@@ -67,7 +67,10 @@ logs/
 # Staged add-on migrations (see tasks/Migrate.cfc). The canonical
 # source lives in each add-on's own migrations/ folder; staged copies
 # under the central dir are a runtime artifact, not version-controlled.
-resources/database/migrations/_addon_*.cfc
+# The `_addon-` (hyphenated) sentinel after the timestamp is what
+# distinguishes a staged file from a hand-written core migration like
+# `2026_05_20_000010_create_addon_tables.cfc` (underscore, not hyphen).
+resources/database/migrations/*_addon-*_*.cfc
 resources/database/migrations/.staged.json
 
 # IDE

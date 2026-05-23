@@ -139,6 +139,17 @@ component extends="commandbox.system.BaseTask" {
         if ( !directoryExists( centralAbs ) ) {
             error( "Central migrations directory does not exist: " & centralAbs );
         }
+        // Sweep out any stale `_addon_*.cfc` files left over from the
+        // pre-fix layout (when staged files started with `_addon_`
+        // instead of the timestamp). cfmigrations ignored those, so
+        // they have never been "applied" from its perspective; safe
+        // to delete unconditionally. Dev environments that ran an
+        // older stager self-heal on the next stage. See the
+        // matching `cfmigrations` table cleanup note below.
+        var stale = directoryList( centralAbs, false, "query", "_addon_*.cfc", "name", "file" );
+        for ( var i = 1; i <= stale.recordCount; i++ ) {
+            fileDelete( centralAbs & "/" & stale.name[ i ] );
+        }
         var discovered = discoverAddonMigrations( arguments.projectRoot );
         var staged   = [];
         var skipped  = [];
@@ -250,12 +261,30 @@ component extends="commandbox.system.BaseTask" {
      * cfmigrations table when two add-ons happen to pick the same
      * timestamp.
      *
-     * If a source filename already begins with `_addon_`, we leave it
-     * alone (idempotency under re-stage).
+     * Layout:
+     *   <YYYY_MM_DD_HHMMSS>_addon-<slug>_<rest>.cfc
+     *
+     * The timestamp MUST stay at the front because cfmigrations'
+     * isMigrationFile filter inspects only the first 10 characters
+     * and requires them to parse as a date (with `_` -> `-`). A
+     * `_addon_<slug>_<timestamp>_...` prefix (the prior layout) was
+     * silently filtered out of every `box migrate up`, so add-on
+     * migrations never ran in CI. The hyphen between `addon-` and
+     * the slug is the gitignore sentinel (core migrations use only
+     * underscores).
+     *
+     * If a source filename is already in this layout we leave it
+     * alone for idempotency under re-stage.
      */
     private string function stagedTargetName( required string slug, required string fileName ){
-        if ( left( arguments.fileName, 7 ) == "_addon_" ) return arguments.fileName;
-        return "_addon_" & arguments.slug & "_" & arguments.fileName;
+        if ( reFindNoCase( "^\d{4}_\d{2}_\d{2}_\d{6}_addon-", arguments.fileName ) ) return arguments.fileName;
+        // Source name is the canonical YYYY_MM_DD_HHMMSS_<rest>.cfc
+        // shape produced by `commandbox-migrations migrate create`.
+        // Split on the FIRST underscore after the 17-char timestamp
+        // prefix and inject the addon-<slug> marker.
+        var prefix = left( arguments.fileName, 17 );
+        var rest   = mid( arguments.fileName, 19, len( arguments.fileName ) );
+        return prefix & "_addon-" & arguments.slug & "_" & rest;
     }
 
     private void function printStageReport( required struct report ){
