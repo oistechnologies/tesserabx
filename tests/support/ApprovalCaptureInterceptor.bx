@@ -1,0 +1,39 @@
+/**
+ * ApprovalCaptureInterceptor: spec-only listener that records every
+ * onTicketApproval* payload into a shared array.
+ *
+ * Used by ApprovalServiceSpec to assert the canonical envelope shape
+ * on each emitted event.
+ */
+class accessors=true {
+
+    variables.captured = [];
+
+    public void function clear(){
+        variables.captured = [];
+    }
+
+    public array function captured(){
+        return variables.captured;
+    }
+
+    public any function lastFor( required string eventName ){
+        for ( var i = arrayLen( variables.captured ); i >= 1; i-- ) {
+            if ( variables.captured[ i ].eventName == arguments.eventName ) return variables.captured[ i ].data;
+        }
+        return javaCast( "null", "" );
+    }
+
+    function onTicketApprovalRequested( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onTicketApprovalRequested", data : arguments.interceptData } );
+    }
+
+    function onTicketApprovalApproved( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onTicketApprovalApproved", data : arguments.interceptData } );
+    }
+
+    function onTicketApprovalRejected( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onTicketApprovalRejected", data : arguments.interceptData } );
+    }
+
+}

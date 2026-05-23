@@ -13,6 +13,7 @@
 class {
 
     property name="ticketsService"        inject="TicketsService@tickets";
+    property name="approvalService"       inject="ApprovalService@tickets";
     property name="agentService"          inject="AgentService@agent";
     property name="customFieldsService"   inject="CustomFieldsService@tickets";
     property name="bulkActionsService"    inject="BulkActionsService@tickets";
@@ -313,6 +314,48 @@ class {
             messagebox.error( "AI tone check failed: " & result.error );
         } else {
             messagebox.warn( "AI tone check not available (outcome: " & result.outcome & ")." );
+        }
+        relocate( uri = "/agent/tickets/" & t.getId() );
+    }
+
+    /**
+     * POST /agent/tickets/:id/approval/decide
+     * Decide the pending approval (Approve or Reject). The decider
+     * must be the named approver; ApprovalService throws otherwise.
+     */
+    function decideApproval( event, rc, prc ){
+        param rc.approvalId = "";
+        param rc.decision   = "";
+        param rc.comment    = "";
+        var t = ticketsService.getTicket( rc.id ?: "" );
+        if ( isNull( t ) ) {
+            messagebox.warn( "That ticket does not exist." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        if ( !len( rc.approvalId ) || ( rc.decision != "approve" && rc.decision != "reject" ) ) {
+            messagebox.error( "Approval decision is missing or invalid." );
+            relocate( uri = "/agent/tickets/" & t.getId() );
+            return;
+        }
+        try {
+            if ( rc.decision == "approve" ) {
+                approvalService.approveTicket(
+                    approvalId     : rc.approvalId,
+                    deciderAgentId : currentAgentId(),
+                    comment        : rc.comment
+                );
+                messagebox.info( "Approval granted." );
+            } else {
+                approvalService.rejectTicket(
+                    approvalId     : rc.approvalId,
+                    deciderAgentId : currentAgentId(),
+                    comment        : rc.comment
+                );
+                messagebox.info( "Approval rejected." );
+            }
+        } catch ( any e ) {
+            messagebox.error( e.message );
         }
         relocate( uri = "/agent/tickets/" & t.getId() );
     }
@@ -620,6 +663,12 @@ class {
         arguments.prc.pageTitle    = "Ticket ##" & arguments.ticket.getTicketNumber();
         arguments.prc.messages     = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
         arguments.prc.events       = ticketsService.listEventsForTicket( arguments.ticket.getId() );
+        // B8: latest approval row for the ticket (null when none).
+        arguments.prc.ticketApproval = approvalService.getForTicket( arguments.ticket.getId() );
+        // Panels need the viewer's identity to gate the
+        // approver-only Approve/Reject buttons. tbxViewer() is the
+        // canonical helper.
+        arguments.prc.viewer = tbxViewer();
 
         // Avatar/name directory for every agent referenced on this
         // page (assignee + each message author + each event actor)
@@ -637,6 +686,13 @@ class {
                 var actorId = ev.getActorId() ?: "";
                 if ( len( actorId ) ) agentIds.append( actorId );
             }
+        }
+        // B8: include the approval row's approver so the panel can
+        // render the name + email instead of falling back to the
+        // raw UUID.
+        if ( !isNull( arguments.prc.ticketApproval ) ) {
+            var approverId = arguments.prc.ticketApproval.getApproverAgentId() ?: "";
+            if ( len( approverId ) ) agentIds.append( approverId );
         }
         arguments.prc.agentDirectory = agentService.directoryFor( agentIds );
 

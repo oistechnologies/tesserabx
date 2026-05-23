@@ -1,0 +1,71 @@
+<bx:output>
+<bx:if !isNull( prc.ticketApproval )>
+    <bx:set local.a = prc.ticketApproval >
+    <bx:set local.t = prc.ticket >
+    <bx:set local.statusBadge = local.a.getStatus() eq "approved" ? "success"
+                              : ( local.a.getStatus() eq "rejected" ? "danger" : "warning" ) >
+    <bx:set local.approverInfo = prc.agentDirectory[ local.a.getApproverAgentId() ?: "" ] ?: {} >
+    <bx:set local.viewerIsApprover = ( prc.viewer.userId ?: "" ) == ( local.a.getApproverAgentId() ?: "" ) >
+
+    <div class="card mb-3 border-#local.statusBadge#">
+        <div class="card-header p-0">
+            <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body"
+               data-bs-toggle="collapse"
+               href="##approval-card"
+               role="button"
+               aria-expanded="<bx:if local.a.getStatus() eq 'pending'>true<bx:else>false</bx:if>"
+               aria-controls="approval-card">
+                <span>
+                    Approval
+                    <span class="badge text-bg-#local.statusBadge# ms-2">#encodeForHTML( local.a.getStatus() )#</span>
+                </span>
+                <i class="bi bi-chevron-down"></i>
+            </a>
+        </div>
+        <div id="approval-card" class="collapse<bx:if local.a.getStatus() eq 'pending'> show</bx:if>">
+            <div class="card-body small">
+                <div class="mb-2">
+                    <span class="text-body-secondary">Approver:</span>
+                    <bx:if structKeyExists( local.approverInfo, "id" )>
+                        <strong>#encodeForHTML( trim( local.approverInfo.firstName & " " & local.approverInfo.lastName ) )#</strong>
+                        <small class="text-body-secondary d-block">#encodeForHTML( local.approverInfo.email )#</small>
+                    <bx:else>
+                        <code>#encodeForHTML( local.a.getApproverAgentId() ?: "" )#</code>
+                    </bx:if>
+                </div>
+                <bx:if local.a.getStatus() neq "pending">
+                    <div class="mb-2">
+                        <span class="text-body-secondary">Decided:</span>
+                        <bx:if !isNull( local.a.getDecidedAt() )>
+                            #encodeForHTML( dateTimeFormat( local.a.getDecidedAt(), "yyyy-mm-dd HH:nn" ) )#
+                        </bx:if>
+                    </div>
+                    <bx:if len( local.a.getComment() ?: "" )>
+                        <div class="alert alert-light py-2 px-3 small mb-2">
+                            <strong>Note:</strong> #encodeForHTML( local.a.getComment() )#
+                        </div>
+                    </bx:if>
+                </bx:if>
+
+                <bx:if local.a.getStatus() eq "pending" && local.viewerIsApprover>
+                    <p class="text-body-secondary small mb-2">You are the approver for this ticket. Decide below.</p>
+                    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/approval/decide" class="vstack gap-2">
+                        <input type="hidden" name="approvalId" value="#encodeForHTMLAttribute( local.a.getId() )#">
+                        <textarea class="form-control form-control-sm" name="comment" rows="2" placeholder="Optional comment"></textarea>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success btn-sm flex-fill" type="submit" name="decision" value="approve">
+                                <i class="bi bi-check2-circle"></i> Approve
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm flex-fill" type="submit" name="decision" value="reject">
+                                <i class="bi bi-x-circle"></i> Reject
+                            </button>
+                        </div>
+                    </form>
+                <bx:elseif local.a.getStatus() eq "pending">
+                    <p class="text-body-secondary small mb-0">Awaiting decision from the named approver.</p>
+                </bx:if>
+            </div>
+        </div>
+    </div>
+</bx:if>
+</bx:output>

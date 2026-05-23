@@ -89,6 +89,9 @@ class {
         binder.map( "AssignByStrategyExecutor@automation" )
               .to( "#moduleMapping#.models.actions.AssignByStrategyExecutor" )
               .asSingleton();
+        binder.map( "RequestApprovalExecutor@automation" )
+              .to( "#moduleMapping#.models.actions.RequestApprovalExecutor" )
+              .asSingleton();
     }
 
     function onUnload(){}

@@ -181,6 +181,22 @@ class singleton=true {
                 parameterSchema : [
                     { name : "value", label : "Strategy", type : "select", required : true, options : [ "roundRobin", "leastLoaded" ] }
                 ]
+            },
+            {
+                id              : "requestApproval",
+                label           : "Request approval",
+                description     : "Request a named agent's approval before the ticket is worked. Creates a pending approval visible on the ticket's right-column panel.",
+                executor        : "RequestApprovalExecutor@automation",
+                parameterSchema : [
+                    {
+                        name            : "value",
+                        label           : "Approver",
+                        type            : "select",
+                        required        : true,
+                        optionsProvider : "AgentService@agent.listAssignableAgentOptions",
+                        description     : "The agent who must approve or reject this ticket before it proceeds."
+                    }
+                ]
             }
         ];
         for ( var s in seeds ) addEntry( s, "core" );

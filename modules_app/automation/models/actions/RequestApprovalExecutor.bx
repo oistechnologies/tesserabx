@@ -1,0 +1,39 @@
+/**
+ * RequestApprovalExecutor: action executor for "requestApproval".
+ *
+ * Action shape:
+ *   { type : "requestApproval", params : { value : "<approver-agent-uuid>" } }
+ *
+ * `params.value` is the approver agent id, the convention used by
+ * every other agent-picker-driven action (see AssignToAgentExecutor).
+ * Calls ApprovalService.requestApproval; records the rule id as the
+ * requester so the audit trail attributes the request to the
+ * automation engine rather than to a human agent.
+ *
+ * Returns the action outcome struct the rest of the actions emit:
+ *   { type, value, approvalId? }
+ */
+class singleton=true {
+
+    property name="approvalService" inject="ApprovalService@tickets";
+
+    public struct function execute( required struct action, required any ticket, required any rule ){
+        var params          = arguments.action.params ?: {};
+        var approverAgentId = params.value ?: "";
+        if ( !len( approverAgentId ) ) {
+            return { type : arguments.action.type, value : "", skipped : true, reason : "no approver configured" };
+        }
+        var row = approvalService.requestApproval(
+            ticketId           : arguments.ticket.getId(),
+            approverAgentId    : approverAgentId,
+            requestedByAgentId : arguments.rule.getId(),
+            actorType          : "automation"
+        );
+        return {
+            type       : arguments.action.type,
+            value      : approverAgentId,
+            approvalId : row.getId()
+        };
+    }
+
+}

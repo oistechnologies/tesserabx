@@ -1,0 +1,222 @@
+/**
+ * ApprovalServiceSpec: follow-up B8.
+ *
+ * Round-trips the single-approver lifecycle:
+ *   requestApproval -> approveTicket  (decided_at stamps, status approved)
+ *   requestApproval -> rejectTicket   (status rejected, comment persisted)
+ *   approveTicket by a non-approver throws WrongApprover
+ *   double-decide throws AlreadyDecided
+ *   getForTicket returns the latest row
+ *   the three events emit canonical-envelope-shaped payloads
+ *
+ * Uses real Ticket + Agent + Organization fixtures so the FK
+ * constraints exercise alongside the service logic.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.approval = wb.getInstance( "ApprovalService@tickets" );
+        variables.tickets  = wb.getInstance( "TicketsService@tickets" );
+        variables.contacts = wb.getInstance( "ContactsService@contacts" );
+
+        // Register a capture interceptor so we can inspect the
+        // emitted onTicketApproval* payloads.
+        variables.binder = wb.getBinder();
+        if ( !variables.binder.mappingExists( "ApprovalCaptureInterceptor@spec" ) ) {
+            variables.binder.map( "ApprovalCaptureInterceptor@spec" )
+                            .to( "tests.support.ApprovalCaptureInterceptor" )
+                            .asSingleton();
+        }
+        variables.capture = wb.getInstance( "ApprovalCaptureInterceptor@spec" );
+        getController().getInterceptorService().registerInterceptor( interceptorObject : variables.capture );
+    }
+
+    function run(){
+        describe( "ApprovalService", function(){
+
+            beforeEach( function( currentSpec ){
+                variables.fixture = makeFixture();
+                variables.capture.clear();
+            } );
+
+            afterEach( function( currentSpec ){
+                cleanupFixture( variables.fixture );
+            } );
+
+            it( "requestApproval inserts a pending row + announces onTicketApprovalRequested", function(){
+                var row = variables.approval.requestApproval(
+                    ticketId           : variables.fixture.ticket.getId(),
+                    approverAgentId    : variables.fixture.approverId,
+                    requestedByAgentId : variables.fixture.requesterId
+                );
+                expect( row.getStatus() ).toBe( "pending" );
+                expect( row.getApproverAgentId() ).toBe( variables.fixture.approverId );
+                expect( row.getTicketId() ).toBe( variables.fixture.ticket.getId() );
+
+                // BoxLang's scope walker drops `var x = <null returning call>`
+                // declarations; call lastFor() inline on every
+                // assertion to avoid the silent-null trap.
+                expect( variables.capture.lastFor( "onTicketApprovalRequested" ) ).notToBeNull();
+                expect( variables.capture.lastFor( "onTicketApprovalRequested" ).event       ).toBe( "onTicketApprovalRequested" );
+                expect( variables.capture.lastFor( "onTicketApprovalRequested" ).entity.type ).toBe( "TicketApproval" );
+                expect( variables.capture.lastFor( "onTicketApprovalRequested" ).entity.id   ).toBe( row.getId() );
+            } );
+
+            it( "approveTicket flips status, stamps decided_at, fires onTicketApprovalApproved", function(){
+                var row = variables.approval.requestApproval(
+                    ticketId           : variables.fixture.ticket.getId(),
+                    approverAgentId    : variables.fixture.approverId,
+                    requestedByAgentId : variables.fixture.requesterId
+                );
+                var after = variables.approval.approveTicket(
+                    approvalId     : row.getId(),
+                    deciderAgentId : variables.fixture.approverId,
+                    comment        : "looks good"
+                );
+                expect( after.getStatus() ).toBe( "approved" );
+                expect( after.getDecidedAt() ).notToBeNull();
+                expect( after.getComment() ).toBe( "looks good" );
+
+                expect( variables.capture.lastFor( "onTicketApprovalApproved" ) ).notToBeNull();
+                expect( variables.capture.lastFor( "onTicketApprovalApproved" ).after.status ).toBe( "approved" );
+            } );
+
+            it( "rejectTicket flips status to rejected and fires onTicketApprovalRejected", function(){
+                var row = variables.approval.requestApproval(
+                    ticketId           : variables.fixture.ticket.getId(),
+                    approverAgentId    : variables.fixture.approverId,
+                    requestedByAgentId : variables.fixture.requesterId
+                );
+                var after = variables.approval.rejectTicket(
+                    approvalId     : row.getId(),
+                    deciderAgentId : variables.fixture.approverId,
+                    comment        : "not yet"
+                );
+                expect( after.getStatus() ).toBe( "rejected" );
+                expect( after.getComment() ).toBe( "not yet" );
+                expect( variables.capture.lastFor( "onTicketApprovalRejected" ) ).notToBeNull();
+            } );
+
+            it( "approveTicket by a non-approver throws WrongApprover", function(){
+                var row = variables.approval.requestApproval(
+                    ticketId           : variables.fixture.ticket.getId(),
+                    approverAgentId    : variables.fixture.approverId,
+                    requestedByAgentId : variables.fixture.requesterId
+                );
+                expect( function(){
+                    variables.approval.approveTicket(
+                        approvalId     : row.getId(),
+                        deciderAgentId : variables.fixture.requesterId
+                    );
+                } ).toThrow( type : "ApprovalService.WrongApprover" );
+            } );
+
+            it( "deciding an already-decided row throws AlreadyDecided", function(){
+                var row = variables.approval.requestApproval(
+                    ticketId           : variables.fixture.ticket.getId(),
+                    approverAgentId    : variables.fixture.approverId,
+                    requestedByAgentId : variables.fixture.requesterId
+                );
+                variables.approval.approveTicket(
+                    approvalId     : row.getId(),
+                    deciderAgentId : variables.fixture.approverId
+                );
+                expect( function(){
+                    variables.approval.rejectTicket(
+                        approvalId     : row.getId(),
+                        deciderAgentId : variables.fixture.approverId
+                    );
+                } ).toThrow( type : "ApprovalService.AlreadyDecided" );
+            } );
+
+            it( "getForTicket returns the latest row when one exists, null otherwise", function(){
+                expect( variables.approval.getForTicket( variables.fixture.ticket.getId() ) ).toBeNull();
+                var row = variables.approval.requestApproval(
+                    ticketId           : variables.fixture.ticket.getId(),
+                    approverAgentId    : variables.fixture.approverId,
+                    requestedByAgentId : variables.fixture.requesterId
+                );
+                var got = variables.approval.getForTicket( variables.fixture.ticket.getId() );
+                expect( got ).notToBeNull();
+                expect( got.getId() ).toBe( row.getId() );
+            } );
+
+            it( "requestApproval on an unknown ticket throws UnknownTicket", function(){
+                expect( function(){
+                    variables.approval.requestApproval(
+                        ticketId           : "no-such-ticket-id",
+                        approverAgentId    : variables.fixture.approverId,
+                        requestedByAgentId : variables.fixture.requesterId
+                    );
+                } ).toThrow( type : "ApprovalService.UnknownTicket" );
+            } );
+
+            it( "requestApproval with no approver throws MissingApprover", function(){
+                expect( function(){
+                    variables.approval.requestApproval(
+                        ticketId           : variables.fixture.ticket.getId(),
+                        approverAgentId    : "",
+                        requestedByAgentId : variables.fixture.requesterId
+                    );
+                } ).toThrow( type : "ApprovalService.MissingApprover" );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Approval Spec Org " & createUUID(),
+            slug : "approval-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "approval-spec-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var approverId  = createUUID();
+        var requesterId = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES
+                ( :ap, :apEmail, :h, FALSE, TRUE ),
+                ( :rq, :rqEmail, :h, FALSE, TRUE )",
+            {
+                ap : approverId,  apEmail : "approver-" & approverId  & "@example.com",
+                rq : requesterId, rqEmail : "requester-" & requesterId & "@example.com",
+                h  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
+        var ticket = variables.tickets.createTicket( {
+            requesterContactId : contact.getId(),
+            subject            : "approval-spec-" & createUUID(),
+            priority           : "normal"
+        } );
+        return {
+            org         : org,
+            contact     : contact,
+            ticket      : ticket,
+            approverId  : approverId,
+            requesterId : requesterId
+        };
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM ticket_approvals  WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );
+        queryExecute( "DELETE FROM ticket_events     WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );
+        queryExecute( "DELETE FROM ticket_messages   WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );
+        queryExecute( "DELETE FROM audit_events      WHERE entity_id  = :id", { id : arguments.fixture.ticket.getId() } );
+        queryExecute( "DELETE FROM tickets           WHERE id = :id", { id : arguments.fixture.ticket.getId() } );
+        queryExecute( "DELETE FROM contact_roles     WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts          WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events      WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations     WHERE id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM agents            WHERE id IN ( :ap, :rq )", { ap : arguments.fixture.approverId, rq : arguments.fixture.requesterId } );
+    }
+
+}

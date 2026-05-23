@@ -92,6 +92,7 @@ class {
         route( "tickets/:id/assign" ).withVerbs( "POST" ).to( "Tickets.assign" );
         route( "tickets/:id/promote-sender" ).withVerbs( "POST" ).to( "Tickets.promoteSender" );
         route( "tickets/:id/block-sender" ).withVerbs( "POST" ).to( "Tickets.blockSender" );
+        route( "tickets/:id/approval/decide" ).withVerbs( "POST" ).to( "Tickets.decideApproval" );
         route( "tickets/:id/suggest-reply" ).withVerbs( "POST" ).to( "Tickets.suggestReply" );
         route( "tickets/:id/summarize" ).withVerbs( "POST" ).to( "Tickets.summarize" );
         route( "tickets/:id/draft-kb-article" ).withVerbs( "POST" ).to( "Tickets.draftKbArticle" );

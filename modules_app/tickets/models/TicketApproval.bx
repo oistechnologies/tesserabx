@@ -1,0 +1,28 @@
+/**
+ * TicketApproval: one approval request against a ticket.
+ *
+ * B8 single-approver model: one row per approval request; deciding
+ * it locks it. Future multi-step chains will model steps in a
+ * separate table.
+ *
+ * Tenant scope follows the parent Ticket via the ticket_id FK; the
+ * organization_id column on this entity is for direct
+ * approval-list queries that filter by tenant without joining.
+ */
+class
+    extends="tesserabx.modules.contacts.models.TesseraBXEntity"
+    table="ticket_approvals"
+    accessors="true"
+{
+
+    property name="id";
+    property name="ticketId"            column="ticket_id";
+    property name="requestedByAgentId"  column="requested_by_agent_id";
+    property name="approverAgentId"     column="approver_agent_id";
+    property name="organizationId"      column="organization_id";
+    property name="status";
+    property name="decidedAt"           column="decided_at" sqltype="timestamp";
+    property name="comment";
+    property name="createdAt"           column="created_at" sqltype="timestamp";
+
+}

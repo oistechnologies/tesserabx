@@ -1,0 +1,198 @@
+/**
+ * ApprovalService: request and decide per-ticket approvals.
+ *
+ * B8 single-approver model. One row in ticket_approvals per request;
+ * deciding it locks it (status moves off "pending", decided_at
+ * stamps). Future multi-step chains will model steps in a separate
+ * table and an ApprovalChainService; this service stays focused on
+ * the basic request/decide round-trip so the UX can land first.
+ *
+ * Events (canonical envelope; see EventPayloadBuilder + B3 rewrap
+ * pattern):
+ *   - onTicketApprovalRequested
+ *   - onTicketApprovalApproved
+ *   - onTicketApprovalRejected
+ *
+ * Tenant scope: the service resolves the ticket via TicketsService
+ * to inherit its organization_id, which is then stamped on the
+ * approval row.
+ */
+class singleton=true {
+
+    property name="wirebox"              inject="wirebox";
+    property name="ticketsService"       inject="TicketsService@tickets";
+    property name="auditService"         inject="AuditService@audit";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+
+    /**
+     * Create a pending approval row for the given ticket. Caller
+     * supplies the approver and the requester (the agent or the
+     * automation rule id that triggered the request).
+     *
+     * Returns the inserted TicketApproval entity.
+     */
+    public any function requestApproval(
+        required string ticketId,
+        required string approverAgentId,
+        string requestedByAgentId = "",
+        string actorType          = "agent"
+    ){
+        var t = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( t ) ) {
+            throw( type = "ApprovalService.UnknownTicket", message = "No ticket with id [#arguments.ticketId#]." );
+        }
+        if ( !len( arguments.approverAgentId ) ) {
+            throw( type = "ApprovalService.MissingApprover", message = "approverAgentId is required." );
+        }
+
+        var row = wirebox.getInstance( "TicketApproval@tickets" );
+        row.setId( createUUID() );
+        row.setTicketId( t.getId() );
+        row.setApproverAgentId( arguments.approverAgentId );
+        row.setRequestedByAgentId( arguments.requestedByAgentId );
+        row.setOrganizationId( t.getOrganizationId() ?: "" );
+        row.setStatus( "pending" );
+        row.save();
+
+        recordAudit(
+            eventType : "ticket.approval_requested",
+            entityId  : row.getId(),
+            metadata  : { "ticketId" : t.getId(), "approverAgentId" : arguments.approverAgentId }
+        );
+        announce(
+            eventName : "onTicketApprovalRequested",
+            row       : row,
+            ticket    : t,
+            actorType : arguments.actorType,
+            actorId   : len( arguments.requestedByAgentId ) ? arguments.requestedByAgentId : "system"
+        );
+
+        return row;
+    }
+
+    /**
+     * Approve the named row. The decider must be the approver
+     * recorded on the row; otherwise this throws.
+     */
+    public any function approveTicket(
+        required string approvalId,
+        required string deciderAgentId,
+        string comment = ""
+    ){
+        return decide( arguments.approvalId, arguments.deciderAgentId, "approved", arguments.comment );
+    }
+
+    public any function rejectTicket(
+        required string approvalId,
+        required string deciderAgentId,
+        string comment = ""
+    ){
+        return decide( arguments.approvalId, arguments.deciderAgentId, "rejected", arguments.comment );
+    }
+
+    /**
+     * Latest approval row for the ticket (any status). Returns null
+     * when no approval exists yet.
+     */
+    public any function getForTicket( required string ticketId ){
+        var row = wirebox.getInstance( "TicketApproval@tickets" )
+            .where( "ticket_id", arguments.ticketId )
+            .orderBy( "created_at", "desc" )
+            .first();
+        return isNull( row ) ? javaCast( "null", "" ) : row;
+    }
+
+    // ---------------- internals ----------------
+
+    private any function decide(
+        required string approvalId,
+        required string deciderAgentId,
+        required string newStatus,
+        string comment = ""
+    ){
+        var row = wirebox.getInstance( "TicketApproval@tickets" )
+            .where( "id", arguments.approvalId )
+            .first();
+        if ( isNull( row ) ) {
+            throw( type = "ApprovalService.UnknownApproval", message = "No approval with id [#arguments.approvalId#]." );
+        }
+        if ( row.getStatus() != "pending" ) {
+            throw( type = "ApprovalService.AlreadyDecided", message = "Approval [#arguments.approvalId#] is already #row.getStatus()#." );
+        }
+        if ( row.getApproverAgentId() != arguments.deciderAgentId ) {
+            throw(
+                type    = "ApprovalService.WrongApprover",
+                message = "Agent [#arguments.deciderAgentId#] is not the named approver for approval [#arguments.approvalId#]."
+            );
+        }
+
+        row.setStatus( arguments.newStatus );
+        row.setDecidedAt( now() );
+        if ( len( arguments.comment ) ) row.setComment( arguments.comment );
+        row.save();
+
+        recordAudit(
+            eventType : arguments.newStatus == "approved" ? "ticket.approval_approved" : "ticket.approval_rejected",
+            entityId  : row.getId(),
+            metadata  : { "ticketId" : row.getTicketId(), "deciderAgentId" : arguments.deciderAgentId }
+        );
+
+        var ticket = ticketsService.getTicket( row.getTicketId() );
+        announce(
+            eventName : arguments.newStatus == "approved" ? "onTicketApprovalApproved" : "onTicketApprovalRejected",
+            row       : row,
+            ticket    : isNull( ticket ) ? javaCast( "null", "" ) : ticket,
+            actorType : "agent",
+            actorId   : arguments.deciderAgentId
+        );
+        return row;
+    }
+
+    private void function announce(
+        required string eventName,
+        required any    row,
+        any    ticket,
+        required string actorType,
+        required string actorId
+    ){
+        var orgId = arguments.row.getOrganizationId() ?: "";
+        var payload = eventPayloadBuilder.build(
+            event          : arguments.eventName,
+            organizationId : orgId,
+            actorType      : arguments.actorType,
+            actorId        : arguments.actorId,
+            entity         : { type : "TicketApproval", id : arguments.row.getId() },
+            after          : {
+                "id"                  : arguments.row.getId(),
+                "ticketId"            : arguments.row.getTicketId(),
+                "approverAgentId"     : arguments.row.getApproverAgentId(),
+                "status"              : arguments.row.getStatus(),
+                "decidedAt"           : toString( arguments.row.getDecidedAt() ?: "" ),
+                "comment"             : arguments.row.getComment() ?: ""
+            },
+            metadata       : { "ticketId" : arguments.row.getTicketId() }
+        );
+        if ( !isNull( arguments.ticket ) ) payload.ticket = arguments.ticket;
+        payload.approval = arguments.row;
+        interceptorService.announce( arguments.eventName, payload );
+    }
+
+    private void function recordAudit(
+        required string eventType,
+        required string entityId,
+        required struct metadata
+    ){
+        try {
+            auditService.record(
+                eventType  : arguments.eventType,
+                entityType : "TicketApproval",
+                entityId   : arguments.entityId,
+                metadata   : arguments.metadata
+            );
+        } catch ( any e ) {
+            writeLog( file = "Approval", text = "Audit failed for [#arguments.eventType#]: " & e.message, type = "warning" );
+        }
+    }
+
+}
