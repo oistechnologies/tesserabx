@@ -37,6 +37,25 @@
      data-reset-url="/agent/home/preferences/reset">
     <bx:loop array="#prc.visibleWidgets#" item="local.w">
         <bx:if len( local.w.partial )>
+            <!---
+                Pre-fetch the widget's data once before rendering so the
+                partial can read prc.widgetData directly (same convention
+                used by /agent/reports). The /agent/home/poll endpoint
+                re-runs the same dataProvider on its interval to refresh
+                the partial in place via the JS update hook.
+            --->
+            <bx:if len( local.w.dataProvider ?: "" ) && len( local.w.dataMethod ?: "" )>
+                <bx:try>
+                    <bx:set prc.widgetData = application.wirebox
+                        .getInstance( "DashboardWidgetRegistry@reporting" )
+                        .fetchWidgetData( local.w ) >
+                    <bx:catch type="any">
+                        <bx:set prc.widgetData = { "error" : "widget-error" } >
+                    </bx:catch>
+                </bx:try>
+            <bx:else>
+                <bx:set prc.widgetData = {} >
+            </bx:if>
             <div class="#encodeForHTMLAttribute( local.w.defaultGridSize )#"
                  data-widget-id="#encodeForHTMLAttribute( local.w.id )#">
                 <!---
@@ -150,8 +169,11 @@
     }
 </style>
 
-<!-- SortableJS for drag-and-drop, loaded from CDN (mirrors the
-     Chart.js approach used by /agent/reports). -->
+<!-- SortableJS for drag-and-drop, Chart.js for chart widgets. Both
+     are loaded from CDN here to match the Chart.js approach already
+     used by /agent/reports. Widget partials can rely on Chart.js
+     and Sortable being globally available at DOMContentLoaded. -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="/includes/js/agent-dashboard.js"></script>
 </bx:output>

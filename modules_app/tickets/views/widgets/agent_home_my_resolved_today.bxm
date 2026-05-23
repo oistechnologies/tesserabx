@@ -1,11 +1,23 @@
 <bx:output>
-<!--- Phase C scaffolding: stub metric. Phase D wires TicketsService.countResolvedTodayByMe. --->
+<bx:set local.count = ( prc.widgetData.count ?: 0 ) >
 #view( view = "_partials/small_box", module = "core", args = {
     color     : "success",
-    metric    : "<span data-metric>0</span>",
+    metric    : "<span data-metric>" & encodeForHTML( local.count ) & "</span>",
     label     : "Resolved today",
     icon      : "bi bi-check2-circle",
     link      : "/agent/tickets?status=resolved",
     linkLabel : "View resolved"
 } )#
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.my-resolved-today" ] = {
+        update : function( payload, card ){
+            if ( !payload ) return;
+            var el = card.querySelector( "[data-metric]" );
+            if ( el && typeof payload.count !== "undefined" ) el.textContent = payload.count;
+        }
+    };
+})();
+</script>
 </bx:output>

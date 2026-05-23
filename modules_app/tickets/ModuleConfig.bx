@@ -35,17 +35,25 @@ class {
                     { id : "tickets.working-the-queue", section : "tickets", title : "Working the ticket queue", audience : "agent",  sortWeight : 10, source : "resources/help/working-the-queue.md", searchable : true, keywords : [ "queue", "ticket", "assign", "claim" ] },
                     { id : "tickets.submitting",        section : "tickets", title : "Submitting a ticket",     audience : "client", sortWeight : 20, source : "resources/help/submitting.md",        searchable : true, keywords : [ "submit", "open", "request", "ticket" ] }
                 ],
-                // /agent home dashboard widgets. Phase C scaffolding:
-                // the four stat cards render a stub metric of "0" so
-                // the home page has something to render through the
-                // registry-driven loop. Phase D will replace the stub
-                // partials with real per-agent counts wired through a
-                // TicketsService dataProvider.
+                // /agent home dashboard widgets owned by the tickets
+                // module. Each widget declares a dataProvider that the
+                // registry pre-invokes before the partial renders, and
+                // that /agent/home/poll uses to refresh the metric in
+                // place on the 30s cadence.
+                //
+                // Layout:
+                //   row 1: four stat cards (col-3 each)
+                //   row 2: workload trend (col-xl-8) + queue health (col-xl-4)
+                //   row 3: recent tickets (col-xl-8) + recent activity (col-xl-4)
                 dashboardWidgets : [
-                    { id : "agent-home.my-open-tickets",   title : "Open tickets",     partial : "widgets/agent_home_my_open_tickets",   module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 100, requiredPermission : "tickets.view" },
-                    { id : "agent-home.my-awaiting-reply", title : "Awaiting reply",   partial : "widgets/agent_home_my_awaiting_reply", module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 200, requiredPermission : "tickets.view" },
-                    { id : "agent-home.my-sla-at-risk",    title : "SLA at risk",      partial : "widgets/agent_home_my_sla_at_risk",    module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 300, requiredPermission : "tickets.view" },
-                    { id : "agent-home.my-resolved-today", title : "Resolved today",   partial : "widgets/agent_home_my_resolved_today", module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 400, requiredPermission : "tickets.view" }
+                    { id : "agent-home.my-open-tickets",     title : "Open tickets",         partial : "widgets/agent_home_my_open_tickets",     module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 100, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "countOpenAssignedToMe" },
+                    { id : "agent-home.my-awaiting-reply",   title : "Awaiting reply",       partial : "widgets/agent_home_my_awaiting_reply",   module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 200, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "countAwaitingReplyAssignedToMe" },
+                    { id : "agent-home.my-sla-at-risk",      title : "SLA at risk",          partial : "widgets/agent_home_my_sla_at_risk",      module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 300, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "countSlaAtRiskAssignedToMe" },
+                    { id : "agent-home.my-resolved-today",   title : "Resolved today",       partial : "widgets/agent_home_my_resolved_today",   module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 400, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "countResolvedTodayByMe" },
+                    { id : "agent-home.my-workload-trend",   title : "My ticket volume",     partial : "widgets/agent_home_workload_trend",      module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-xl-8 d-flex",          sortWeight : 500, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "workloadTrendForMe" },
+                    { id : "agent-home.queue-health",        title : "Queue health",         partial : "widgets/agent_home_queue_health",        module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-xl-4 d-flex",          sortWeight : 550, requiredPermission : "tickets.assign",  dataProvider : "TicketsService@tickets", dataMethod : "queueHealthSummary" },
+                    { id : "agent-home.my-recent-tickets",   title : "My recent tickets",    partial : "widgets/agent_home_my_recent_tickets",   module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-xl-8 d-flex",          sortWeight : 600, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "recentForMe" },
+                    { id : "agent-home.my-recent-activity",  title : "Recent activity",      partial : "widgets/agent_home_my_recent_activity",  module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-xl-4 d-flex",          sortWeight : 650, requiredPermission : "tickets.view", dataProvider : "TicketsService@tickets", dataMethod : "recentActivityOnMyTickets" }
                 ]
             }
         };

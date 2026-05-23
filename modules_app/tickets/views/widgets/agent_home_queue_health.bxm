@@ -1,0 +1,50 @@
+<bx:output>
+<bx:set local.data    = prc.widgetData ?: {} >
+<bx:set local.unassgn = local.data.unassignedCount       ?: 0 >
+<bx:set local.oldest  = local.data.oldestUnassignedHours ?: 0 >
+<bx:set local.total   = local.data.openTotal             ?: 0 >
+<div class="card flex-fill h-100">
+    <div class="card-header">
+        <h3 class="card-title mb-0">
+            <i class="bi bi-people me-2"></i>Queue health
+        </h3>
+    </div>
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-7 text-body-secondary fw-normal">Unassigned</dt>
+            <dd class="col-5 text-end mb-2">
+                <a href="/agent/tickets?assignee=unassigned" class="link-body-emphasis text-decoration-none">
+                    <span class="fw-semibold" data-queue-unassigned>#encodeForHTML( local.unassgn )#</span>
+                </a>
+            </dd>
+            <dt class="col-7 text-body-secondary fw-normal">Oldest unassigned</dt>
+            <dd class="col-5 text-end mb-2">
+                <span class="fw-semibold" data-queue-oldest>#encodeForHTML( local.oldest )#</span>
+                <span class="text-body-secondary small">h</span>
+            </dd>
+            <dt class="col-7 text-body-secondary fw-normal">Open (all agents)</dt>
+            <dd class="col-5 text-end mb-0">
+                <a href="/agent/tickets?status=open" class="link-body-emphasis text-decoration-none">
+                    <span class="fw-semibold" data-queue-total>#encodeForHTML( local.total )#</span>
+                </a>
+            </dd>
+        </dl>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.queue-health" ] = {
+        update : function( payload, card ){
+            if ( !payload ) return;
+            var u = card.querySelector( "[data-queue-unassigned]" );
+            var o = card.querySelector( "[data-queue-oldest]" );
+            var t = card.querySelector( "[data-queue-total]" );
+            if ( u && typeof payload.unassignedCount       !== "undefined" ) u.textContent = payload.unassignedCount;
+            if ( o && typeof payload.oldestUnassignedHours !== "undefined" ) o.textContent = payload.oldestUnassignedHours;
+            if ( t && typeof payload.openTotal             !== "undefined" ) t.textContent = payload.openTotal;
+        }
+    };
+})();
+</script>
+</bx:output>

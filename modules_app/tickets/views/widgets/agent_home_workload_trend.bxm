@@ -1,0 +1,78 @@
+<bx:output>
+<bx:set local.series   = ( prc.widgetData.series ?: [] ) >
+<bx:set local.canvasId = "tbx-widget-workload-trend" >
+<div class="card flex-fill h-100">
+    <div class="card-header">
+        <h3 class="card-title mb-0">
+            <i class="bi bi-graph-up me-2"></i>My ticket volume (14&nbsp;days)
+        </h3>
+    </div>
+    <div class="card-body">
+        <bx:if !arrayLen( local.series )>
+            <p class="text-body-secondary mb-0">No tickets in the last 14 days.</p>
+        <bx:else>
+            <canvas id="#local.canvasId#" height="120"></canvas>
+        </bx:if>
+    </div>
+</div>
+
+<bx:if arrayLen( local.series )>
+<script>
+(function(){
+    var INITIAL = #jsonSerialize( local.series )#;
+    var WIDGET_ID = "agent-home.my-workload-trend";
+    var CANVAS_ID = "#local.canvasId#";
+
+    function buildChart( series ){
+        var canvas = document.getElementById( CANVAS_ID );
+        if ( !canvas || typeof Chart === "undefined" ) return null;
+        return new Chart( canvas.getContext( "2d" ), {
+            type : "line",
+            data : {
+                labels   : series.map( function( d ){ return d.day; } ),
+                datasets : [ {
+                    label : "Tickets",
+                    data  : series.map( function( d ){ return d.count; } ),
+                    fill  : true,
+                    tension : 0.3,
+                    borderColor     : "##0d6efd",
+                    backgroundColor : "rgba(13,110,253,0.12)",
+                    pointRadius     : 2
+                } ]
+            },
+            options : {
+                responsive : true,
+                maintainAspectRatio : false,
+                plugins : { legend : { display : false } },
+                scales  : { y : { beginAtZero : true, ticks : { precision : 0 } } }
+            }
+        } );
+    }
+
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    var entry = window.tbxDashboard.widgets[ WIDGET_ID ] = window.tbxDashboard.widgets[ WIDGET_ID ] || {};
+
+    function init(){
+        if ( typeof Chart === "undefined" ) {
+            // Chart.js loaded asynchronously; retry until ready.
+            setTimeout( init, 100 );
+            return;
+        }
+        entry.chart = buildChart( INITIAL );
+    }
+    if ( document.readyState === "loading" ) {
+        document.addEventListener( "DOMContentLoaded", init );
+    } else {
+        init();
+    }
+
+    entry.update = function( payload ){
+        if ( !payload || !payload.series || !entry.chart ) return;
+        entry.chart.data.labels         = payload.series.map( function( d ){ return d.day; } );
+        entry.chart.data.datasets[ 0 ].data = payload.series.map( function( d ){ return d.count; } );
+        entry.chart.update();
+    };
+})();
+</script>
+</bx:if>
+</bx:output>

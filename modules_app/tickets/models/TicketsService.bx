@@ -22,6 +22,7 @@ class singleton=true {
     property name="interceptorService"   inject="coldbox:interceptorService";
     property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
     property name="ticketDto"            inject="TicketDto@tickets";
+    property name="auth"                 inject="AuthenticationService@cbauth";
 
     // ---------- Status workflow ----------
     //
@@ -1458,6 +1459,310 @@ class singleton=true {
         var s = workflowService.findStatus( arguments.statusKey );
         if ( isNull( s ) ) return "";
         return s.category ?: "";
+    }
+
+    // =====================================================================
+    // Agent home dashboard reads.
+    //
+    // Each method resolves the current agent from cbauth itself so widget
+    // partials and the /agent/home/poll endpoint can call them with no
+    // arguments. When no agent is signed in the methods return zero/empty
+    // shapes rather than throw, so a partial rendered in a non-agent
+    // context (a misconfigured add-on, a test fixture) degrades gracefully.
+    // =====================================================================
+
+    /**
+     * Count of "open" tickets currently assigned to the logged-in agent.
+     * "Open" means category=open (new, open, ...) — paused/resolved/closed
+     * are excluded. Returns 0 for an anonymous viewer.
+     */
+    public struct function countOpenAssignedToMe(){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "count" : 0 };
+        var openKeys = workflowService.keysByCategory( [ "open" ] );
+        if ( !arrayLen( openKeys ) ) return { "count" : 0 };
+        return { "count" : countByAssigneeAndStatus( id, openKeys ) };
+    }
+
+    /**
+     * Count of tickets the agent is assigned to that are sitting in a
+     * paused-category status (pending, on-hold, etc.). The convention
+     * across the project is that paused statuses mean "waiting on the
+     * client to reply" so this is the agent's "awaiting reply" load.
+     */
+    public struct function countAwaitingReplyAssignedToMe(){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "count" : 0 };
+        var pausedKeys = workflowService.keysByCategory( [ "paused" ] );
+        if ( !arrayLen( pausedKeys ) ) return { "count" : 0 };
+        return { "count" : countByAssigneeAndStatus( id, pausedKeys ) };
+    }
+
+    /**
+     * Count of the agent's assigned tickets that are either past their
+     * first-response or resolution SLA deadline, or within the
+     * approaching window (default 30 minutes — same default
+     * SlaService.slaSummaryForTicket uses).
+     *
+     * Excludes terminal statuses (resolved/closed) and paused statuses
+     * — the SLA clock is not running on those.
+     */
+    public struct function countSlaAtRiskAssignedToMe( numeric approachingMinutes = 30 ){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "count" : 0 };
+        var activeKeys = workflowService.keysByCategory( [ "open" ] );
+        if ( !arrayLen( activeKeys ) ) return { "count" : 0 };
+        var placeholders = [];
+        var binds = {
+            aid : id,
+            mins: arguments.approachingMinutes
+        };
+        var i = 0;
+        for ( var k in activeKeys ) {
+            i++;
+            placeholders.append( ":s" & i );
+            binds[ "s" & i ] = k;
+        }
+        var sql = "
+            SELECT COUNT(*) AS c
+            FROM   tickets
+            WHERE  assigned_to_agent_id = :aid
+            AND    status IN ( " & placeholders.toList( "," ) & " )
+            AND    (
+                       (
+                           first_response_at IS NULL
+                           AND first_response_due_at IS NOT NULL
+                           AND first_response_due_at <= NOW() + make_interval( mins => cast( :mins as integer ) )
+                       )
+                       OR (
+                           resolution_due_at IS NOT NULL
+                           AND resolution_due_at <= NOW() + make_interval( mins => cast( :mins as integer ) )
+                       )
+                   )
+        ";
+        var rows = queryExecute( sql, binds );
+        return { "count" : ( rows.recordCount ? rows.c[ 1 ] : 0 ) };
+    }
+
+    /**
+     * Count of tickets the agent was assigned to that have been
+     * resolved since the start of the current UTC day. We don't track
+     * who flipped the status, so this is "tickets on my plate that got
+     * resolved today" — a close proxy for "my output today".
+     */
+    public struct function countResolvedTodayByMe(){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "count" : 0 };
+        var resolvedKeys = workflowService.keysByCategory( [ "resolved" ] );
+        if ( !arrayLen( resolvedKeys ) ) return { "count" : 0 };
+        var placeholders = [];
+        var binds = { aid : id };
+        var i = 0;
+        for ( var k in resolvedKeys ) {
+            i++;
+            placeholders.append( ":s" & i );
+            binds[ "s" & i ] = k;
+        }
+        var sql = "
+            SELECT COUNT(*) AS c
+            FROM   tickets
+            WHERE  assigned_to_agent_id = :aid
+            AND    status IN ( " & placeholders.toList( "," ) & " )
+            AND    resolved_at >= date_trunc( 'day', NOW() )
+        ";
+        var rows = queryExecute( sql, binds );
+        return { "count" : ( rows.recordCount ? rows.c[ 1 ] : 0 ) };
+    }
+
+    /**
+     * 14-day series of how many tickets currently assigned to the
+     * agent were CREATED on each day. Useful as a quick "incoming
+     * volume" sparkline. Zero-filled so the chart x-axis is
+     * continuous even on quiet days. Mirrors the shape used by
+     * ReportingService.ticketVolumePerDay.
+     */
+    public struct function workloadTrendForMe( numeric days = 14 ){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "series" : [] };
+        var rows = queryExecute(
+            "SELECT to_char( date_trunc( 'day', created_at ), 'YYYY-MM-DD' ) AS day,
+                    COUNT(*) AS c
+             FROM   tickets
+             WHERE  assigned_to_agent_id = :aid
+             AND    created_at >= date_trunc( 'day', NOW() ) - make_interval( days => cast( :d as integer ) - 1 )
+             GROUP  BY date_trunc( 'day', created_at )
+             ORDER  BY day ASC",
+            { aid : id, d : arguments.days }
+        );
+        var counts = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) counts[ rows.day[ i ] ] = rows.c[ i ];
+        var out = [];
+        var startOffset = arguments.days - 1;
+        for ( var off = startOffset; off >= 0; off-- ) {
+            var day = dateFormat( dateAdd( "d", -off, now() ), "yyyy-mm-dd" );
+            out.append( { day : day, count : ( counts[ day ] ?: 0 ) } );
+        }
+        return { "series" : out };
+    }
+
+    /**
+     * Queue health snapshot for the team-lead / admin role:
+     *   - unassignedCount: how many open or paused tickets have no
+     *     assignee
+     *   - oldestUnassignedHours: how long the oldest unassigned ticket
+     *     has been sitting (whole hours, rounded down)
+     *   - openTotal: total active (open + paused) tickets across the
+     *     deployment
+     *
+     * Cheap enough to call on every poll thanks to the existing index
+     * on assigned_to_agent_id + status.
+     */
+    public struct function queueHealthSummary(){
+        var activeKeys = workflowService.keysByCategory( [ "open", "paused" ] );
+        if ( !arrayLen( activeKeys ) ) {
+            return { "unassignedCount" : 0, "oldestUnassignedHours" : 0, "openTotal" : 0 };
+        }
+        var placeholders = [];
+        var binds = {};
+        var i = 0;
+        for ( var k in activeKeys ) {
+            i++;
+            placeholders.append( ":s" & i );
+            binds[ "s" & i ] = k;
+        }
+        var statusIn = "status IN ( " & placeholders.toList( "," ) & " )";
+        var openRow = queryExecute(
+            "SELECT COUNT(*) AS c FROM tickets WHERE " & statusIn,
+            binds
+        );
+        var unRow = queryExecute(
+            "SELECT COUNT(*) AS c,
+                    EXTRACT( EPOCH FROM ( NOW() - MIN( created_at ) ) ) / 3600.0 AS hrs
+             FROM   tickets
+             WHERE  assigned_to_agent_id IS NULL
+             AND    " & statusIn,
+            binds
+        );
+        var hrsRaw = unRow.recordCount ? ( unRow.hrs[ 1 ] ?: "" ) : "";
+        return {
+            "unassignedCount"       : unRow.recordCount ? unRow.c[ 1 ] : 0,
+            "oldestUnassignedHours" : isNumeric( hrsRaw ) ? int( hrsRaw ) : 0,
+            "openTotal"             : openRow.recordCount ? openRow.c[ 1 ] : 0
+        };
+    }
+
+    /**
+     * Recent ticket activity on the agent's plate. Returns up to
+     * `limit` rows of { id, ticketNumber, subject, status, priority,
+     * updatedAt, url } for tickets currently assigned to the agent,
+     * newest activity first.
+     */
+    public struct function recentForMe( numeric limit = 10 ){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "rows" : [] };
+        var rows = queryExecute(
+            "SELECT id, ticket_number, subject, status, priority, updated_at
+             FROM   tickets
+             WHERE  assigned_to_agent_id = :aid
+             ORDER  BY updated_at DESC
+             LIMIT  " & int( arguments.limit ),
+            { aid : id }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "id"           : rows.id[ i ],
+                "ticketNumber" : rows.ticket_number[ i ],
+                "subject"      : rows.subject[ i ] ?: "",
+                "status"       : rows.status[ i ] ?: "",
+                "priority"     : rows.priority[ i ] ?: "",
+                "updatedAt"    : dateTimeFormat( rows.updated_at[ i ], "yyyy-mm-dd HH:nn" ),
+                "url"          : "/agent/tickets/" & rows.id[ i ]
+            } );
+        }
+        return { "rows" : out };
+    }
+
+    /**
+     * Recent messages on tickets the agent is currently assigned to.
+     * Excludes the agent's own messages so the list answers
+     * "what's been happening on my tickets while I wasn't looking?".
+     * Internal notes from other agents are included; messages from
+     * the client are included. The list is ordered newest-first and
+     * capped at `limit`.
+     */
+    public struct function recentActivityOnMyTickets( numeric limit = 5 ){
+        var id = currentAgentId();
+        if ( !len( id ) ) return { "rows" : [] };
+        var rows = queryExecute(
+            "SELECT m.id              AS message_id,
+                    m.ticket_id,
+                    m.author_agent_id,
+                    m.author_contact_id,
+                    m.author_email,
+                    m.is_internal,
+                    m.created_at,
+                    t.ticket_number,
+                    t.subject
+             FROM   ticket_messages m
+             JOIN   tickets         t ON t.id = m.ticket_id
+             WHERE  t.assigned_to_agent_id = :aid
+             AND    ( m.author_agent_id IS NULL OR m.author_agent_id <> :aid )
+             ORDER  BY m.created_at DESC
+             LIMIT  " & int( arguments.limit ),
+            { aid : id }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "messageId"    : rows.message_id[ i ],
+                "ticketId"     : rows.ticket_id[ i ],
+                "ticketNumber" : rows.ticket_number[ i ],
+                "subject"      : rows.subject[ i ] ?: "",
+                "isInternal"   : !!rows.is_internal[ i ],
+                "fromAgent"    : len( rows.author_agent_id[ i ] ?: "" ) > 0,
+                "createdAt"    : dateTimeFormat( rows.created_at[ i ], "yyyy-mm-dd HH:nn" ),
+                "url"          : "/agent/tickets/" & rows.ticket_id[ i ]
+            } );
+        }
+        return { "rows" : out };
+    }
+
+    // ---------- agent-home internals ----------
+
+    private string function currentAgentId(){
+        try {
+            if ( !auth.isLoggedIn() ) return "";
+            var u = auth.getUser();
+            if ( isNull( u ) ) return "";
+            return u.getId();
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    /**
+     * Helper: COUNT(*) of tickets assigned to the agent with status in
+     * the supplied keys. Returns 0 for an empty key list.
+     */
+    private numeric function countByAssigneeAndStatus( required string agentId, required array statusKeys ){
+        if ( !arrayLen( arguments.statusKeys ) ) return 0;
+        var placeholders = [];
+        var binds = { aid : arguments.agentId };
+        var i = 0;
+        for ( var k in arguments.statusKeys ) {
+            i++;
+            placeholders.append( ":s" & i );
+            binds[ "s" & i ] = k;
+        }
+        var rows = queryExecute(
+            "SELECT COUNT(*) AS c
+             FROM   tickets
+             WHERE  assigned_to_agent_id = :aid
+             AND    status IN ( " & placeholders.toList( "," ) & " )",
+            binds
+        );
+        return rows.recordCount ? rows.c[ 1 ] : 0;
     }
 
 }

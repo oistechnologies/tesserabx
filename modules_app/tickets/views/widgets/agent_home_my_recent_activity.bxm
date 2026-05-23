@@ -1,0 +1,71 @@
+<bx:output>
+<bx:set local.rows = ( prc.widgetData.rows ?: [] ) >
+<div class="card flex-fill h-100">
+    <div class="card-header">
+        <h3 class="card-title mb-0">
+            <i class="bi bi-chat-left-dots me-2"></i>Recent activity
+        </h3>
+    </div>
+    <div class="card-body p-0">
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-secondary mb-0 p-3">No recent activity on tickets assigned to you.</p>
+        <bx:else>
+            <ul class="list-group list-group-flush" data-recent-activity>
+                <bx:loop array="#local.rows#" item="local.row">
+                    <li class="list-group-item">
+                        <div class="d-flex align-items-center gap-2 small text-body-secondary mb-1">
+                            <bx:if local.row.fromAgent>
+                                <span class="badge text-bg-info">internal</span>
+                            <bx:else>
+                                <span class="badge text-bg-secondary">client</span>
+                            </bx:if>
+                            <span>###encodeForHTML( local.row.ticketNumber )#</span>
+                            <span class="ms-auto">#encodeForHTML( local.row.createdAt )#</span>
+                        </div>
+                        <a href="#encodeForHTMLAttribute( local.row.url )#"
+                           class="link-body-emphasis text-decoration-none small">
+                            #encodeForHTML( local.row.subject )#
+                        </a>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.my-recent-activity" ] = {
+        update : function( payload, card ){
+            if ( !payload || !payload.rows ) return;
+            var ul = card.querySelector( "[data-recent-activity]" );
+            if ( !ul ) return;
+            var html = "";
+            payload.rows.forEach( function( r ){
+                var badge = r.fromAgent
+                    ? "<span class=\"badge text-bg-info\">internal</span>"
+                    : "<span class=\"badge text-bg-secondary\">client</span>";
+                html += "<li class=\"list-group-item\">" +
+                    "<div class=\"d-flex align-items-center gap-2 small text-body-secondary mb-1\">" +
+                        badge +
+                        "<span>##" + escape( r.ticketNumber ) + "</span>" +
+                        "<span class=\"ms-auto\">" + escape( r.createdAt ) + "</span>" +
+                    "</div>" +
+                    "<a href=\"" + escapeAttr( r.url ) + "\" class=\"link-body-emphasis text-decoration-none small\">" + escape( r.subject ) + "</a>" +
+                "</li>";
+            } );
+            ul.innerHTML = html;
+        }
+    };
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+    function escapeAttr( s ){
+        return escape( s ).replace( /"/g, "&quot;" );
+    }
+})();
+</script>
+</bx:output>

@@ -1,11 +1,23 @@
 <bx:output>
-<!--- Phase C scaffolding: stub metric. Phase D wires TicketsService.countAwaitingReplyAssignedToMe. --->
+<bx:set local.count = ( prc.widgetData.count ?: 0 ) >
 #view( view = "_partials/small_box", module = "core", args = {
     color     : "warning",
-    metric    : "<span data-metric>0</span>",
+    metric    : "<span data-metric>" & encodeForHTML( local.count ) & "</span>",
     label     : "Awaiting reply",
     icon      : "bi bi-hourglass-split",
     link      : "/agent/tickets?status=pending",
     linkLabel : "View pending"
 } )#
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.my-awaiting-reply" ] = {
+        update : function( payload, card ){
+            if ( !payload ) return;
+            var el = card.querySelector( "[data-metric]" );
+            if ( el && typeof payload.count !== "undefined" ) el.textContent = payload.count;
+        }
+    };
+})();
+</script>
 </bx:output>
