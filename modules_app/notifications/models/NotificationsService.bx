@@ -285,6 +285,34 @@ class singleton=true {
         );
     }
 
+    /**
+     * Wipe every in-app notification for one recipient. Scoped to
+     * channel='inapp' so it matches exactly what listForRecipient
+     * shows in the notifications view; email/slack delivery history
+     * lives in the same table but is left alone.
+     */
+    public numeric function deleteAllForRecipient(
+        required string recipientType,
+        required string recipientId
+    ){
+        var rows = queryExecute(
+            "SELECT COUNT(*) AS n
+             FROM   notifications
+             WHERE  recipient_type = :rt
+             AND    recipient_id   = :rid
+             AND    channel        = 'inapp'",
+            { rt : arguments.recipientType, rid : arguments.recipientId }
+        );
+        queryExecute(
+            "DELETE FROM notifications
+             WHERE  recipient_type = :rt
+             AND    recipient_id   = :rid
+             AND    channel        = 'inapp'",
+            { rt : arguments.recipientType, rid : arguments.recipientId }
+        );
+        return val( rows.n[ 1 ] );
+    }
+
     // ---------------- internals ----------------
 
     private any function createNotification(

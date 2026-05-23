@@ -119,6 +119,7 @@ class {
         // flow is a single submit.
         route( "notifications/poll"          ).to( "Notifications.poll" );
         route( "notifications/mark-all-read" ).withVerbs( "POST" ).to( "Notifications.markAllRead" );
+        route( "notifications/delete-all"    ).withVerbs( "POST" ).to( "Notifications.deleteAll" );
         route( "notifications/:id/read"      ).withVerbs( "POST" ).to( "Notifications.markRead" );
         route( "notifications"               ).to( "Notifications.index" );
 

@@ -61,6 +61,19 @@ class {
         relocate( uri = "/agent/notifications" );
     }
 
+    function deleteAll( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( len( agentId ) ) {
+            var removed = notificationsService.deleteAllForRecipient( "agent", agentId );
+            if ( removed ) {
+                messagebox.info( "Deleted #removed# notification#removed eq 1 ? '' : 's'#." );
+            } else {
+                messagebox.info( "No notifications to delete." );
+            }
+        }
+        relocate( uri = "/agent/notifications" );
+    }
+
     /**
      * JSON poll endpoint for the bell-icon dropdown. The agent
      * layout's JS hits this every 30 seconds and rebuilds the

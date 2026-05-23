@@ -210,6 +210,24 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( agentId, "" );
             } );
 
+            it( "deleteAllForRecipient removes every in-app row for the recipient", function(){
+                var agentId = createUUID();
+                for ( var i = 1; i <= 4; i++ ) {
+                    variables.svc.dispatchForEvent(
+                        eventKey   : "ticket.created",
+                        recipients : [ { "type" : "agent", "id" : agentId } ],
+                        context    : { "ticketId" : "t", "ticketNumber" : i, "subject" : "s", "status" : "new" }
+                    );
+                }
+                expect( variables.svc.listForRecipient( "agent", agentId ).len() ).toBe( 4 );
+                var removed = variables.svc.deleteAllForRecipient( "agent", agentId );
+                expect( removed ).toBe( 4 );
+                expect( variables.svc.listForRecipient( "agent", agentId ).len() ).toBe( 0 );
+                // Second call on an empty inbox returns 0, no errors.
+                expect( variables.svc.deleteAllForRecipient( "agent", agentId ) ).toBe( 0 );
+                cleanup( agentId, "" );
+            } );
+
         } );
     }
 

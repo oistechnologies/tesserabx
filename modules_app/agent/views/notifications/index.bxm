@@ -1,13 +1,23 @@
 <bx:output>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <p class="mb-0 text-body-secondary">Bell-icon notifications for the current agent. Click an entry to mark it read and open the linked record.</p>
-    <bx:if ( prc.unreadCount ?: 0 ) gt 0>
-        <form method="post" action="/agent/notifications/mark-all-read" class="m-0">
-            <button class="btn btn-outline-secondary btn-sm" type="submit">
-                <i class="bi bi-check-all"></i> Mark all read
-            </button>
-        </form>
-    </bx:if>
+    <div class="d-flex gap-2">
+        <bx:if ( prc.unreadCount ?: 0 ) gt 0>
+            <form method="post" action="/agent/notifications/mark-all-read" class="m-0">
+                <button class="btn btn-outline-secondary btn-sm" type="submit">
+                    <i class="bi bi-check-all"></i> Mark all read
+                </button>
+            </form>
+        </bx:if>
+        <bx:if arrayLen( prc.notifications )>
+            <form method="post" action="/agent/notifications/delete-all" class="m-0"
+                  onsubmit="return confirm('Delete all notifications? This cannot be undone.');">
+                <button class="btn btn-outline-danger btn-sm" type="submit">
+                    <i class="bi bi-trash"></i> Delete all
+                </button>
+            </form>
+        </bx:if>
+    </div>
 </div>
 
 <div class="card">
