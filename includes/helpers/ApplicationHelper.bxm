@@ -125,6 +125,38 @@ array function tbxNavigation( required string surface, required string menu ){
 }
 
 /**
+ * The application version, read once from `box.json` and cached in
+ * the `application` scope. Returns an empty string if box.json is
+ * unreadable or missing the `version` field, so callers can safely
+ * include the result unconditionally.
+ */
+string function tbxAppVersion(){
+    if ( !structKeyExists( application, "tbxBoxJsonVersion" ) ) {
+        // expandPath( "/box.json" ) does not work because there is no
+        // `/` mapping in Application.bx — only `/root`, `/coldbox`,
+        // `/tesserabx`, etc. Walk the candidates so the helper works
+        // from the live app, the test app, and any future context.
+        var candidates = [
+            expandPath( "/root/box.json" ),
+            expandPath( "/tesserabx/box.json" ),
+            "/app/box.json"
+        ];
+        var version = "";
+        for ( var p in candidates ) {
+            try {
+                if ( fileExists( p ) ) {
+                    var parsed = jsonDeserialize( fileRead( p ) );
+                    version = parsed.version ?: "";
+                    if ( len( version ) ) break;
+                }
+            } catch ( any e ) { /* try next candidate */ }
+        }
+        application.tbxBoxJsonVersion = version;
+    }
+    return application.tbxBoxJsonVersion;
+}
+
+/**
  * Concatenated add-on `<link>` tags for the surface. Emit inside the
  * layout's `<head>`.
  */

@@ -55,11 +55,17 @@
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Work phone</label>
-                        <input type="tel" class="form-control" wire:model="phoneWork">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-telephone"></i></span>
+                            <input type="tel" class="form-control" wire:model="phoneWork">
+                        </div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Mobile phone</label>
-                        <input type="tel" class="form-control" wire:model="phoneMobile">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-phone"></i></span>
+                            <input type="tel" class="form-control" wire:model="phoneMobile">
+                        </div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Time zone</label>
@@ -103,16 +109,25 @@
             <form wire:submit.prevent="changePassword" autocomplete="off" class="row g-3" style="max-width:480px;">
                 <div class="col-12">
                     <label class="form-label">Current password</label>
-                    <input type="password" class="form-control" wire:model="currentPassword" autocomplete="current-password">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                        <input type="password" class="form-control" wire:model="currentPassword" autocomplete="current-password">
+                    </div>
                 </div>
                 <div class="col-12">
                     <label class="form-label">New password</label>
-                    <input type="password" class="form-control" wire:model="newPassword" autocomplete="new-password">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                        <input type="password" class="form-control" wire:model="newPassword" autocomplete="new-password">
+                    </div>
                     <div class="form-text small">At least 8 characters.</div>
                 </div>
                 <div class="col-12">
                     <label class="form-label">Confirm new password</label>
-                    <input type="password" class="form-control" wire:model="newPasswordConfirm" autocomplete="new-password">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                        <input type="password" class="form-control" wire:model="newPasswordConfirm" autocomplete="new-password">
+                    </div>
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">Change password</button>
@@ -203,7 +218,10 @@
             <form wire:submit.prevent="requestEmailChange" class="row g-3" style="max-width:480px;">
                 <div class="col-12">
                     <label class="form-label">New email</label>
-                    <input type="email" class="form-control" wire:model="newEmail" autocomplete="email">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+                        <input type="email" class="form-control" wire:model="newEmail" autocomplete="email">
+                    </div>
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">Send verification email</button>

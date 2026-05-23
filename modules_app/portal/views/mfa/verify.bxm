@@ -1,30 +1,49 @@
 <bx:output>
-<div class="row justify-content-center">
-    <div class="col-12 col-md-6 col-lg-5">
-        <div class="card">
-            <div class="card-body">
-                <h2 class="h4 mb-3">Two-factor verification</h2>
-                <p class="text-body-secondary small">
-                    Open your authenticator app and enter the current 6-digit code.
-                    If you've lost your device, paste one of your recovery codes instead.
-                </p>
-                <form method="post" action="/login/verify">
-                    <div class="mb-3">
-                        <label class="form-label" for="code">Code</label>
+<bx:set local.brand = getInstance( "SettingsService@admin" ).getBranding() >
+<div class="login-box">
+    <div class="card card-outline card-primary">
+        <div class="card-header text-center">
+            <a href="/" class="link-body-emphasis text-decoration-none">
+                <bx:if len( local.brand.logoUrl )>
+                    <img src="#encodeForHTMLAttribute( local.brand.logoUrl )#"
+                         alt="#encodeForHTMLAttribute( local.brand.productName )#"
+                         class="mb-2"
+                         style="max-height:48px">
+                </bx:if>
+                <h1 class="h4 mb-0 fw-semibold">#encodeForHTML( local.brand.productName )#</h1>
+            </a>
+            <div class="small text-body-secondary mt-1">Two-factor verification</div>
+        </div>
+        <div class="card-body login-card-body">
+            #getInstance( "messagebox@cbmessagebox" ).renderIt()#
+            <p class="login-box-msg">
+                Open your authenticator app and enter the 6-digit code.
+                Lost your device? Paste a recovery code instead.
+            </p>
+            <form method="post" action="/login/verify">
+                <div class="input-group mb-3">
+                    <div class="form-floating">
                         <input type="text"
                                id="code"
                                name="code"
-                               class="form-control form-control-lg text-center font-monospace"
+                               class="form-control text-center font-monospace"
                                required
-                               autocomplete="one-time-code"
                                autofocus
-                               placeholder="123456 or recovery code">
+                               autocomplete="one-time-code"
+                               inputmode="numeric"
+                               placeholder="123456">
+                        <label for="code">Code or recovery code</label>
                     </div>
-                    <button class="btn btn-primary w-100" type="submit">Verify</button>
-                </form>
-                <hr>
+                    <div class="input-group-text"><i class="bi bi-shield-lock"></i></div>
+                </div>
+                <button class="btn btn-primary w-100" type="submit">
+                    <i class="bi bi-check2-circle me-1"></i> Verify
+                </button>
+            </form>
+            <hr>
+            <p class="mb-0 text-center">
                 <a href="/logout" class="small text-body-secondary">Sign in as a different user</a>
-            </div>
+            </p>
         </div>
     </div>
 </div>

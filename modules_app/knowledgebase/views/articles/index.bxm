@@ -1,8 +1,9 @@
 <bx:output>
 <form method="get" action="/kb" class="mb-3">
     <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
         <input type="search" class="form-control" name="q" placeholder="Search the knowledge base..." value="#encodeForHTMLAttribute( prc.searchTerm ?: "" )#">
-        <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Search</button>
+        <button class="btn btn-primary" type="submit">Search</button>
         <bx:if len( prc.searchTerm ?: "" )>
             <a class="btn btn-outline-secondary" href="/kb">Clear</a>
         </bx:if>

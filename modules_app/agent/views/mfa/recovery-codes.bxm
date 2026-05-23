@@ -1,29 +1,45 @@
 <bx:output>
-<div class="row justify-content-center">
-    <div class="col-12 col-md-8 col-lg-6">
-        <div class="card border-warning">
-            <div class="card-body">
-                <h2 class="h4 mb-2">Save your recovery codes</h2>
-                <p class="text-body-secondary">
-                    Each code below works exactly once if you lose access to your authenticator app.
-                    They will not be shown again. Store them in a password manager or print them now.
-                </p>
+<bx:set local.brand = getInstance( "SettingsService@admin" ).getBranding() >
+<!-- Wider login-box so the recovery-code grid stays readable. Warning
+     accent color comes through card-outline-warning. -->
+<div class="login-box" style="max-width:520px">
+    <div class="card card-outline card-warning">
+        <div class="card-header text-center">
+            <a href="/agent" class="link-body-emphasis text-decoration-none">
+                <bx:if len( local.brand.logoUrl )>
+                    <img src="#encodeForHTMLAttribute( local.brand.logoUrl )#"
+                         alt="#encodeForHTMLAttribute( local.brand.productName )#"
+                         class="mb-2"
+                         style="max-height:48px">
+                </bx:if>
+                <h1 class="h4 mb-0 fw-semibold">#encodeForHTML( local.brand.productName )#</h1>
+            </a>
+            <div class="small text-body-secondary mt-1">Save your recovery codes</div>
+        </div>
+        <div class="card-body login-card-body">
+            #getInstance( "messagebox@cbmessagebox" ).renderIt()#
+            <p class="login-box-msg">
+                Each code below works exactly once if you lose access to your authenticator app.
+                They will not be shown again. Save them in a password manager or print them now.
+            </p>
 
-                <div class="bg-light text-black border rounded p-3 my-3 font-monospace fs-5">
-                    <bx:loop array="#prc.codes#" item="c">
-                        <div>#encodeForHTML( c )#</div>
-                    </bx:loop>
-                </div>
+            <div class="bg-light text-black border rounded p-3 my-3 font-monospace fs-5">
+                <bx:loop array="#prc.codes#" item="c">
+                    <div>#encodeForHTML( c )#</div>
+                </bx:loop>
+            </div>
 
-                <div class="d-flex gap-2">
-                    <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('codesText').innerText)">
-                        <i class="bi bi-clipboard"></i> Copy to clipboard
-                    </button>
-                    <a class="btn btn-primary" href="/agent">I've saved them, continue</a>
-                </div>
-                <div id="codesText" class="visually-hidden">
-                    <bx:loop array="#prc.codes#" item="c">#c#&##10;</bx:loop>
-                </div>
+            <div class="d-grid gap-2">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="navigator.clipboard.writeText(document.getElementById('codesText').innerText)">
+                    <i class="bi bi-clipboard me-1"></i> Copy to clipboard
+                </button>
+                <a class="btn btn-primary" href="/agent">
+                    <i class="bi bi-check2-circle me-1"></i> I've saved them, continue
+                </a>
+            </div>
+            <div id="codesText" class="visually-hidden">
+                <bx:loop array="#prc.codes#" item="c">#c#&##10;</bx:loop>
             </div>
         </div>
     </div>

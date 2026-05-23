@@ -683,6 +683,26 @@ settings.tesserabx.dashboardWidgets = [
 
 The host loops `#tbxDashboardWidgets()#`, invokes each widget's data provider (when declared), and renders the named partial wrapped in the declared grid size. The same deferral applies: core's existing six dashboard widgets (overview tiles, ticket-volume line chart, three doughnut charts, backlog table, agent-load table) remain rendered inline and are not yet migrated to the registry.
 
+### Reusable `.small-box` partial
+
+For KPI-style widgets (one big number + a label), the core module ships a partial that renders the AdminLTE 4 [`.small-box`](https://adminlte.io/themes/v4/dist/widgets/small-box.html). Adopt it so add-on widgets look like core widgets:
+
+```boxlang
+<bx:output>
+#view( view = "_partials/small_box", module = "core", args = {
+    color     : "primary",                       // primary | success | warning | danger | info | secondary
+    metric    : encodeForHTML( prc.widgetData.openCount ),
+    label     : "Open Jira issues",
+    icon      : "bi bi-bug",                     // any Bootstrap Icon class
+    caption   : "synced 5 min ago",              // optional secondary line
+    link      : "/agent/admin/example-jira",     // optional footer link; omit for no footer
+    linkLabel : "Manage sync"                    // optional, defaults to "View details"
+} )#
+</bx:output>
+```
+
+Caller responsibilities: HTML-encode any user-supplied values you pass in `metric` (the partial does not, so you can compose markup like `<small>%</small>`). Pass any of the six Bootstrap semantic color tokens for `color`; `warning` automatically gets a dark footer link, the others get light.
+
 ---
 
 ## Asset publishing

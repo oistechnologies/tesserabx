@@ -1,26 +1,21 @@
 <bx:output>
 <bx:set local.brand = getInstance( "SettingsService@admin" ).getBranding() >
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="surface" content="agent">
-    <title>#encodeForHTML( local.brand.productName )# Agent</title>
-
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-rc4/dist/css/adminlte.min.css">
-    <!-- highlight.js: syntax highlighting for ``` code blocks rendered
-         through bx-markdown. Active across every page on both surfaces
-         (help pages, KB articles, anywhere a `<pre><code class="language-*">`
-         appears). atom-one-dark theme + copy-on-click button. -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/atom-one-dark.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlightjs-copy@1.0.6/dist/highlightjs-copy.min.css">
-    <style>:root { --bs-primary: #encodeForCSS( local.brand.primaryColor )#; }</style>
-    #tbxAssetCss( "agent" )#
-</head>
+<html lang="en">
+#view( view = "_partials/layout_head", module = "core", args = { surface : "agent" } )#
 <body class="layout-fixed sidebar-expand-lg bg-body">
+    <script>
+    // Pre-paint: restore the user's saved sidebar-collapse state before
+    // first paint so a collapsed sidebar does not flash open on reload.
+    // The click listener in layout_scripts.bxm persists subsequent
+    // toggles (AdminLTE flips body.sidebar-collapse on the toggle
+    // button, we mirror that into localStorage).
+    try {
+        if ( localStorage.getItem( 'tbx-sidebar' ) === 'collapsed' ) {
+            document.body.classList.add( 'sidebar-collapse' );
+        }
+    } catch ( e ) { /* localStorage blocked -> sidebar opens by default */ }
+    </script>
     <div class="app-wrapper">
 
         <nav class="app-header navbar navbar-expand bg-body-tertiary border-bottom">
@@ -34,6 +29,13 @@
                     </li>
                 </ul>
                 <ul class="navbar-nav ms-auto">
+                    #view( view = "_partials/theme_toggle", module = "core" )#
+                    <li class="nav-item">
+                        <a class="nav-link" href="##" role="button" data-lte-toggle="fullscreen" aria-label="Toggle fullscreen" title="Toggle fullscreen">
+                            <i data-lte-icon="maximize" class="bi bi-arrows-fullscreen"></i>
+                            <i data-lte-icon="minimize" class="bi bi-fullscreen-exit" style="display:none"></i>
+                        </a>
+                    </li>
                     <bx:script>
                         // Cheap once-per-request lookup. Only renders
                         // the bell when an agent is signed in, so the
@@ -57,7 +59,7 @@
                         <li class="nav-item dropdown" id="notif-bell">
                             <a class="nav-link position-relative" href="##" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="bi bi-bell"></i>
-                                <span id="notif-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill text-bg-danger"
+                                <span id="notif-badge" class="position-absolute top-0 end-0 badge rounded-pill text-bg-danger"
                                       style="font-size:0.65rem; #( local.bellUnread gt 0 ? '' : 'display:none;' )#">
                                     #encodeForHTML( local.bellUnread )#
                                 </span>
@@ -215,11 +217,10 @@
         </aside>
 
         <main class="app-main">
-            <div class="app-content-header">
-                <div class="container-fluid">
-                    <h1 class="mb-0 fs-3">#prc.pageTitle ?: "Dashboard"#</h1>
-                </div>
-            </div>
+            #view( view = "_partials/page_header", module = "core", args = {
+                title       : prc.pageTitle   ?: "Dashboard",
+                breadcrumbs : prc.breadcrumbs ?: []
+            } )#
             <div class="app-content">
                 <div class="container-fluid">
                     #getInstance( "messagebox@cbmessagebox" ).renderIt()#
@@ -229,42 +230,18 @@
         </main>
 
         <footer class="app-footer">
-            <div class="float-end d-none d-sm-inline">#encodeForHTML( local.brand.productName )# Agent</div>
-            <strong>#encodeForHTML( local.brand.footerText )#</strong>
+            <div class="float-end d-none d-sm-inline text-body-secondary small">
+                #encodeForHTML( local.brand.footerText )#
+            </div>
+            <strong>#encodeForHTML( local.brand.productName )# Agent</strong>
+            <bx:if len( tbxAppVersion() )>
+                <span class="text-body-secondary small ms-1">v#encodeForHTML( tbxAppVersion() )#</span>
+            </bx:if>
         </footer>
 
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-rc4/dist/js/adminlte.min.js"></script>
-
-    <!-- highlight.js: ships every language in the "common" bundle
-         (HTML/JS/CSS/SQL/JSON/shell/Markdown/CFML/etc.) plus the copy
-         button plugin. Auto-runs on DOMContentLoaded so any
-         <pre><code class="language-*"> rendered into the page is
-         highlighted with the atom-one-dark theme. Idempotent under
-         CBWire re-render thanks to highlightAll's mark-already-done
-         guard. -->
-    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/highlightjs-copy@1.0.6/dist/highlightjs-copy.min.js"></script>
-    <script>
-        if ( typeof hljs !== "undefined" ) {
-            if ( typeof CopyButtonPlugin !== "undefined" ) {
-                hljs.addPlugin( new CopyButtonPlugin() );
-            }
-            // BoxLang / CFML aren't shipped languages in highlight.js
-            // 11.x. The javascript grammar is the closest visual match
-            // (struct literals, double-quoted strings, var, function,
-            // line/block comments all line up), so we alias every name
-            // bx-markdown might emit (```boxlang, ```bx, ```bxs,
-            // ```cfscript, ```cfm, ```cfml) to javascript.
-            hljs.registerAliases( [ "boxlang", "bx", "bxs", "cfscript", "cfm", "cfml" ], { languageName: "javascript" } );
-            hljs.highlightAll();
-        }
-    </script>
-
-    #view( view = "_partials/attachment_dropzone", module = "core" )#
-    #tbxAssetJs( "agent" )#
+    #view( view = "_partials/layout_scripts", module = "core", args = { surface : "agent" } )#
 </body>
 </html>
 </bx:output>

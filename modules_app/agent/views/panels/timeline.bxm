@@ -1,27 +1,18 @@
 <bx:output>
-<div class="card mb-3">
-    <div class="card-header p-0">
-        <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
-           data-bs-toggle="collapse"
-           href="##timeline-card"
-           role="button"
-           aria-expanded="false"
-           aria-controls="timeline-card">
-            <span>Timeline</span>
-            <i class="bi bi-chevron-down"></i>
-        </a>
-    </div>
-    <div id="timeline-card" class="collapse">
-        <div class="card-body p-0">
-            <ul class="list-group list-group-flush small">
-                <bx:loop array="#prc.events#" item="local.e">
-                    <li class="list-group-item">
-                        <div class="text-body-secondary">#encodeForHTML( dateTimeFormat( local.e.getOccurredAt(), "yyyy-mm-dd HH:nn:ss" ) )#</div>
-                        <code>#encodeForHTML( local.e.getEventType() )#</code>
-                    </li>
-                </bx:loop>
-            </ul>
-        </div>
-    </div>
-</div>
+<bx:savecontent variable="local.body">
+    <ul class="list-group list-group-flush small">
+        <bx:loop array="#prc.events#" item="local.e">
+            <li class="list-group-item">
+                <div class="text-body-secondary">#encodeForHTML( dateTimeFormat( local.e.getOccurredAt(), "yyyy-mm-dd HH:nn:ss" ) )#</div>
+                <code>#encodeForHTML( local.e.getEventType() )#</code>
+            </li>
+        </bx:loop>
+    </ul>
+</bx:savecontent>
+#view( view = "_partials/collapsible_card", module = "core", args = {
+    id        : "timeline-card",
+    title     : "Timeline",
+    body      : local.body,
+    bodyClass : "p-0"
+} )#
 </bx:output>

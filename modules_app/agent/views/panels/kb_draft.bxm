@@ -1,28 +1,20 @@
 <bx:output>
 <bx:if prc.canDraftKbArticle ?: false>
     <bx:set local.t = prc.ticket >
-    <div class="card mb-3">
-        <div class="card-header p-0">
-            <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
-               data-bs-toggle="collapse"
-               href="##kb-draft-card"
-               role="button"
-               aria-expanded="false"
-               aria-controls="kb-draft-card">
-                <span>Draft KB article <span class="badge text-bg-info ms-2">AI</span></span>
-                <i class="bi bi-chevron-down"></i>
-            </a>
-        </div>
-        <div id="kb-draft-card" class="collapse">
-            <div class="card-body small">
-                <p class="mb-2 text-body-secondary">Generate an internal-only draft KB article from this resolved ticket. You will review and publish before customers see it.</p>
-                <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/draft-kb-article">
-                    <button class="btn btn-outline-info btn-sm w-100" type="submit">
-                        <i class="bi bi-journal-plus"></i> Draft KB article
-                    </button>
-                </form>
-            </div>
-        </div>
-    </div>
+    <bx:savecontent variable="local.body">
+        <p class="mb-2 text-body-secondary">Generate an internal-only draft KB article from this resolved ticket. You will review and publish before customers see it.</p>
+        <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/draft-kb-article">
+            <button class="btn btn-outline-info btn-sm w-100" type="submit">
+                <i class="bi bi-journal-plus"></i> Draft KB article
+            </button>
+        </form>
+    </bx:savecontent>
+    #view( view = "_partials/collapsible_card", module = "core", args = {
+        id        : "kb-draft-card",
+        title     : "Draft KB article",
+        badges    : [ { label : "AI", color : "info" } ],
+        bodyClass : "small",
+        body      : local.body
+    } )#
 </bx:if>
 </bx:output>

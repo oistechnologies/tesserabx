@@ -14,7 +14,8 @@
 <div class="card mb-3">
     <div class="card-header"><strong>Statuses</strong></div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0 align-middle">
+        <div class="table-responsive">
+        <table class="table table-striped table-hover mb-0 align-middle">
             <thead>
                 <tr>
                     <th>Label</th>
@@ -57,6 +58,7 @@
                 </bx:loop>
             </tbody>
         </table>
+        </div>
     </div>
 </div>
 

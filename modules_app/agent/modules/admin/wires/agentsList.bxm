@@ -46,11 +46,14 @@
             <div class="row g-2">
                 <div class="col-md-4">
                     <label class="form-label small text-body-secondary mb-1">Search</label>
-                    <input
-                        type="search"
-                        class="form-control"
-                        placeholder="email, name, or title"
-                        wire:model.live.debounce.300ms="q">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input
+                            type="search"
+                            class="form-control"
+                            placeholder="email, name, or title"
+                            wire:model.live.debounce.300ms="q">
+                    </div>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small text-body-secondary mb-1">Status</label>
@@ -112,7 +115,7 @@
     <!-- Table -->
     <div class="card">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-striped table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
                         <th style="width:2.5rem" class="text-center">

@@ -1,0 +1,75 @@
+<bx:output>
+<bx:script>
+    // Shared <head> block for the agent and portal layouts. Loads every
+    // vendor stylesheet self-hosted out of /includes/vendor/<pkg-version>/
+    // (so dev and air-gapped deploys do not depend on jsdelivr) plus the
+    // brand color override and the add-on CSS hook.
+    //
+    // AdminLTE 4 rc7's adminlte.min.css bundles Bootstrap 5.3.x, so the
+    // earlier separate bootstrap.min.css link is gone — adding it back
+    // would just duplicate the Bootstrap reset.
+    //
+    // Required args:
+    //   surface  "agent" | "portal" — drives the <meta name="surface"> tag
+    //            and the title suffix.
+    local.surface  = args.surface ?: "portal";
+    local.brand    = getInstance( "SettingsService@admin" ).getBranding();
+    local.suffix   = local.surface eq "agent" ? " Agent" : " Portal";
+    local.pageTtl  = encodeForHTML( local.brand.productName ) & local.suffix;
+</bx:script>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="##0d6efd" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="##1a1a1a" media="(prefers-color-scheme: dark)">
+    <meta name="surface" content="#encodeForHTMLAttribute( local.surface )#">
+    <title>#local.pageTtl#</title>
+
+    <!-- Theme pre-paint. Reads the user's saved choice (light / dark /
+         auto) and sets data-bs-theme on <html> BEFORE any CSS evaluates,
+         so a dark-mode user reloading the page never sees a light-mode
+         flash. Defaults to "auto" when nothing is stored, which falls
+         through to the OS preference via prefers-color-scheme. The
+         dropdown UI and click wiring live in layout_scripts.bxm and the
+         theme_toggle partial; this snippet only needs to *resolve* the
+         initial state. -->
+    <script>
+    (function(){
+        try {
+            var stored   = localStorage.getItem( 'tbx-theme' ) || 'auto';
+            var resolved = stored === 'auto'
+                ? ( window.matchMedia( '(prefers-color-scheme: dark)' ).matches ? 'dark' : 'light' )
+                : stored;
+            document.documentElement.setAttribute( 'data-bs-theme', resolved );
+        } catch ( e ) { /* localStorage blocked (private mode) -> fall through to Bootstrap default */ }
+    })();
+    </script>
+
+    <!-- Source Sans 3 (AdminLTE 4 rc7 default UI font). Loaded with the
+         print/onload swap so a Fontsource outage degrades to the system
+         font instead of blocking first paint. -->
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.0.12/index.css"
+          media="print"
+          onload="this.media='all'">
+
+    <!-- Vendor CSS, self-hosted under /includes/vendor/. -->
+    <link rel="stylesheet" href="/includes/vendor/overlayscrollbars-2.11.0/styles/overlayscrollbars.min.css">
+    <link rel="stylesheet" href="/includes/vendor/bootstrap-icons-1.13.1/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/includes/vendor/adminlte-4.0.0-rc7/css/adminlte.min.css">
+
+    <!-- highlight.js: syntax highlighting for ``` code blocks rendered
+         through bx-markdown. atom-one-dark theme + copy-on-click button. -->
+    <link rel="stylesheet" href="/includes/vendor/highlightjs-11.10.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="/includes/vendor/highlightjs-copy-1.0.6/highlightjs-copy.min.css">
+
+    <!-- Brand primary color override. Drives every Bootstrap utility that
+         keys off --bs-primary (.btn-primary, .text-bg-primary, ...). -->
+    <style>:root { --bs-primary: #encodeForCSS( local.brand.primaryColor )#; }</style>
+
+    <!-- Add-on CSS contributions for this surface. Add-ons register via
+         settings.tesserabx.assets in their ModuleConfig. -->
+    #tbxAssetCss( local.surface )#
+</head>
+</bx:output>

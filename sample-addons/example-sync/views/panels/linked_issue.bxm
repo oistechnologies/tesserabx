@@ -1,24 +1,34 @@
 <bx:output>
-<!--
+<!---
     Ticket right-column panel contributed by example-sync.
 
     The panel registry calls this view with the current ticket
     available as `prc.ticket` (set by the agent surface's ticket
     show handler). For the stub we just show a placeholder.
--->
-<div class="card mb-3">
-    <div class="card-header py-2">
-        <a class="d-flex align-items-center text-decoration-none text-body" data-bs-toggle="collapse" href="##example-sync-linked-issue">
-            <span class="me-2"><i class="bi bi-arrow-repeat"></i> External link</span>
-            <span class="ms-auto"><span class="badge text-bg-secondary">none</span> <i class="bi bi-chevron-down"></i></span>
-        </a>
-    </div>
-    <div class="collapse" id="example-sync-linked-issue">
-        <div class="card-body small text-body-secondary">
-            No external issue is linked to this ticket. Use the
-            <strong>Example Sync &middot; Link this ticket</strong>
-            automation action (or call the Example Sync API) to create one.
-        </div>
-    </div>
-</div>
+
+    Add-on panels render through the same AdminLTE chrome as core
+    panels: capture the body with a `bx:savecontent` block and call
+    the shared `_partials/collapsible_card` partial in the core
+    module. Required args: `title` + `body`. Optional: `id`,
+    `badges`, `color`, `collapsed` (default true), `bodyClass`.
+    See `docs/EXTENSIONS.md` and `modules_app/core/README.md` for
+    the contract.
+
+    Note the 3-dash CFML-style comment delimiters above. BoxLang
+    parses `<bx:*` tags inside HTML `<!-- -->` comments, so any
+    reference to a `bx:` tag name in documentation has to live
+    inside `<!--- --->` (server-stripped) instead.
+--->
+<bx:savecontent variable="local.body">
+    No external issue is linked to this ticket. Use the
+    <strong>Example Sync &middot; Link this ticket</strong>
+    automation action (or call the Example Sync API) to create one.
+</bx:savecontent>
+#view( view = "_partials/collapsible_card", module = "core", args = {
+    id        : "example-sync-linked-issue",
+    title     : "External link",
+    badges    : [ { label : "none", color : "secondary" } ],
+    bodyClass : "small text-body-secondary",
+    body      : local.body
+} )#
 </bx:output>

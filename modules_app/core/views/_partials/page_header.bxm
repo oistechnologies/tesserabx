@@ -1,0 +1,47 @@
+<bx:output>
+<bx:script>
+    // AdminLTE app-content-header block: page title on the left,
+    // optional breadcrumb trail on the right. Both layouts call this
+    // partial so the chrome stays consistent across surfaces.
+    //
+    // Required args:
+    //   title  page title text. Emitted raw (NOT HTML-encoded) so a
+    //          handler can include badge markup if it wants — match
+    //          the existing behavior of `prc.pageTitle` interpolation
+    //          in the layouts.
+    //
+    // Optional args:
+    //   breadcrumbs  array of { label, link } structs. The final entry
+    //                is rendered as the active/current page (no link)
+    //                regardless of whether `link` is supplied. Pass an
+    //                empty array (or omit) to suppress the breadcrumb
+    //                column entirely.
+    local.title       = args.title       ?: "";
+    local.breadcrumbs = args.breadcrumbs ?: [];
+</bx:script>
+<div class="app-content-header">
+    <div class="container-fluid">
+        <div class="row align-items-center">
+            <div class="col-sm-6">
+                <h1 class="mb-0 fs-3">#local.title#</h1>
+            </div>
+            <bx:if isArray( local.breadcrumbs ) && arrayLen( local.breadcrumbs )>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-end mb-0" aria-label="Breadcrumb">
+                        <bx:loop array="#local.breadcrumbs#" index="local.bcIdx" item="local.bc">
+                            <bx:set local.bcIsLast = local.bcIdx eq arrayLen( local.breadcrumbs ) >
+                            <bx:if !local.bcIsLast && len( local.bc.link ?: "" )>
+                                <li class="breadcrumb-item">
+                                    <a href="#encodeForHTMLAttribute( local.bc.link )#">#encodeForHTML( local.bc.label ?: "" )#</a>
+                                </li>
+                            <bx:else>
+                                <li class="breadcrumb-item active" aria-current="page">#encodeForHTML( local.bc.label ?: "" )#</li>
+                            </bx:if>
+                        </bx:loop>
+                    </ol>
+                </div>
+            </bx:if>
+        </div>
+    </div>
+</div>
+</bx:output>

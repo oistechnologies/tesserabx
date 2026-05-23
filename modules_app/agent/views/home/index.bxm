@@ -1,43 +1,65 @@
 <bx:output>
+<!--
+    Agent dashboard placeholder tiles. The reporting module owns
+    the real KPI widgets (DashboardWidgetRegistry contributions); this
+    home page is the agent's first landing after sign-in and currently
+    shows static zero counts. When B2 wires the live counts here we
+    keep the same .small-box markup via the core partial; only the
+    metric/link args change.
+-->
 <div class="row g-3">
     <div class="col-12 col-md-6 col-xl-3">
-        <div class="card text-bg-primary">
-            <div class="card-body">
-                <h5 class="card-title">Open tickets</h5>
-                <p class="display-6 mb-0">0</p>
-            </div>
-        </div>
+        #view( view = "_partials/small_box", module = "core", args = {
+            color     : "primary",
+            metric    : "0",
+            label     : "Open tickets",
+            icon      : "bi bi-ticket-detailed",
+            link      : "/agent/tickets?status=open",
+            linkLabel : "View open queue"
+        } )#
     </div>
     <div class="col-12 col-md-6 col-xl-3">
-        <div class="card text-bg-warning">
-            <div class="card-body">
-                <h5 class="card-title">Awaiting reply</h5>
-                <p class="display-6 mb-0">0</p>
-            </div>
-        </div>
+        #view( view = "_partials/small_box", module = "core", args = {
+            color     : "warning",
+            metric    : "0",
+            label     : "Awaiting reply",
+            icon      : "bi bi-hourglass-split",
+            link      : "/agent/tickets?status=pending",
+            linkLabel : "View pending"
+        } )#
     </div>
     <div class="col-12 col-md-6 col-xl-3">
-        <div class="card text-bg-danger">
-            <div class="card-body">
-                <h5 class="card-title">SLA at risk</h5>
-                <p class="display-6 mb-0">0</p>
-            </div>
-        </div>
+        #view( view = "_partials/small_box", module = "core", args = {
+            color     : "danger",
+            metric    : "0",
+            label     : "SLA at risk",
+            icon      : "bi bi-exclamation-triangle",
+            link      : "/agent/tickets?sla=at-risk",
+            linkLabel : "View at-risk"
+        } )#
     </div>
     <div class="col-12 col-md-6 col-xl-3">
-        <div class="card text-bg-success">
-            <div class="card-body">
-                <h5 class="card-title">Resolved today</h5>
-                <p class="display-6 mb-0">0</p>
-            </div>
-        </div>
+        #view( view = "_partials/small_box", module = "core", args = {
+            color     : "success",
+            metric    : "0",
+            label     : "Resolved today",
+            icon      : "bi bi-check2-circle",
+            link      : "/agent/tickets?status=resolved",
+            linkLabel : "View resolved"
+        } )#
     </div>
 
     <div class="col-12">
         <div class="card">
-            <div class="card-header">Welcome</div>
+            <div class="card-header">
+                <h3 class="card-title mb-0">Welcome</h3>
+            </div>
             <div class="card-body">
-                <p class="mb-0">Agent dashboard placeholder. Phase 1 wires the queue, ticket list, and reply panes.</p>
+                <p class="mb-0">
+                    Agent dashboard placeholder. The full live dashboard is at
+                    <a href="/agent/reports">Reports</a>; once B2 wires the live
+                    counts above, this page becomes the primary landing.
+                </p>
             </div>
         </div>
     </div>

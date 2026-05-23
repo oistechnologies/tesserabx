@@ -1,21 +1,41 @@
 <bx:output>
-<div class="row justify-content-center">
-    <div class="col-12 col-md-6 col-lg-5">
-        <div class="card">
-            <div class="card-body">
-                <h2 class="card-title mb-3">Agent sign in</h2>
-                <form method="post" action="/agent/login">
-                    <div class="mb-3">
-                        <label for="email" class="form-label">Email</label>
-                        <input type="email" class="form-control" id="email" name="email" required autofocus>
+<bx:set local.brand = getInstance( "SettingsService@admin" ).getBranding() >
+<div class="login-box">
+    <div class="card card-outline card-primary">
+        <div class="card-header text-center">
+            <a href="/agent" class="link-body-emphasis text-decoration-none">
+                <bx:if len( local.brand.logoUrl )>
+                    <img src="#encodeForHTMLAttribute( local.brand.logoUrl )#"
+                         alt="#encodeForHTMLAttribute( local.brand.productName )#"
+                         class="mb-2"
+                         style="max-height:48px">
+                </bx:if>
+                <h1 class="h4 mb-0 fw-semibold">#encodeForHTML( local.brand.productName )#</h1>
+            </a>
+            <div class="small text-body-secondary mt-1">Agent sign in</div>
+        </div>
+        <div class="card-body login-card-body">
+            #getInstance( "messagebox@cbmessagebox" ).renderIt()#
+            <p class="login-box-msg">Sign in to start your session</p>
+            <form method="post" action="/agent/login">
+                <div class="input-group mb-3">
+                    <div class="form-floating">
+                        <input type="email" class="form-control" id="email" name="email" required autofocus autocomplete="username" placeholder="agent@example.com">
+                        <label for="email">Email</label>
                     </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" required>
+                    <div class="input-group-text"><i class="bi bi-envelope"></i></div>
+                </div>
+                <div class="input-group mb-3">
+                    <div class="form-floating">
+                        <input type="password" class="form-control" id="password" name="password" required autocomplete="current-password" placeholder="">
+                        <label for="password">Password</label>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Sign in</button>
-                </form>
-            </div>
+                    <div class="input-group-text"><i class="bi bi-lock-fill"></i></div>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-box-arrow-in-right me-1"></i> Sign in
+                </button>
+            </form>
         </div>
     </div>
 </div>

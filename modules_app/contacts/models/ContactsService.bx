@@ -196,11 +196,53 @@ class singleton=true {
         return contact;
     }
 
+    /**
+     * Update the editable profile fields on a contact. Targeted
+     * UPDATE (NOT contact.save()) because Quick's save() re-binds
+     * every column on the entity, including `mfa_recovery_codes`
+     * (jsonb) which JDBC hands back as a PGobject. The JDBC driver
+     * can't coerce that PGobject back into a varchar bind, so save()
+     * on any MFA-enrolled contact throws BoxCastException at the
+     * controller boundary. See memory note
+     * [boxlang-pgobject-quick-save] for the broader pattern.
+     *
+     * Mirrors the agent-side workaround in Mfa.bx and the existing
+     * comments there.
+     */
+    public any function updateContactProfile(
+        required string  id,
+        required string  firstName,
+        required string  lastName,
+        required boolean isActive
+    ){
+        queryExecute(
+            "UPDATE contacts
+             SET    first_name = :firstName,
+                    last_name  = :lastName,
+                    is_active  = cast( :isActive as boolean ),
+                    updated_at = NOW()
+             WHERE  id = :id",
+            {
+                id        : arguments.id,
+                firstName : arguments.firstName,
+                lastName  : arguments.lastName,
+                isActive  : arguments.isActive
+            }
+        );
+        return getContactById( arguments.id );
+    }
+
     public any function deactivateContact( required string id ){
         var contact = getContactById( arguments.id );
         if ( isNull( contact ) ) return javaCast( "null", "" );
+        // Targeted UPDATE for the same reason updateContactProfile uses
+        // one — Quick's save() would rebind mfa_recovery_codes (PGobject)
+        // and fail at the JDBC layer.
+        queryExecute(
+            "UPDATE contacts SET is_active = FALSE, updated_at = NOW() WHERE id = :id",
+            { id : arguments.id }
+        );
         contact.setIsActive( false );
-        contact.save();
         recordAudit(
             eventType      : "contact.deactivated",
             entityType     : "Contact",

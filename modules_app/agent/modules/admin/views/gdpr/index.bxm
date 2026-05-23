@@ -12,6 +12,7 @@
 <form method="get" action="/agent/admin/gdpr" class="card mb-3">
     <div class="card-body">
         <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
             <input type="search" name="q" class="form-control" placeholder="alice@example.com or contact id"
                    value="#encodeForHTMLAttribute( prc.q )#">
             <button class="btn btn-primary" type="submit">Search</button>
@@ -26,7 +27,8 @@
 <bx:else>
     <div class="card">
         <div class="card-body p-0">
-            <table class="table table-hover mb-0 align-middle">
+            <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0 align-middle">
                 <thead>
                     <tr>
                         <th>Email</th>
@@ -62,6 +64,7 @@
                     </bx:loop>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </bx:if>

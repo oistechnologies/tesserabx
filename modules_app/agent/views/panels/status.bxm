@@ -1,28 +1,19 @@
 <bx:output>
 <bx:set local.t = prc.ticket >
-<div class="card mb-3">
-    <div class="card-header p-0">
-        <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
-           data-bs-toggle="collapse"
-           href="##status-card"
-           role="button"
-           aria-expanded="false"
-           aria-controls="status-card">
-            <span>Status <span class="badge text-bg-primary ms-2">#encodeForHTML( local.t.getStatus() )#</span></span>
-            <i class="bi bi-chevron-down"></i>
-        </a>
-    </div>
-    <div id="status-card" class="collapse">
-        <div class="card-body">
-            <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/status" class="d-flex gap-2">
-                <select class="form-select" name="status">
-                    <bx:loop array="#prc.statuses#" item="local.s">
-                        <option value="#encodeForHTMLAttribute( local.s )#"<bx:if local.t.getStatus() eq local.s> selected</bx:if>>#encodeForHTML( local.s )#</option>
-                    </bx:loop>
-                </select>
-                <button class="btn btn-outline-primary" type="submit">Set</button>
-            </form>
-        </div>
-    </div>
-</div>
+<bx:savecontent variable="local.body">
+    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/status" class="d-flex gap-2">
+        <select class="form-select" name="status">
+            <bx:loop array="#prc.statuses#" item="local.s">
+                <option value="#encodeForHTMLAttribute( local.s )#"<bx:if local.t.getStatus() eq local.s> selected</bx:if>>#encodeForHTML( local.s )#</option>
+            </bx:loop>
+        </select>
+        <button class="btn btn-outline-primary" type="submit">Set</button>
+    </form>
+</bx:savecontent>
+#view( view = "_partials/collapsible_card", module = "core", args = {
+    id     : "status-card",
+    title  : "Status",
+    badges : [ { label : local.t.getStatus(), color : "primary" } ],
+    body   : local.body
+} )#
 </bx:output>

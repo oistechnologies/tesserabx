@@ -1,0 +1,45 @@
+<bx:output>
+<!-- Color-mode dropdown for the agent and portal navbars. Always
+     visible (renders on signed-in pages AND the login pages) so a user
+     can pick the theme before authenticating. The actual data-bs-theme
+     attribute on <html> is set by the pre-paint script in layout_head;
+     this dropdown only writes localStorage and triggers the apply
+     callback wired in layout_scripts.bxm. Three values: light, dark,
+     auto. "auto" follows prefers-color-scheme and re-resolves when the
+     OS preference changes. -->
+<li class="nav-item dropdown">
+    <button class="btn btn-link nav-link dropdown-toggle d-flex align-items-center"
+            id="tbx-theme-toggle-button"
+            type="button"
+            data-bs-toggle="dropdown"
+            aria-expanded="false"
+            aria-label="Toggle color theme"
+            title="Toggle color theme">
+        <i class="bi bi-circle-half" data-tbx-theme-icon></i>
+        <span class="visually-hidden" data-tbx-theme-label>Auto</span>
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="tbx-theme-toggle-button">
+        <li>
+            <button type="button" class="dropdown-item d-flex align-items-center" data-tbx-theme-value="light">
+                <i class="bi bi-sun-fill me-2 opacity-75"></i>
+                <span>Light</span>
+                <i class="bi bi-check-lg ms-auto d-none" data-tbx-theme-check></i>
+            </button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item d-flex align-items-center" data-tbx-theme-value="dark">
+                <i class="bi bi-moon-stars-fill me-2 opacity-75"></i>
+                <span>Dark</span>
+                <i class="bi bi-check-lg ms-auto d-none" data-tbx-theme-check></i>
+            </button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item d-flex align-items-center" data-tbx-theme-value="auto">
+                <i class="bi bi-circle-half me-2 opacity-75"></i>
+                <span>Auto</span>
+                <i class="bi bi-check-lg ms-auto d-none" data-tbx-theme-check></i>
+            </button>
+        </li>
+    </ul>
+</li>
+</bx:output>

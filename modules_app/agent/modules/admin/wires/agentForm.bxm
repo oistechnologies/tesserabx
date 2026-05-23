@@ -44,7 +44,10 @@
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label">Email <span class="text-danger">*</span></label>
-                                <input type="email" class="form-control" wire:model="email" #( isEdit ? 'disabled' : '' )#>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+                                    <input type="email" class="form-control" wire:model="email" #( isEdit ? 'disabled' : '' )#>
+                                </div>
                                 <bx:if isEdit>
                                     <div class="form-text">Email changes are made by the agent through My Account.</div>
                                 </bx:if>
@@ -65,11 +68,17 @@
                             <bx:if !isEdit>
                                 <div class="col-md-6">
                                     <label class="form-label">Initial password <span class="text-danger">*</span></label>
-                                    <input type="password" class="form-control" wire:model="password">
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                                        <input type="password" class="form-control" wire:model="password">
+                                    </div>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Confirm password <span class="text-danger">*</span></label>
-                                    <input type="password" class="form-control" wire:model="passwordConfirm">
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                                        <input type="password" class="form-control" wire:model="passwordConfirm">
+                                    </div>
                                 </div>
                                 <div class="col-12">
                                     <div class="form-text">
@@ -126,11 +135,17 @@
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label">Work phone</label>
-                                <input type="tel" class="form-control" wire:model="phoneWork">
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-telephone"></i></span>
+                                    <input type="tel" class="form-control" wire:model="phoneWork">
+                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Mobile phone</label>
-                                <input type="tel" class="form-control" wire:model="phoneMobile">
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-phone"></i></span>
+                                    <input type="tel" class="form-control" wire:model="phoneMobile">
+                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Slack handle</label>

@@ -1,0 +1,65 @@
+<bx:output>
+<bx:script>
+    // AdminLTE 4 .small-box dashboard tile. Use for any KPI that
+    // reduces to one metric + a label, with an optional secondary
+    // caption line and an optional "View details" footer link.
+    //
+    // Reference markup lives at
+    // /Users/mrigsby/Data/BoxLang-Dev/TesseraBX/Assets/AdminLTE-4.0.0-rc7/dist/widgets/small-box.html.
+    // The CSS positions .small-box-icon absolutely (font-size: 70px,
+    // color rgba(0,0,0,.15)) so a Bootstrap Icon glyph works in the
+    // same slot as AdminLTE's reference SVG without us having to
+    // ship raw SVG paths.
+    //
+    // Required args:
+    //   color    "primary" | "success" | "warning" | "danger" | "info"
+    //            | "secondary" — drives .text-bg-{color}
+    //   metric   string-or-html: the big number. Pass through as raw
+    //            so callers can include <small>%</small>, <sup>%</sup>,
+    //            etc. Callers must encode any user-supplied numbers
+    //            before passing them in.
+    //   label    string: the descriptive title under the metric. Will
+    //            be HTML-encoded for you.
+    //   icon     string: Bootstrap Icon class (e.g. "bi bi-cart").
+    //
+    // Optional args:
+    //   caption    string: a small line below the metric (e.g.
+    //              "last 30 days"). HTML-encoded. Pass empty/null to
+    //              omit.
+    //   link       string: footer link URL. When empty, the footer
+    //              is omitted entirely.
+    //   linkLabel  string: footer link text (default "View details").
+    local.color     = args.color     ?: "primary";
+    local.metric    = args.metric    ?: "0";
+    local.label     = args.label     ?: "";
+    local.icon      = args.icon      ?: "bi bi-bar-chart";
+    local.caption   = args.caption   ?: "";
+    local.link      = args.link      ?: "";
+    local.linkLabel = args.linkLabel ?: "View details";
+
+    // Warning has a yellow background with dark text, so its footer
+    // link uses link-dark. The other semantic colors all paint a
+    // dark background with light text and want link-light.
+    local.linkClass = local.color eq "warning" ? "link-dark" : "link-light";
+</bx:script>
+<!-- flex-fill so the box stretches when its column is itself a flex
+     container (the /agent/reports grid wraps every widget in
+     `col-... d-flex` for equal-height rows). On block-layout columns
+     like /agent home, flex-fill is a no-op. -->
+<div class="small-box flex-fill text-bg-#encodeForHTMLAttribute( local.color )#">
+    <div class="inner">
+        <h3>#local.metric#</h3>
+        <p class="mb-0">#encodeForHTML( local.label )#</p>
+        <bx:if len( local.caption )>
+            <p class="small opacity-75 mb-0 mt-1">#encodeForHTML( local.caption )#</p>
+        </bx:if>
+    </div>
+    <i class="small-box-icon #encodeForHTMLAttribute( local.icon )#" aria-hidden="true"></i>
+    <bx:if len( local.link )>
+        <a href="#encodeForHTMLAttribute( local.link )#"
+           class="small-box-footer #local.linkClass# link-underline-opacity-0 link-underline-opacity-50-hover">
+            #encodeForHTML( local.linkLabel )# <i class="bi bi-arrow-right" aria-hidden="true"></i>
+        </a>
+    </bx:if>
+</div>
+</bx:output>

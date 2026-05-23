@@ -82,6 +82,15 @@ class {
         // SLA policy matches before the test's own fixture).
         purgeFixtureAgents();
         purgeFixtureSlaPolicies();
+        // Order matters: rec-spec cleanup creates more orphan
+        // notifications (the spec's cleanupTicket inlines this list
+        // but only when the it() block reaches the cleanup line —
+        // an early-throw expect() leaves the rows behind). Then the
+        // orphan-notification sweep catches whatever's left from
+        // this purge AND from purgeFixtureAgents above (which NULLs
+        // FKs but doesn't touch notifications).
+        purgeFixtureRecurringSpecData();
+        purgeOrphanNotifications();
         return true;
     }
 
@@ -155,6 +164,81 @@ class {
         } catch ( any e ) {
             writeLog(
                 text : "tests/Application.bx purgeFixtureSlaPolicies skipped: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * Idempotent cleanup of leftover RecurringTicketServiceSpec
+     * fixtures: the tickets materialized by runTemplate() and the
+     * recurring_tickets templates themselves.
+     *
+     * Patterns matched (kept narrow so a real user-created ticket
+     * with the same subject is not accidentally clobbered):
+     *   - tickets.subject LIKE 'Weekly review for Rec Spec Org %'
+     *   - tickets.subject IN ('Quarterly walkthrough',
+     *                         'Unattached recurring check',
+     *                         'Daily smoke check')
+     *   - recurring_tickets.name LIKE 'rec-spec-%'
+     *
+     * The spec inlines a per-ticket DELETE cascade
+     * (notifications + ticket_approvals + ticket_events +
+     * ticket_messages + attachments + audit_events) at the end of
+     * each it() block, but any expect() that fails earlier in the
+     * block skips the cleanup. This sweep does the same cascade.
+     */
+    private void function purgeFixtureRecurringSpecData(){
+        try {
+            queryExecute(
+                "WITH doomed_tickets AS (
+                    SELECT id FROM tickets
+                    WHERE  subject LIKE 'Weekly review for Rec Spec Org %'
+                       OR  subject IN ( 'Quarterly walkthrough', 'Unattached recurring check', 'Daily smoke check' )
+                ),
+                d1 AS ( DELETE FROM notifications      WHERE ticket_id IN ( SELECT id FROM doomed_tickets ) RETURNING 1 ),
+                d2 AS ( DELETE FROM ticket_approvals   WHERE ticket_id IN ( SELECT id FROM doomed_tickets ) RETURNING 1 ),
+                d3 AS ( DELETE FROM ticket_events      WHERE ticket_id IN ( SELECT id FROM doomed_tickets ) RETURNING 1 ),
+                d4 AS ( DELETE FROM ticket_messages    WHERE ticket_id IN ( SELECT id FROM doomed_tickets ) RETURNING 1 ),
+                d5 AS ( DELETE FROM attachments        WHERE ticket_id IN ( SELECT id FROM doomed_tickets ) RETURNING 1 ),
+                d6 AS ( DELETE FROM audit_events       WHERE entity_id IN ( SELECT id FROM doomed_tickets ) RETURNING 1 ),
+                d7 AS ( DELETE FROM recurring_tickets  WHERE name LIKE 'rec-spec-%' RETURNING 1 )
+                DELETE FROM tickets WHERE id IN ( SELECT id FROM doomed_tickets )"
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "tests/Application.bx purgeFixtureRecurringSpecData skipped: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * Sweep notifications whose parent (ticket, agent recipient, or
+     * contact recipient) has been deleted. Orphans accumulate because
+     * purgeFixtureAgents NULLs FKs but never touches notifications,
+     * and the per-spec cleanup in RecurringTicketServiceSpec /
+     * NotificationsServiceSpec / etc. only catches the rows it
+     * knows about — fan-out rows to other agents become orphans the
+     * moment those agents get purged.
+     *
+     * Notifications carry no FK constraint to tickets/agents/contacts
+     * (the recipient_type discriminator means a single FK wouldn't
+     * fit), so this is a manual referential-integrity sweep.
+     */
+    private void function purgeOrphanNotifications(){
+        try {
+            queryExecute(
+                "DELETE FROM notifications n
+                 WHERE  ( n.ticket_id IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM tickets  t WHERE t.id = n.ticket_id ) )
+                    OR  ( n.recipient_type = 'agent'   AND NOT EXISTS ( SELECT 1 FROM agents   a WHERE a.id = n.recipient_id ) )
+                    OR  ( n.recipient_type = 'contact' AND NOT EXISTS ( SELECT 1 FROM contacts c WHERE c.id = n.recipient_id ) )"
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "tests/Application.bx purgeOrphanNotifications skipped: " & e.message,
                 log  : "tesserabx",
                 type : "warning"
             );

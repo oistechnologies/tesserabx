@@ -15,37 +15,39 @@
 <bx:if len( prc.activeOrgId ?: "" )>
     <div class="card">
         <div class="card-body p-0">
-            <table class="table table-hover mb-0 align-middle">
-                <thead>
-                    <tr>
-                        <th>Email</th>
-                        <th>Name</th>
-                        <th>Status</th>
-                        <th class="text-end">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <bx:if !arrayLen( prc.contacts )>
-                        <tr><td colspan="4" class="text-center text-body-secondary py-4">No contacts in this organization yet.</td></tr>
-                    </bx:if>
-                    <bx:loop array="#prc.contacts#" item="contact">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover mb-0 align-middle">
+                    <thead>
                         <tr>
-                            <td><a href="/agent/contacts/#encodeForURL( contact.getId() )#">#encodeForHTML( contact.getEmail() )#</a></td>
-                            <td>#encodeForHTML( ( contact.getFirstName() ?: "" ) & " " & ( contact.getLastName() ?: "" ) )#</td>
-                            <td>
-                                <bx:if contact.getIsActive()>
-                                    <span class="badge text-bg-success">Active</span>
-                                <bx:else>
-                                    <span class="badge text-bg-secondary">Inactive</span>
-                                </bx:if>
-                            </td>
-                            <td class="text-end">
-                                <a class="btn btn-sm btn-outline-secondary" href="/agent/contacts/#encodeForURL( contact.getId() )#/edit">Edit</a>
-                            </td>
+                            <th>Email</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
                         </tr>
-                    </bx:loop>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        <bx:if !arrayLen( prc.contacts )>
+                            <tr><td colspan="4" class="text-center text-body-secondary py-4">No contacts in this organization yet.</td></tr>
+                        </bx:if>
+                        <bx:loop array="#prc.contacts#" item="contact">
+                            <tr>
+                                <td><a href="/agent/contacts/#encodeForURL( contact.getId() )#">#encodeForHTML( contact.getEmail() )#</a></td>
+                                <td>#encodeForHTML( ( contact.getFirstName() ?: "" ) & " " & ( contact.getLastName() ?: "" ) )#</td>
+                                <td>
+                                    <bx:if contact.getIsActive()>
+                                        <span class="badge text-bg-success">Active</span>
+                                    <bx:else>
+                                        <span class="badge text-bg-secondary">Inactive</span>
+                                    </bx:if>
+                                </td>
+                                <td class="text-end">
+                                    <a class="btn btn-sm btn-outline-secondary" href="/agent/contacts/#encodeForURL( contact.getId() )#/edit">Edit</a>
+                                </td>
+                            </tr>
+                        </bx:loop>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 <bx:else>

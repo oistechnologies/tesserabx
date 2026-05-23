@@ -1,0 +1,176 @@
+<bx:output>
+<bx:script>
+    // Shared end-of-body script block for the agent and portal layouts.
+    // Loads every vendor JS file self-hosted out of /includes/vendor/<pkg-version>/
+    // (matching the head partial), wires the OverlayScrollbars sidebar
+    // init the way the AdminLTE 4 rc7 reference pages do, runs the
+    // highlight.js pass, drops in the global attachment-dropzone partial,
+    // and finally invokes the add-on JS hook.
+    //
+    // Required args:
+    //   surface  "agent" | "portal" — passed straight through to the
+    //            add-on hook so add-ons can target a single surface.
+    local.surface = args.surface ?: "portal";
+</bx:script>
+
+    <!-- Vendor JS, self-hosted under /includes/vendor/. The Bootstrap
+         "bundle" build already includes Popper, so no separate popper
+         script is needed. -->
+    <script src="/includes/vendor/overlayscrollbars-2.11.0/browser/overlayscrollbars.browser.es6.min.js"></script>
+    <script src="/includes/vendor/bootstrap-5.3.7/js/bootstrap.bundle.min.js"></script>
+    <script src="/includes/vendor/adminlte-4.0.0-rc7/js/adminlte.min.js"></script>
+
+    <!-- OverlayScrollbars init for the sidebar. Lifted verbatim from
+         AdminLTE 4 rc7's reference examples; skips mobile so touch
+         scrolling stays native. -->
+    <script>
+    (function(){
+        var SELECTOR_SIDEBAR_WRAPPER = '.sidebar-wrapper';
+        var Default = {
+            scrollbarTheme       : 'os-theme-light',
+            scrollbarAutoHide    : 'leave',
+            scrollbarClickScroll : true
+        };
+        document.addEventListener( 'DOMContentLoaded', function(){
+            var sidebarWrapper = document.querySelector( SELECTOR_SIDEBAR_WRAPPER );
+            var isMobile       = window.innerWidth <= 992;
+            if (
+                sidebarWrapper
+                && typeof OverlayScrollbarsGlobal !== 'undefined'
+                && OverlayScrollbarsGlobal.OverlayScrollbars !== undefined
+                && !isMobile
+            ) {
+                OverlayScrollbarsGlobal.OverlayScrollbars( sidebarWrapper, {
+                    scrollbars : {
+                        theme       : Default.scrollbarTheme,
+                        autoHide    : Default.scrollbarAutoHide,
+                        clickScroll : Default.scrollbarClickScroll
+                    }
+                });
+            }
+        });
+    })();
+    </script>
+
+    <!-- highlight.js: ships every language in the "common" bundle
+         (HTML/JS/CSS/SQL/JSON/shell/Markdown/CFML/etc.) plus the copy
+         button plugin. Auto-runs on DOMContentLoaded so any
+         <pre><code class="language-*"> rendered into the page is
+         highlighted with the atom-one-dark theme. Idempotent under
+         CBWire re-render thanks to highlightAll's mark-already-done
+         guard. -->
+    <script src="/includes/vendor/highlightjs-11.10.0/highlight.min.js"></script>
+    <script src="/includes/vendor/highlightjs-copy-1.0.6/highlightjs-copy.min.js"></script>
+    <script>
+        if ( typeof hljs !== "undefined" ) {
+            if ( typeof CopyButtonPlugin !== "undefined" ) {
+                hljs.addPlugin( new CopyButtonPlugin() );
+            }
+            // BoxLang / CFML aren't shipped languages in highlight.js
+            // 11.x. The javascript grammar is the closest visual match
+            // (struct literals, double-quoted strings, var, function,
+            // line/block comments all line up), so we alias every name
+            // bx-markdown might emit (```boxlang, ```bx, ```bxs,
+            // ```cfscript, ```cfm, ```cfml) to javascript.
+            hljs.registerAliases( [ "boxlang", "bx", "bxs", "cfscript", "cfm", "cfml" ], { languageName: "javascript" } );
+            hljs.highlightAll();
+        }
+    </script>
+
+    <!-- Sidebar-collapse persistence. AdminLTE's data-lte-toggle="sidebar"
+         handler flips body.sidebar-collapse synchronously on click; we
+         use a delegated listener to mirror the result into localStorage.
+         The pre-paint snippet at the top of <body> in each layout
+         re-applies it on the next load. -->
+    <script>
+    document.addEventListener( 'click', function( e ){
+        var btn = e.target.closest( '[data-lte-toggle="sidebar"]' );
+        if ( !btn ) return;
+        // AdminLTE toggles the class during its own click handler.
+        // Read the new state on the next tick so we capture the result
+        // rather than the pre-toggle value.
+        setTimeout( function(){
+            try {
+                var collapsed = document.body.classList.contains( 'sidebar-collapse' );
+                localStorage.setItem( 'tbx-sidebar', collapsed ? 'collapsed' : 'expanded' );
+            } catch ( e ) { /* localStorage blocked -> choice does not persist */ }
+        }, 0 );
+    } );
+    </script>
+
+    <!-- Theme toggle wire-up. The pre-paint script in layout_head has
+         already resolved data-bs-theme; this block just keeps the
+         dropdown's icons/check-marks in sync with the stored choice,
+         handles click events to persist a new choice, and reapplies
+         when the OS preference flips while the user is on "auto". -->
+    <script>
+    (function(){
+        var STORAGE_KEY = 'tbx-theme';
+        var icons       = { light: 'bi-sun-fill', dark: 'bi-moon-stars-fill', auto: 'bi-circle-half' };
+        var labels      = { light: 'Light',       dark: 'Dark',               auto: 'Auto' };
+        var mql         = window.matchMedia( '(prefers-color-scheme: dark)' );
+
+        function read(){
+            try { return localStorage.getItem( STORAGE_KEY ) || 'auto'; }
+            catch ( e ) { return 'auto'; }
+        }
+        function write( mode ){
+            try { localStorage.setItem( STORAGE_KEY, mode ); } catch ( e ) {}
+        }
+        function resolve( mode ){
+            if ( mode === 'auto' ) return mql.matches ? 'dark' : 'light';
+            return mode;
+        }
+        function apply( mode ){
+            document.documentElement.setAttribute( 'data-bs-theme', resolve( mode ) );
+            paintToggle( mode );
+        }
+        function paintToggle( mode ){
+            // Swap the trigger icon to match the active choice.
+            document.querySelectorAll( '[data-tbx-theme-icon]' ).forEach( function( el ){
+                el.className = 'bi ' + icons[ mode ];
+            } );
+            document.querySelectorAll( '[data-tbx-theme-label]' ).forEach( function( el ){
+                el.textContent = labels[ mode ];
+            } );
+            // Show the check next to the active item, hide on the others.
+            document.querySelectorAll( '[data-tbx-theme-value]' ).forEach( function( btn ){
+                var active = btn.getAttribute( 'data-tbx-theme-value' ) === mode;
+                var check  = btn.querySelector( '[data-tbx-theme-check]' );
+                if ( check ) check.classList.toggle( 'd-none', !active );
+                btn.classList.toggle( 'active', active );
+            } );
+        }
+
+        // Click a dropdown item -> persist + apply. Delegated so
+        // dynamically-rendered toggles (e.g. inside a CBWire re-render)
+        // pick up the same handler.
+        document.addEventListener( 'click', function( e ){
+            var btn = e.target.closest( '[data-tbx-theme-value]' );
+            if ( !btn ) return;
+            var mode = btn.getAttribute( 'data-tbx-theme-value' );
+            write( mode );
+            apply( mode );
+        } );
+
+        // OS preference change while on "auto" -> re-resolve and repaint.
+        // addEventListener is the modern API; older Safari needs the
+        // deprecated addListener fallback.
+        function onMqlChange(){
+            if ( read() === 'auto' ) apply( 'auto' );
+        }
+        if ( mql.addEventListener ) mql.addEventListener( 'change', onMqlChange );
+        else if ( mql.addListener ) mql.addListener( onMqlChange );
+
+        // Initial paint of the dropdown UI once the dropdown is in the DOM.
+        if ( document.readyState === 'loading' ) {
+            document.addEventListener( 'DOMContentLoaded', function(){ paintToggle( read() ); } );
+        } else {
+            paintToggle( read() );
+        }
+    })();
+    </script>
+
+    #view( view = "_partials/attachment_dropzone", module = "core" )#
+    #tbxAssetJs( local.surface )#
+</bx:output>

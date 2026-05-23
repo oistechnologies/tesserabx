@@ -7,7 +7,10 @@
                     <div class="row g-3">
                         <div class="col-12 col-md-6">
                             <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
-                            <input type="email" class="form-control" id="email" name="email" required value="#encodeForHTMLAttribute( prc.formData.email ?: "" )#">
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+                                <input type="email" class="form-control" id="email" name="email" required value="#encodeForHTMLAttribute( prc.formData.email ?: "" )#">
+                            </div>
                         </div>
                         <div class="col-12 col-md-6">
                             <label class="form-label" for="organizationId">Organization <span class="text-danger">*</span></label>

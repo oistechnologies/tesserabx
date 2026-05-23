@@ -1,0 +1,27 @@
+<bx:output>
+<bx:script>
+    // Compact layout for the auth surface: sign-in, MFA verify, MFA
+    // enrollment, and the one-shot recovery-codes screen. Renders a
+    // centered AdminLTE login-box and nothing else — no navbar, no
+    // sidebar, no footer — so the user's attention is on the credential
+    // flow. Re-uses the same head + scripts partials as the main
+    // layouts (Bootstrap, AdminLTE CSS bundles Bootstrap, OverlayScrollbars,
+    // theme pre-paint, etc.) but skips the theme-toggle dropdown markup;
+    // the toggle lives in the post-login navbar.
+    //
+    // Surface awareness comes from currentSurface() in ApplicationHelper —
+    // the head partial uses it to set the <title> suffix and the
+    // <meta name="surface"> tag. Views themselves wrap their card in
+    // <div class="login-box"> (or a wider override for QR + recovery
+    // codes), so the layout itself is just the body chrome.
+    local.surface = currentSurface();
+</bx:script>
+<!DOCTYPE html>
+<html lang="en">
+#view( view = "_partials/layout_head", module = "core", args = { surface : local.surface } )#
+<body class="login-page bg-body-secondary">
+    #view()#
+    #view( view = "_partials/layout_scripts", module = "core", args = { surface : local.surface } )#
+</body>
+</html>
+</bx:output>

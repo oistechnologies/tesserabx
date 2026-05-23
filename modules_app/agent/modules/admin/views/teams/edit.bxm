@@ -75,6 +75,7 @@
                         </div>
                     </form>
 
+                    <div class="table-responsive">
                     <table class="table table-sm mb-0 align-middle">
                         <thead>
                             <tr>
@@ -124,6 +125,7 @@
                             </bx:loop>
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
         </div>

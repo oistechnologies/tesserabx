@@ -133,10 +133,18 @@ class {
         param rc.organizationAdmin = false;
         param rc.isActive          = true;
 
-        contact.setFirstName( rc.firstName );
-        contact.setLastName( rc.lastName );
-        contact.setIsActive( isBoolean( rc.isActive ) ? rc.isActive : ( rc.isActive == "true" || rc.isActive == "1" ) );
-        contact.save();
+        // Go through the service rather than calling contact.save() —
+        // Quick's save() rebinds every column on the entity, including
+        // mfa_recovery_codes (jsonb / PGobject on load), which JDBC
+        // cannot coerce back into a varchar bind. The service uses a
+        // targeted UPDATE that only touches the columns this form
+        // changes.
+        contact = contactsService.updateContactProfile(
+            id        : contact.getId(),
+            firstName : rc.firstName,
+            lastName  : rc.lastName,
+            isActive  : isBoolean( rc.isActive ) ? rc.isActive : ( rc.isActive == "true" || rc.isActive == "1" )
+        );
 
         var wantOrgAdmin = isBoolean( rc.organizationAdmin ) ? rc.organizationAdmin : ( rc.organizationAdmin == "true" || rc.organizationAdmin == "1" );
         if ( wantOrgAdmin ) {

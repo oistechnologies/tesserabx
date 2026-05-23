@@ -7,42 +7,33 @@
     <bx:set local.color  = local.bucket eq "high" ? "danger" : ( local.bucket eq "medium" ? "warning" : "success" ) >
     <bx:set local.rationale = local.t.getEscalationRiskRationale() ?: "" >
     <bx:set local.scoredAt  = local.t.getEscalationRiskAt() ?: "" >
-
-    <div class="card mb-3 border-#local.color#">
-        <div class="card-header p-0">
-            <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
-               data-bs-toggle="collapse"
-               href="##escalation-risk-card"
-               role="button"
-               aria-expanded="false"
-               aria-controls="escalation-risk-card">
-                <span>
-                    Escalation risk
-                    <span class="badge text-bg-#local.color# ms-2">#local.score# / 100</span>
-                    <span class="badge text-bg-info ms-1">AI</span>
-                </span>
-                <i class="bi bi-chevron-down"></i>
-            </a>
+    <bx:savecontent variable="local.body">
+        <div class="mb-2">
+            <strong>Bucket:</strong>
+            <span class="text-#local.color#">#encodeForHTML( local.bucket )#</span>
         </div>
-        <div id="escalation-risk-card" class="collapse">
-            <div class="card-body small">
-                <div class="mb-2">
-                    <strong>Bucket:</strong>
-                    <span class="text-#local.color#">#encodeForHTML( local.bucket )#</span>
-                </div>
-                <bx:if len( local.rationale )>
-                    <div class="alert alert-light py-2 px-3 small mb-2">
-                        #encodeForHTML( local.rationale )#
-                    </div>
-                </bx:if>
-                <bx:if isDate( local.scoredAt )>
-                    <div class="text-body-secondary">
-                        <i class="bi bi-clock"></i>
-                        Scored #encodeForHTML( dateTimeFormat( local.scoredAt, "yyyy-mm-dd HH:nn" ) )#
-                    </div>
-                </bx:if>
+        <bx:if len( local.rationale )>
+            <div class="alert alert-light py-2 px-3 small mb-2">
+                #encodeForHTML( local.rationale )#
             </div>
-        </div>
-    </div>
+        </bx:if>
+        <bx:if isDate( local.scoredAt )>
+            <div class="text-body-secondary">
+                <i class="bi bi-clock"></i>
+                Scored #encodeForHTML( dateTimeFormat( local.scoredAt, "yyyy-mm-dd HH:nn" ) )#
+            </div>
+        </bx:if>
+    </bx:savecontent>
+    #view( view = "_partials/collapsible_card", module = "core", args = {
+        id        : "escalation-risk-card",
+        title     : "Escalation risk",
+        color     : local.color,
+        badges    : [
+            { label : local.score & " / 100", color : local.color },
+            { label : "AI",                   color : "info" }
+        ],
+        bodyClass : "small",
+        body      : local.body
+    } )#
 </bx:if>
 </bx:output>

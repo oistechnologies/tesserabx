@@ -9,7 +9,7 @@ class {
 
     function new( event, rc, prc ){
         prc.pageTitle = "Sign in";
-        event.setLayout( name = "Portal", module = "core" );
+        event.setLayout( name = "Auth", module = "core" );
         event.setView( "session/new" );
     }
 

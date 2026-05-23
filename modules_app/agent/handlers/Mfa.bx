@@ -23,7 +23,11 @@ class {
     property name="messagebox"  inject="messagebox@cbmessagebox";
 
     function preHandler( event, rc, prc, action, eventArguments ){
-        event.setLayout( name = "Agent", module = "core" );
+        // All MFA actions render through the compact auth layout —
+        // verify is pre-auth, setup + recovery-codes happen mid-auth
+        // (password done, MFA pending). The full agent shell with
+        // sidebar/nav would be misleading in that state.
+        event.setLayout( name = "Auth", module = "core" );
     }
 
     // ---------- Two-step login: the second step ----------

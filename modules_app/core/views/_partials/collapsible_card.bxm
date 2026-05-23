@@ -1,0 +1,63 @@
+<bx:output>
+<bx:script>
+    // Reusable collapsible card. Renders the AdminLTE 4 .card-tools
+    // card-collapse pattern (plus/minus button in the upper-right);
+    // AdminLTE handles the .collapsed-card > .card-body { display:none }
+    // rule purely in CSS so the body never flashes visible before JS.
+    //
+    // Defaults to starting collapsed because the ticket detail right
+    // column stacks ~10 of these and users expand only what they need
+    // (see memory note [agent-ticket-right-column-collapsed]). Pass
+    // `collapsed : false` to start expanded.
+    //
+    // Required args:
+    //   title  card title text (HTML-encoded)
+    //   body   pre-rendered HTML for the card body — use
+    //          <bx:savecontent variable="x">...</bx:savecontent> in the
+    //          caller and pass `x` as `body`. Already-rendered HTML, NOT
+    //          encoded.
+    //
+    // Optional args:
+    //   id         DOM id on the .card element (useful for deep links)
+    //   badges     array of { label, color } structs rendered in the
+    //              header after the title. `color` is a Bootstrap
+    //              token (primary | success | warning | danger | info
+    //              | secondary | light). Pass empty array to skip.
+    //   color      AdminLTE card-color accent for the top border —
+    //              renders as `card-outline card-{color}`. Pass empty
+    //              for a plain card.
+    //   collapsed  boolean, default true. Pass false to start expanded.
+    //   bodyClass  extra classes on the .card-body (e.g. "p-0" for
+    //              edge-to-edge list-groups, "small" for tighter type).
+    local.id        = args.id        ?: "";
+    local.title     = args.title     ?: "";
+    local.body      = args.body      ?: "";
+    local.badges    = args.badges    ?: [];
+    local.color     = args.color     ?: "";
+    local.collapsed = ( args.keyExists( "collapsed" ) && isBoolean( args.collapsed ) ) ? args.collapsed : true;
+    local.bodyClass = args.bodyClass ?: "";
+
+    local.cardClass = "card mb-3";
+    if ( len( local.color ) )   local.cardClass &= " card-outline card-" & local.color;
+    if ( local.collapsed )       local.cardClass &= " collapsed-card";
+</bx:script>
+<div class="#local.cardClass#"<bx:if len( local.id )> id="#encodeForHTMLAttribute( local.id )#"</bx:if>>
+    <div class="card-header">
+        <h3 class="card-title mb-0">
+            #encodeForHTML( local.title )#
+            <bx:loop array="#local.badges#" item="local.b">
+                <span class="badge text-bg-#encodeForHTMLAttribute( local.b.color ?: 'secondary' )#<bx:if ( local.b.color ?: '' ) eq 'light'> text-black</bx:if> ms-1">#encodeForHTML( local.b.label ?: '' )#</span>
+            </bx:loop>
+        </h3>
+        <div class="card-tools">
+            <button type="button" class="btn btn-tool" data-lte-toggle="card-collapse" aria-label="Toggle">
+                <i data-lte-icon="expand" class="bi bi-plus-lg"></i>
+                <i data-lte-icon="collapse" class="bi bi-dash-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body<bx:if len( local.bodyClass )> #encodeForHTMLAttribute( local.bodyClass )#</bx:if>">
+        #local.body#
+    </div>
+</div>
+</bx:output>

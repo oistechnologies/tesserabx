@@ -85,6 +85,7 @@
             </bx:if>
         </div>
         <div class="card-body p-0">
+            <div class="table-responsive">
             <table class="table table-sm mb-0 align-middle">
                 <thead>
                     <tr>
@@ -109,6 +110,7 @@
                     </bx:loop>
                 </tbody>
             </table>
+            </div>
         </div>
         <div class="card-footer small text-body-secondary">
             Started #encodeForHTML( prc.report.started_at )# · Completed #encodeForHTML( prc.report.completed_at ?: "" )#

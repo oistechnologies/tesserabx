@@ -1,45 +1,32 @@
 <bx:output>
 <bx:set local.t = prc.ticket >
-<div class="card mb-3">
-    <div class="card-header p-0">
-        <a class="d-flex justify-content-between align-items-center w-100 px-3 py-2 text-decoration-none text-body collapsed"
-           data-bs-toggle="collapse"
-           href="##assignment-card"
-           role="button"
-           aria-expanded="false"
-           aria-controls="assignment-card">
-            <span>
-                Assignment
-                <bx:if len( local.t.getAssignedToAgentId() ?: "" )>
-                    <span class="badge text-bg-secondary ms-2">Assigned</span>
-                <bx:else>
-                    <span class="badge text-bg-light text-black ms-2">Unassigned</span>
+<bx:set local.assignedBadge = len( local.t.getAssignedToAgentId() ?: "" )
+                            ? { label : "Assigned",   color : "secondary" }
+                            : { label : "Unassigned", color : "light"     } >
+<bx:savecontent variable="local.body">
+    <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/assign">
+        <bx:set local.currentAssigneeId = local.t.getAssignedToAgentId() ?: "" >
+        <select class="form-select mb-2" name="agentId">
+            <option value="">(unassigned)</option>
+            <bx:loop array="#prc.assignableAgents#" item="local.aa">
+                <bx:if local.aa.isActive>
+                    <bx:set local.aaLabel = trim( local.aa.firstName & " " & local.aa.lastName ) >
+                    <bx:if !len( local.aaLabel )><bx:set local.aaLabel = local.aa.email ></bx:if>
+                    <option value="#encodeForHTMLAttribute( local.aa.id )#" #( local.aa.id == local.currentAssigneeId ? 'selected' : '' )#>
+                        #encodeForHTML( local.aaLabel )# (#encodeForHTML( local.aa.email )#)
+                    </option>
                 </bx:if>
-            </span>
-            <i class="bi bi-chevron-down"></i>
-        </a>
-    </div>
-    <div id="assignment-card" class="collapse">
-        <div class="card-body">
-            <form method="post" action="/agent/tickets/#encodeForHTMLAttribute( local.t.getId() )#/assign">
-                <bx:set local.currentAssigneeId = local.t.getAssignedToAgentId() ?: "" >
-                <select class="form-select mb-2" name="agentId">
-                    <option value="">(unassigned)</option>
-                    <bx:loop array="#prc.assignableAgents#" item="local.aa">
-                        <bx:if local.aa.isActive>
-                            <bx:set local.aaLabel = trim( local.aa.firstName & " " & local.aa.lastName ) >
-                            <bx:if !len( local.aaLabel )><bx:set local.aaLabel = local.aa.email ></bx:if>
-                            <option value="#encodeForHTMLAttribute( local.aa.id )#" #( local.aa.id == local.currentAssigneeId ? 'selected' : '' )#>
-                                #encodeForHTML( local.aaLabel )# (#encodeForHTML( local.aa.email )#)
-                            </option>
-                        </bx:if>
-                    </bx:loop>
-                </select>
-                <div class="d-flex justify-content-end">
-                    <button class="btn btn-outline-primary" type="submit">Save</button>
-                </div>
-            </form>
+            </bx:loop>
+        </select>
+        <div class="d-flex justify-content-end">
+            <button class="btn btn-outline-primary" type="submit">Save</button>
         </div>
-    </div>
-</div>
+    </form>
+</bx:savecontent>
+#view( view = "_partials/collapsible_card", module = "core", args = {
+    id     : "assignment-card",
+    title  : "Assignment",
+    badges : [ local.assignedBadge ],
+    body   : local.body
+} )#
 </bx:output>

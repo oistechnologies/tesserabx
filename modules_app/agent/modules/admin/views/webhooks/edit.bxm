@@ -87,6 +87,7 @@
     <div class="card mt-4">
         <div class="card-header"><strong>Recent deliveries</strong></div>
         <div class="card-body p-0">
+            <div class="table-responsive">
             <table class="table table-sm mb-0 align-middle">
                 <thead>
                     <tr>
@@ -120,6 +121,7 @@
                     </bx:loop>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </bx:if>
