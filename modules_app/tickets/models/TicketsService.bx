@@ -21,6 +21,7 @@ class singleton=true {
     property name="imageProcessing"    inject="ImageProcessingService@core";
     property name="interceptorService"   inject="coldbox:interceptorService";
     property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+    property name="ticketDto"            inject="TicketDto@tickets";
 
     // ---------- Status workflow ----------
     //
@@ -415,7 +416,20 @@ class singleton=true {
             metadata       : { "requesterContactId" : t.getRequesterContactId(), "subject" : t.getSubject() }
         );
 
-        interceptorService.announce( "onTicketCreated", { "ticket" : t, "accountless" : false } );
+        // B3: emit the canonical envelope plus the legacy top-level
+        // ticket/accountless keys so existing consumers keep working.
+        var createdPayload = eventPayloadBuilder.build(
+            event          : "onTicketCreated",
+            organizationId : t.getOrganizationId() ?: "",
+            actorType      : arguments.data.actorType ?: "system",
+            actorId        : arguments.data.actorId   ?: "system",
+            entity         : { type : "Ticket", id : t.getId() },
+            after          : ticketDto.fromTicket( t ),
+            metadata       : { "accountless" : false }
+        );
+        createdPayload.ticket      = t;
+        createdPayload.accountless = false;
+        interceptorService.announce( "onTicketCreated", createdPayload );
 
         return t;
     }
@@ -452,7 +466,18 @@ class singleton=true {
             metadata   : { "originatingEmail" : t.getOriginatingEmail() }
         );
 
-        interceptorService.announce( "onTicketCreated", { "ticket" : t, "accountless" : true } );
+        var accountlessPayload = eventPayloadBuilder.build(
+            event          : "onTicketCreated",
+            organizationId : "",
+            actorType      : arguments.data.actorType ?: "system",
+            actorId        : arguments.data.actorId   ?: "system",
+            entity         : { type : "Ticket", id : t.getId() },
+            after          : ticketDto.fromTicket( t ),
+            metadata       : { "accountless" : true }
+        );
+        accountlessPayload.ticket      = t;
+        accountlessPayload.accountless = true;
+        interceptorService.announce( "onTicketCreated", accountlessPayload );
 
         return t;
     }
@@ -494,10 +519,18 @@ class singleton=true {
         // Cross-module hook: channels listens for outbound dispatch.
         // Tickets does not depend on channels (cycle); the interceptor
         // service is the back-channel.
-        interceptorService.announce( "onTicketMessageAdded", {
-            "message" : m,
-            "ticket"  : t
-        } );
+        var msgPayload = eventPayloadBuilder.build(
+            event          : "onTicketMessageAdded",
+            organizationId : t.getOrganizationId() ?: "",
+            actorType      : len( arguments.data.authorAgentId ?: "" ) ? "agent" : ( len( arguments.data.authorContactId ?: "" ) ? "contact" : "system" ),
+            actorId        : arguments.data.authorAgentId ?: arguments.data.authorContactId ?: "system",
+            entity         : { type : "TicketMessage", id : m.getId() },
+            after          : ticketDto.fromTicketMessage( m ),
+            metadata       : { "ticketId" : t.getId(), "isInternal" : !!m.getIsInternal() }
+        );
+        msgPayload.message = m;
+        msgPayload.ticket  = t;
+        interceptorService.announce( "onTicketMessageAdded", msgPayload );
 
         return m;
     }
@@ -557,11 +590,20 @@ class singleton=true {
             metadata       : { "from" : from, "to" : to }
         );
 
-        interceptorService.announce( "onTicketStatusChanged", {
-            "ticket" : t,
-            "from"   : from,
-            "to"     : to
-        } );
+        var statusPayload = eventPayloadBuilder.build(
+            event          : "onTicketStatusChanged",
+            organizationId : t.getOrganizationId() ?: "",
+            actorType      : arguments.data.actorType ?: "agent",
+            actorId        : arguments.data.actorId   ?: "system",
+            entity         : { type : "Ticket", id : t.getId() },
+            before         : { "status" : from },
+            after          : ticketDto.fromTicket( t ),
+            metadata       : { "from" : from, "to" : to }
+        );
+        statusPayload.ticket = t;
+        statusPayload.from   = from;
+        statusPayload.to     = to;
+        interceptorService.announce( "onTicketStatusChanged", statusPayload );
 
         return t;
     }

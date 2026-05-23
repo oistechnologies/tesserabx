@@ -16,11 +16,14 @@
  *       metadata       : {}
  *   }
  *
- * Five pre-Phase-3 events (onTicketCreated, onTicketMessageAdded,
- * onTicketStatusChanged, onKbArticlePublished) keep their original
- * payload shapes for backwards compatibility with the six consumer
- * interceptors that already depend on them. New events ship with
- * the canonical envelope.
+ * Follow-up B3: the four pre-Phase-3 events (onTicketCreated,
+ * onTicketMessageAdded, onTicketStatusChanged, onKbArticlePublished)
+ * now ship the canonical envelope ALONGSIDE their original
+ * entity-keyed top-level keys (ticket, message, article, accountless,
+ * from, to). The dual-shape payload keeps the twelve existing
+ * consumer interceptors working while letting new listeners and
+ * add-ons read the canonical fields. Code that emits new events
+ * ships the canonical envelope only.
  *
  * Async policy:
  *   - Events that other modules might react to with network calls

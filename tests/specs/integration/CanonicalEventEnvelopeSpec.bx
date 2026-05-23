@@ -1,0 +1,200 @@
+/**
+ * CanonicalEventEnvelopeSpec: follow-up B3.
+ *
+ * The five pre-Phase-3 events (onTicketCreated for contact-backed +
+ * accountless, onTicketMessageAdded, onTicketStatusChanged,
+ * onKbArticlePublished) used to ship entity-keyed payloads only:
+ *   { ticket : <Quick> } or { article : <Quick> }
+ *
+ * B3 rewraps each in the canonical envelope while preserving the
+ * legacy top-level entity keys for backwards compatibility with the
+ * twelve consumer interceptors that already depend on them. New
+ * listeners (and add-ons) read the canonical envelope fields:
+ *   event, occurredAt, organizationId, actorType, actorId, entity,
+ *   before, after, metadata.
+ *
+ * This spec captures the live payload by registering a custom
+ * interceptor at runtime, drives each pre-Phase-3 event by exercising
+ * the originating service method, and asserts BOTH shapes are
+ * present.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.tickets   = wb.getInstance( "TicketsService@tickets" );
+        variables.contacts  = wb.getInstance( "ContactsService@contacts" );
+        variables.kb        = wb.getInstance( "KnowledgebaseService@knowledgebase" );
+
+        // Lazy capture of every announce we care about. The capture
+        // interceptor lives in tests/support and pushes received
+        // intercept data into a shared array we read after each call.
+        variables.binder = wb.getBinder();
+        if ( !variables.binder.mappingExists( "EventCaptureInterceptor@spec" ) ) {
+            variables.binder.map( "EventCaptureInterceptor@spec" )
+                            .to( "tests.support.EventCaptureInterceptor" )
+                            .asSingleton();
+        }
+        variables.capture = wb.getInstance( "EventCaptureInterceptor@spec" );
+        // Register as a real interceptor so ColdBox's announce() walks it.
+        getController().getInterceptorService().registerInterceptor( interceptorObject : variables.capture );
+    }
+
+    function run(){
+        describe( "Pre-Phase-3 events carry the canonical envelope", function(){
+
+            beforeEach( function( currentSpec ){
+                variables.capture.clear();
+                variables.fixture = makeFixture();
+            } );
+
+            afterEach( function( currentSpec ){
+                cleanupFixture( variables.fixture );
+            } );
+
+            it( "onTicketCreated (contact-backed) emits envelope + legacy ticket key", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "env-spec-created", priority : "normal"
+                } );
+                var payload = lastCapture( "onTicketCreated" );
+                assertEnvelope( payload, "Ticket", t.getId(), "onTicketCreated" );
+                expect( payload ).toHaveKey( "ticket" );
+                expect( payload ).toHaveKey( "accountless" );
+                expect( payload.accountless ).toBeFalse();
+                cleanupTicket( t.getId() );
+            } );
+
+            it( "onTicketCreated (accountless) emits envelope + legacy keys with accountless=true", function(){
+                var t = variables.tickets.createAccountlessTicket( {
+                    subject          : "env-spec-accountless",
+                    originatingEmail : "env-" & createUUID() & "@example.com",
+                    firstMessage     : "test",
+                    source           : "spec"
+                } );
+                var payload = lastCapture( "onTicketCreated" );
+                assertEnvelope( payload, "Ticket", t.getId(), "onTicketCreated" );
+                expect( payload.accountless ).toBeTrue();
+                cleanupTicket( t.getId() );
+            } );
+
+            it( "onTicketMessageAdded emits envelope + legacy message/ticket keys", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "env-spec-msg"
+                } );
+                variables.capture.clear();
+                var m = variables.tickets.addMessage( {
+                    ticketId      : t.getId(),
+                    authorAgentId : variables.fixture.agentId,
+                    body          : "Hello"
+                } );
+                var payload = lastCapture( "onTicketMessageAdded" );
+                assertEnvelope( payload, "TicketMessage", m.getId(), "onTicketMessageAdded" );
+                expect( payload ).toHaveKey( "message" );
+                expect( payload ).toHaveKey( "ticket" );
+                cleanupTicket( t.getId() );
+            } );
+
+            it( "onTicketStatusChanged emits envelope + legacy ticket/from/to keys", function(){
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : variables.fixture.contact.getId(),
+                    subject : "env-spec-status"
+                } );
+                variables.capture.clear();
+                variables.tickets.changeStatus( { ticketId : t.getId(), status : "open" } );
+                var payload = lastCapture( "onTicketStatusChanged" );
+                assertEnvelope( payload, "Ticket", t.getId(), "onTicketStatusChanged" );
+                expect( payload ).toHaveKey( "ticket" );
+                expect( payload.from ).toBe( "new" );
+                expect( payload.to ).toBe( "open" );
+                expect( payload.before.status ).toBe( "new" );
+                cleanupTicket( t.getId() );
+            } );
+
+            it( "onKbArticlePublished emits envelope + legacy article key", function(){
+                var slug    = "env-spec-kb-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                var article = variables.kb.createArticle( {
+                    title      : "Env spec KB " & slug,
+                    slug       : slug,
+                    body       : "Body",
+                    visibility : "internal"
+                } );
+                variables.capture.clear();
+                variables.kb.publishArticle( articleId : article.getId() );
+                var payload = lastCapture( "onKbArticlePublished" );
+                assertEnvelope( payload, "Article", article.getId(), "onKbArticlePublished" );
+                expect( payload ).toHaveKey( "article" );
+                queryExecute( "DELETE FROM kb_articles WHERE id = :id", { id : article.getId() } );
+                queryExecute( "DELETE FROM kb_article_versions WHERE article_id = :id", { id : article.getId() } );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private void function assertEnvelope(
+        required struct payload,
+        required string entityType,
+        required string entityId,
+        required string eventName
+    ){
+        expect( arguments.payload ).toHaveKey( "event" );
+        expect( arguments.payload.event ).toBe( arguments.eventName );
+        expect( arguments.payload ).toHaveKey( "occurredAt" );
+        expect( arguments.payload ).toHaveKey( "organizationId" );
+        expect( arguments.payload ).toHaveKey( "actorType" );
+        expect( arguments.payload ).toHaveKey( "actorId" );
+        expect( arguments.payload ).toHaveKey( "entity" );
+        expect( arguments.payload.entity.type ).toBe( arguments.entityType );
+        expect( arguments.payload.entity.id   ).toBe( arguments.entityId );
+        expect( arguments.payload ).toHaveKey( "metadata" );
+    }
+
+    private any function lastCapture( required string eventName ){
+        var rows = variables.capture.captured();
+        for ( var i = arrayLen( rows ); i >= 1; i-- ) {
+            if ( rows[ i ].eventName == arguments.eventName ) return rows[ i ].data;
+        }
+        throw( type : "CanonicalEventEnvelopeSpec.MissingCapture", message : "No captured event named " & arguments.eventName );
+    }
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Envelope Spec Org " & createUUID(),
+            slug : "env-" & lcase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "env-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var agentId = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :h, FALSE, TRUE )",
+            { id : agentId, email : "env-agent-" & agentId & "@example.com", h : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C" }
+        );
+        return { org : org, contact : contact, agentId : agentId };
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.fixture.agentId } );
+    }
+
+}

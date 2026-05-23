@@ -1,0 +1,38 @@
+/**
+ * EventCaptureInterceptor: spec-only listener that records every
+ * pre-Phase-3 event payload into a shared array.
+ *
+ * Used by CanonicalEventEnvelopeSpec (and any future spec that
+ * needs to inspect the live shape of an emitted payload) to assert
+ * that both the canonical envelope keys and the legacy
+ * back-compatibility keys are present.
+ */
+class accessors=true {
+
+    variables.captured = [];
+
+    public void function clear(){
+        variables.captured = [];
+    }
+
+    public array function captured(){
+        return variables.captured;
+    }
+
+    function onTicketCreated( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onTicketCreated", data : arguments.interceptData } );
+    }
+
+    function onTicketMessageAdded( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onTicketMessageAdded", data : arguments.interceptData } );
+    }
+
+    function onTicketStatusChanged( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onTicketStatusChanged", data : arguments.interceptData } );
+    }
+
+    function onKbArticlePublished( event, interceptData, rc, prc ){
+        variables.captured.append( { eventName : "onKbArticlePublished", data : arguments.interceptData } );
+    }
+
+}

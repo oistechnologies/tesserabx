@@ -428,14 +428,14 @@ Every event TesseraBX announces from Phase 3 onwards uses the same envelope (pro
 }
 ```
 
-The five pre-Phase-3 events keep their original payload shapes for backwards compatibility with the existing core interceptors that consume them:
+As of follow-up B3, the four pre-Phase-3 events emit the canonical envelope alongside the original entity-keyed payload. Existing listeners that read `interceptData.ticket`, `interceptData.message`, `interceptData.article`, `interceptData.from`, `interceptData.to`, or `interceptData.accountless` keep working unchanged; new listeners (and add-ons) should prefer the canonical fields:
 
-- `onTicketCreated`: `{ ticket : <Ticket entity>, accountless : boolean }`
-- `onTicketMessageAdded`: `{ message : <TicketMessage entity>, ticket : <Ticket entity> }`
-- `onTicketStatusChanged`: `{ ticket : <Ticket entity>, statusChange : { from : "...", to : "..." } }`
-- `onKbArticlePublished`: `{ article : <Article entity> }`
+- `onTicketCreated`: envelope `+ { ticket : <Quick entity>, accountless : boolean }`. `entity = { type : "Ticket", id }`. `after = ticket DTO`. `metadata.accountless` mirrors the top-level flag.
+- `onTicketMessageAdded`: envelope `+ { message : <Quick entity>, ticket : <Quick entity> }`. `entity = { type : "TicketMessage", id }`. `after = message DTO`. `metadata = { ticketId, isInternal }`.
+- `onTicketStatusChanged`: envelope `+ { ticket : <Quick entity>, from : "...", to : "..." }`. `entity = { type : "Ticket", id }`. `before = { status : <from> }`. `after = ticket DTO`. `metadata = { from, to }`.
+- `onKbArticlePublished`: envelope `+ { article : <Quick entity> }`. `entity = { type : "Article", id }`. `after = article snapshot` (id, slug, title, visibility, status, publishedAt). `metadata = { version }`.
 
-New listeners for these events get the existing entity-shaped struct, not the canonical envelope.
+The canonical fields (`entity`, `before`, `after`, `metadata`) are JSON-serializable structs. The legacy top-level entity keys still carry the live Quick instance, so a listener that needs to call entity methods directly does not have to round-trip through the service layer. A future migration may drop the legacy keys; until then, both shapes coexist.
 
 ### Async vs sync policy
 

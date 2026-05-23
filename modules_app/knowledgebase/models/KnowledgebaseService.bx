@@ -15,7 +15,8 @@ class singleton=true {
 
     property name="wirebox"            inject="wirebox";
     property name="auditService"       inject="AuditService@audit";
-    property name="interceptorService" inject="coldbox:interceptorService";
+    property name="interceptorService"   inject="coldbox:interceptorService";
+    property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
 
     // ------------------ Categories ------------------
 
@@ -130,7 +131,28 @@ class singleton=true {
         // computes a pgvector embedding so the article shows up in
         // semantic search and KB-suggestion results. When AI is off,
         // nothing listens and the publish completes the same way.
-        interceptorService.announce( "onKbArticlePublished", { "article" : a } );
+        //
+        // B3: canonical envelope alongside the legacy article key for
+        // backwards compatibility with the existing KbIndexingInterceptor
+        // consumer.
+        var publishedPayload = eventPayloadBuilder.build(
+            event          : "onKbArticlePublished",
+            organizationId : "",
+            actorType      : len( arguments.agentId ) ? "agent" : "system",
+            actorId        : len( arguments.agentId ) ? arguments.agentId : "system",
+            entity         : { type : "Article", id : a.getId() },
+            after          : {
+                "id"          : a.getId(),
+                "slug"        : a.getSlug(),
+                "title"       : a.getTitle(),
+                "visibility"  : a.getVisibility(),
+                "status"      : a.getStatus(),
+                "publishedAt" : toString( a.getPublishedAt() ?: "" )
+            },
+            metadata       : { "version" : nextVersion }
+        );
+        publishedPayload.article = a;
+        interceptorService.announce( "onKbArticlePublished", publishedPayload );
 
         return a;
     }
