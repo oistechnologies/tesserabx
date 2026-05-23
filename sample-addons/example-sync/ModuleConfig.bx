@@ -110,8 +110,15 @@ class {
                     // is silently dropped.
                     { id : "exampleSync.linkedIssue", label : "External link", partial : "panels/linked_issue", module : "example-sync", position : "right", sortWeight : 700, requiredPermission : "exampleSync.view", defaultCollapsed : true }
                 ],
+                // Two widgets, one per zone. Demonstrates that an
+                // add-on contributes to the org-wide /agent/reports
+                // dashboard (zone defaults to "reports") and to the
+                // per-agent /agent home dashboard (zone="agent-home")
+                // through the same manifest path. Core widgets follow
+                // the exact same shape.
                 dashboardWidgets : [
-                    { id : "exampleSync.syncStatus", title : "Example Sync status", partial : "widgets/sync_status", module : "example-sync", dataProvider : "SyncService@example-sync", dataMethod : "statusForDashboard", defaultGridSize : "col-12 col-md-6", sortWeight : 500, requiredPermission : "exampleSync.view" }
+                    { id : "exampleSync.syncStatus",  title : "Example Sync status", partial : "widgets/sync_status",  module : "example-sync", dataProvider : "SyncService@example-sync", dataMethod : "statusForDashboard",        defaultGridSize : "col-12 col-md-6", sortWeight : 500,  requiredPermission : "exampleSync.view" },
+                    { id : "exampleSync.recentSyncs", title : "Recent Jira syncs",   partial : "widgets/recent_syncs", module : "example-sync", dataProvider : "SyncService@example-sync", dataMethod : "recentSyncsForDashboard", defaultGridSize : "col-12 col-md-6", sortWeight : 1200, requiredPermission : "exampleSync.view", zone : "agent-home" }
                 ],
 
                 // ---- Phase 5: channel adapters ----

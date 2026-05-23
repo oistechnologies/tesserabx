@@ -1,0 +1,66 @@
+<bx:output>
+<!---
+    Recent syncs widget — agent-home zone contribution from the
+    Example Sync reference add-on. Mirrors the structure of the
+    core agent-home widgets so an add-on author can copy this file
+    as a starting point. See docs/EXTENSIONS.md (Dashboard widgets)
+    for the full contract.
+--->
+<bx:set local.rows = ( prc.widgetData.rows ?: [] ) >
+<div class="card flex-fill h-100">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title mb-0 flex-grow-1">
+            <i class="bi bi-arrow-repeat me-2"></i>Recent Jira syncs
+        </h3>
+        <a href="/agent/admin/example-sync" class="small">Manage <i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="card-body p-0">
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-secondary mb-0 p-3">No tickets linked to Jira issues yet.</p>
+        <bx:else>
+            <ul class="list-group list-group-flush" data-recent-syncs>
+                <bx:loop array="#local.rows#" item="local.row">
+                    <li class="list-group-item d-flex align-items-start gap-2 small">
+                        <span class="badge text-bg-light text-black" style="min-width:5rem;text-align:left;">
+                            #encodeForHTML( local.row.issueKey )#
+                        </span>
+                        <span class="flex-grow-1">
+                            <span class="text-body-tertiary me-1">###encodeForHTML( local.row.ticketNumber )#</span>
+                            #encodeForHTML( local.row.subject )#
+                        </span>
+                        <span class="text-body-tertiary text-nowrap">#encodeForHTML( local.row.syncedAt )#</span>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "exampleSync.recentSyncs" ] = {
+        update : function( payload, card ){
+            if ( !payload || !payload.rows ) return;
+            var ul = card.querySelector( "[data-recent-syncs]" );
+            if ( !ul ) return;
+            ul.innerHTML = payload.rows.map( function( r ){
+                return "<li class=\"list-group-item d-flex align-items-start gap-2 small\">" +
+                    "<span class=\"badge text-bg-light text-black\" style=\"min-width:5rem;text-align:left;\">" + escape( r.issueKey ) + "</span>" +
+                    "<span class=\"flex-grow-1\">" +
+                        "<span class=\"text-body-tertiary me-1\">##" + escape( r.ticketNumber ) + "</span>" +
+                        escape( r.subject ) +
+                    "</span>" +
+                    "<span class=\"text-body-tertiary text-nowrap\">" + escape( r.syncedAt ) + "</span>" +
+                "</li>";
+            } ).join( "" );
+        }
+    };
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+})();
+</script>
+</bx:output>

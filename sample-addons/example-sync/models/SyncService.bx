@@ -23,6 +23,29 @@ class singleton=true {
     }
 
     /**
+     * dataProvider for the agent-home zone widget. The /agent home
+     * dashboard surfaces this widget alongside core widgets when the
+     * add-on is enabled and the viewer holds exampleSync.view.
+     *
+     * Demonstrates the contract symmetry: the same manifest field
+     * shape works for both the org-wide `reports` zone (statusForDashboard
+     * above) and the per-agent `agent-home` zone (here). An add-on
+     * author registers one entry per zone they want to contribute to.
+     */
+    public struct function recentSyncsForDashboard(){
+        // Stub: a real add-on would query its external API or a
+        // local cache. We hand back a small canned list so the
+        // partial renders convincingly during development.
+        return {
+            "rows" : [
+                { "ticketNumber" : 1042, "subject" : "Login button missing on iOS", "issueKey" : "JIRA-217", "syncedAt" : "2026-05-23 14:02" },
+                { "ticketNumber" : 1039, "subject" : "Export to CSV fails for >10k rows", "issueKey" : "JIRA-212", "syncedAt" : "2026-05-23 13:41" },
+                { "ticketNumber" : 1034, "subject" : "Timezone displays in UTC for new agents", "issueKey" : "JIRA-208", "syncedAt" : "2026-05-23 11:18" }
+            ]
+        };
+    }
+
+    /**
      * Stub link-issue: writes to the extension table via
      * EntityExtensionService. Real add-on would call the external
      * system here.

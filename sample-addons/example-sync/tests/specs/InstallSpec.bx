@@ -57,8 +57,16 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( variables.ticketPanel.listAll().filter( ( p ) => p.id == "exampleSync.linkedIssue" ).len() ).toBe( 1 );
             } );
 
-            it( "registers the sync-status dashboard widget", function(){
-                expect( variables.dashboard.listAll().filter( ( w ) => w.id == "exampleSync.syncStatus" ).len() ).toBe( 1 );
+            it( "registers the sync-status dashboard widget on the reports zone", function(){
+                var hits = variables.dashboard.listAll().filter( ( w ) => w.id == "exampleSync.syncStatus" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].zone ).toBe( "reports" );
+            } );
+
+            it( "registers the recent-syncs dashboard widget on the agent-home zone", function(){
+                var hits = variables.dashboard.listAll().filter( ( w ) => w.id == "exampleSync.recentSyncs" );
+                expect( hits.len() ).toBe( 1 );
+                expect( hits[ 1 ].zone ).toBe( "agent-home" );
             } );
 
             it( "registers the exampleSync.webhook channel adapter", function(){
