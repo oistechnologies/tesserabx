@@ -25,7 +25,16 @@ class {
     this.dependencies       = [ "contacts", "tickets" ];
 
     function configure(){
-        variables.settings              = {};
+        variables.settings              = {
+            tesserabx : {
+                // /agent home dashboard widget. Shows the agent's
+                // unread in-app notifications inline so they don't
+                // need to open the bell dropdown to triage them.
+                dashboardWidgets : [
+                    { id : "agent-home.my-unread-notifications", title : "Unread notifications", partial : "widgets/agent_home_my_unread", module : "notifications", zone : "agent-home", defaultGridSize : "col-12 col-md-6 d-flex", sortWeight : 750, requiredPermission : "tickets.view", dataProvider : "NotificationsService@notifications", dataMethod : "unreadForCurrentAgent" }
+                ]
+            }
+        };
         variables.routes                = [];
         variables.interceptorSettings   = { customInterceptionPoints : [] };
         variables.interceptors          = [

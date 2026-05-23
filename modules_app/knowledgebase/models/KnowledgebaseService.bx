@@ -17,6 +17,7 @@ class singleton=true {
     property name="auditService"       inject="AuditService@audit";
     property name="interceptorService"   inject="coldbox:interceptorService";
     property name="eventPayloadBuilder"  inject="EventPayloadBuilder@core";
+    property name="auth"                 inject="AuthenticationService@cbauth";
 
     // ------------------ Categories ------------------
 
@@ -486,6 +487,85 @@ class singleton=true {
 
     private string function slugify( required string text ){
         return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+    }
+
+    // =====================================================================
+    // Agent home dashboard reads.
+    //
+    // These two methods are the dataProviders for the two knowledgebase
+    // widgets on /agent. Both return a plain struct ready for the
+    // widget partial / poll JSON. No auth-side throws; an anonymous
+    // viewer gets an empty rows array from drafts and the full top-
+    // viewed list from topArticlesByViews (the latter is org-wide).
+    // =====================================================================
+
+    /**
+     * Top N published articles by cumulative view_count. Used as the
+     * "Trending" widget on the agent home dashboard. We don't track
+     * per-day views, so this is lifetime popularity — a coarse
+     * proxy for trending but useful as a "what does the team keep
+     * referencing" reading list.
+     */
+    public struct function topArticlesByViews( numeric limit = 5 ){
+        var rows = queryExecute(
+            "SELECT id, slug, title, view_count, published_at
+             FROM   kb_articles
+             WHERE  status = 'published'
+             ORDER  BY view_count DESC, published_at DESC NULLS LAST
+             LIMIT  " & int( arguments.limit )
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "id"        : rows.id[ i ],
+                "slug"      : rows.slug[ i ] ?: "",
+                "title"     : rows.title[ i ] ?: "",
+                "viewCount" : rows.view_count[ i ] ?: 0,
+                "url"       : "/agent/admin/knowledgebase/articles/" & rows.id[ i ]
+            } );
+        }
+        return { "rows" : out };
+    }
+
+    /**
+     * Draft articles the current agent authored, newest first. Helps
+     * agents resume in-progress writing. Returns an empty rows array
+     * for an anonymous viewer.
+     */
+    public struct function draftsByCurrentAgent( numeric limit = 5 ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) return { "rows" : [] };
+        var rows = queryExecute(
+            "SELECT id, slug, title, updated_at
+             FROM   kb_articles
+             WHERE  status = 'draft'
+             AND    author_agent_id = :aid
+             ORDER  BY updated_at DESC
+             LIMIT  " & int( arguments.limit ),
+            { aid : agentId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( {
+                "id"        : rows.id[ i ],
+                "slug"      : rows.slug[ i ] ?: "",
+                "title"     : rows.title[ i ] ?: "(untitled)",
+                "updatedAt" : dateTimeFormat( rows.updated_at[ i ], "yyyy-mm-dd HH:nn" ),
+                "url"       : "/agent/admin/knowledgebase/articles/" & rows.id[ i ]
+            } );
+        }
+        return { "rows" : out };
+    }
+
+    private string function currentAgentId(){
+        try {
+            if ( !auth.isLoggedIn() ) return "";
+            var u = auth.getUser();
+            if ( isNull( u ) ) return "";
+            return u.getId();
+        } catch ( any e ) {
+            return "";
+        }
     }
 
 }

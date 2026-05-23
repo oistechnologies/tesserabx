@@ -33,6 +33,21 @@ class {
                 helpPages : [
                     { id : "kb.finding-articles", section : "kb", title : "Finding articles",       audience : "public", sortWeight : 10, source : "resources/help/finding-articles.md", searchable : true, keywords : [ "search", "knowledge base", "article", "categories", "visibility" ] },
                     { id : "kb.authoring",        section : "kb", title : "Authoring an article",   audience : "agent",  sortWeight : 20, source : "resources/help/authoring.md",        searchable : true, keywords : [ "draft", "publish", "version", "knowledge base" ] }
+                ],
+                // /agent home dashboard widgets owned by the knowledgebase
+                // module. "Trending" is cumulative view_count (we don't
+                // track per-day views), so it surfaces the team's
+                // longest-running references — a useful proxy. "My drafts"
+                // helps agents resume in-progress writing.
+                // tickets.view is the baseline-every-agent gate. A
+                // dedicated kb.read / kb.write permission pair is a
+                // future refinement; for now any agent who can see
+                // the ticket queue can also see the KB widgets, and
+                // draftsByCurrentAgent only ever returns the
+                // requesting agent's own rows.
+                dashboardWidgets : [
+                    { id : "agent-home.trending-kb",  title : "Most-viewed articles", partial : "widgets/agent_home_trending",  module : "knowledgebase", zone : "agent-home", defaultGridSize : "col-12 col-md-6 d-flex", sortWeight : 800, requiredPermission : "tickets.view", dataProvider : "KnowledgebaseService@knowledgebase", dataMethod : "topArticlesByViews" },
+                    { id : "agent-home.my-kb-drafts", title : "My drafts",            partial : "widgets/agent_home_my_drafts", module : "knowledgebase", zone : "agent-home", defaultGridSize : "col-12 col-md-6 d-flex", sortWeight : 850, requiredPermission : "tickets.view", dataProvider : "KnowledgebaseService@knowledgebase", dataMethod : "draftsByCurrentAgent" }
                 ]
             }
         };

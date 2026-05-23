@@ -1,0 +1,66 @@
+<bx:output>
+<bx:set local.rows  = ( prc.widgetData.rows        ?: [] ) >
+<bx:set local.count = ( prc.widgetData.unreadCount ?: 0  ) >
+<div class="card flex-fill h-100">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title mb-0 flex-grow-1">
+            <i class="bi bi-bell me-2"></i>Unread notifications
+            <span class="badge text-bg-light text-black ms-1" data-unread-count>#encodeForHTML( local.count )#</span>
+        </h3>
+        <a href="/agent/notifications" class="small">Inbox <i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="card-body p-0">
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-secondary mb-0 p-3">You're all caught up.</p>
+        <bx:else>
+            <ul class="list-group list-group-flush" data-unread-list>
+                <bx:loop array="#local.rows#" item="local.row">
+                    <li class="list-group-item">
+                        <a href="#encodeForHTMLAttribute( local.row.link )#"
+                           class="link-body-emphasis text-decoration-none d-block">
+                            <div class="small">#encodeForHTML( local.row.title )#</div>
+                            <div class="text-body-tertiary small">#encodeForHTML( local.row.createdAt )#</div>
+                        </a>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.my-unread-notifications" ] = {
+        update : function( payload, card ){
+            if ( !payload ) return;
+            var countEl = card.querySelector( "[data-unread-count]" );
+            if ( countEl && typeof payload.unreadCount !== "undefined" ) {
+                countEl.textContent = payload.unreadCount;
+            }
+            if ( !payload.rows ) return;
+            var ul = card.querySelector( "[data-unread-list]" );
+            if ( !ul ) return;
+            var html = "";
+            payload.rows.forEach( function( r ){
+                html += "<li class=\"list-group-item\">" +
+                    "<a href=\"" + escapeAttr( r.link ) + "\" class=\"link-body-emphasis text-decoration-none d-block\">" +
+                        "<div class=\"small\">" + escape( r.title ) + "</div>" +
+                        "<div class=\"text-body-tertiary small\">" + escape( r.createdAt ) + "</div>" +
+                    "</a>" +
+                "</li>";
+            } );
+            ul.innerHTML = html;
+        }
+    };
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+    function escapeAttr( s ){
+        return escape( s ).replace( /"/g, "&quot;" );
+    }
+})();
+</script>
+</bx:output>

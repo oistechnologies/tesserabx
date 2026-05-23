@@ -18,6 +18,7 @@ class singleton=true {
 
     property name="wirebox"              inject="wirebox";
     property name="addonRegistryService" inject="AddonRegistryService@core";
+    property name="auth"                 inject="AuthenticationService@cbauth";
 
     /**
      * Record one audit event.
@@ -206,6 +207,41 @@ class singleton=true {
             }
         }
         return out;
+    }
+
+    // ---------------- agent home dashboard reads ----------------
+
+    /**
+     * Recent audit events the currently signed-in agent created. Used
+     * as the dataProvider for the agent-home "My history" widget.
+     * Returns the top N entries with already-formatted timestamps so
+     * the partial / poll JSON can use the values directly.
+     */
+    public struct function recentForCurrentAgent( numeric limit = 10 ){
+        var agentId = "";
+        try {
+            if ( auth.isLoggedIn() ) {
+                var u = auth.getUser();
+                if ( !isNull( u ) ) agentId = u.getId();
+            }
+        } catch ( any e ) {}
+        if ( !len( agentId ) ) return { "rows" : [] };
+        var events = search(
+            actorType : "agent",
+            actorId   : agentId,
+            limit     : arguments.limit
+        );
+        var out = [];
+        for ( var e in events ) {
+            out.append( {
+                "id"          : e.getId(),
+                "eventType"   : e.getEventType()  ?: "",
+                "entityType"  : e.getEntityType() ?: "",
+                "entityId"    : e.getEntityId()   ?: "",
+                "createdAt"   : dateTimeFormat( e.getOccurredAt(), "yyyy-mm-dd HH:nn" )
+            } );
+        }
+        return { "rows" : out };
     }
 
     // ---------------- helpers ----------------

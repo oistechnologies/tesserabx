@@ -30,6 +30,7 @@ class singleton=true {
     // sendEmail/sendSlack dispatch with a uniform send() per channel.
     property name="templateRegistry"      inject="NotificationTemplateRegistry@notifications";
     property name="channelRegistry"       inject="NotificationChannelRegistry@notifications";
+    property name="auth"                  inject="AuthenticationService@cbauth";
 
     /**
      * Dispatch an event to its configured templates. Returns the
@@ -475,6 +476,43 @@ class singleton=true {
 
     private string function newId(){
         return createObject( "java", "java.util.UUID" ).randomUUID().toString();
+    }
+
+    /**
+     * /agent home dashboard reader. Returns the top N unread in-app
+     * notifications for the currently signed-in agent, plus the
+     * total unread count for the badge. The shape matches what the
+     * agent_home_my_unread.bxm partial and /agent/home/poll JSON
+     * consume. Returns zero/empty for an anonymous viewer.
+     */
+    public struct function unreadForCurrentAgent( numeric limit = 5 ){
+        var agentId = "";
+        try {
+            if ( auth.isLoggedIn() ) {
+                var u = auth.getUser();
+                if ( !isNull( u ) ) agentId = u.getId();
+            }
+        } catch ( any e ) {}
+        if ( !len( agentId ) ) return { "unreadCount" : 0, "rows" : [] };
+        var entities = listForRecipient(
+            recipientType : "agent",
+            recipientId   : agentId,
+            unreadOnly    : true,
+            limit         : arguments.limit
+        );
+        var rows = [];
+        for ( var n in entities ) {
+            rows.append( {
+                "id"        : n.getId(),
+                "title"     : n.getTitle()    ?: "",
+                "link"      : n.getLink()     ?: "/agent/notifications",
+                "createdAt" : dateTimeFormat( n.getCreatedAt(), "yyyy-mm-dd HH:nn" )
+            } );
+        }
+        return {
+            "unreadCount" : unreadCount( "agent", agentId ),
+            "rows"        : rows
+        };
     }
 
 }

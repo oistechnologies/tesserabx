@@ -61,7 +61,12 @@ class {
                     { id : "by-status",           title : "By status",                   partial : "widgets/by_status",          module : "agent", defaultGridSize : "col-12 col-md-4 d-flex",          sortWeight : 700,  requiredPermission : "tickets.view" },
                     { id : "by-priority",         title : "By priority",                 partial : "widgets/by_priority",        module : "agent", defaultGridSize : "col-12 col-md-4 d-flex",          sortWeight : 800,  requiredPermission : "tickets.view" },
                     { id : "by-source",           title : "By source",                   partial : "widgets/by_source",          module : "agent", defaultGridSize : "col-12 col-md-4 d-flex",          sortWeight : 900,  requiredPermission : "tickets.view" },
-                    { id : "agent-load",          title : "Agent open load",             partial : "widgets/agent_load",         module : "agent", defaultGridSize : "col-12 d-flex",                   sortWeight : 1000, requiredPermission : "tickets.view" }
+                    { id : "agent-load",          title : "Agent open load",             partial : "widgets/agent_load",         module : "agent", defaultGridSize : "col-12 d-flex",                   sortWeight : 1000, requiredPermission : "tickets.view" },
+                    // /agent home dashboard widget. Pure static
+                    // shortcut tile (no dataProvider) so the poll
+                    // endpoint skips it. Lives on the agent module
+                    // because it owns the agent dashboard surface.
+                    { id : "agent-home.quick-actions", title : "Quick actions", partial : "widgets/agent_home_quick_actions", module : "agent", zone : "agent-home", defaultGridSize : "col-12 d-flex", sortWeight : 900, requiredPermission : "tickets.view" }
                 ],
                 ticketPanels : [
                     { id : "summary",          position : "right", label : "AI summary",            partial : "panels/summary",          module : "agent", sortWeight : 100,  requiredPermission : "tickets.view", requiresAi : true                  },

@@ -1,0 +1,57 @@
+<bx:output>
+<bx:set local.rows = ( prc.widgetData.rows ?: [] ) >
+<div class="card flex-fill h-100">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title mb-0 flex-grow-1">
+            <i class="bi bi-graph-up-arrow me-2"></i>Most-viewed articles
+        </h3>
+        <a href="/agent/admin/knowledgebase/articles" class="small">All articles <i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="card-body p-0">
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-secondary mb-0 p-3">No published articles yet.</p>
+        <bx:else>
+            <ol class="list-group list-group-flush list-group-numbered" data-trending-list>
+                <bx:loop array="#local.rows#" item="local.row">
+                    <li class="list-group-item d-flex align-items-center">
+                        <a href="#encodeForHTMLAttribute( local.row.url )#"
+                           class="link-body-emphasis text-decoration-none flex-grow-1 small">
+                            #encodeForHTML( local.row.title )#
+                        </a>
+                        <span class="badge text-bg-light text-black ms-2">#encodeForHTML( local.row.viewCount )#</span>
+                    </li>
+                </bx:loop>
+            </ol>
+        </bx:if>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.trending-kb" ] = {
+        update : function( payload, card ){
+            if ( !payload || !payload.rows ) return;
+            var ol = card.querySelector( "[data-trending-list]" );
+            if ( !ol ) return;
+            var html = "";
+            payload.rows.forEach( function( r ){
+                html += "<li class=\"list-group-item d-flex align-items-center\">" +
+                    "<a href=\"" + escapeAttr( r.url ) + "\" class=\"link-body-emphasis text-decoration-none flex-grow-1 small\">" + escape( r.title ) + "</a>" +
+                    "<span class=\"badge text-bg-light text-black ms-2\">" + escape( r.viewCount ) + "</span>" +
+                "</li>";
+            } );
+            ol.innerHTML = html;
+        }
+    };
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+    function escapeAttr( s ){
+        return escape( s ).replace( /"/g, "&quot;" );
+    }
+})();
+</script>
+</bx:output>

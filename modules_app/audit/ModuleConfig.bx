@@ -30,7 +30,16 @@ class {
     function configure(){
         // `variables.` prefix is REQUIRED. See gotcha log in
         // docs/EXTENSIBILITY-PLAN.md.
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                // /agent home dashboard widget. Shows the most recent
+                // audit events the current agent created — a quick
+                // "what did I just do?" history strip.
+                dashboardWidgets : [
+                    { id : "agent-home.my-history", title : "My history", partial : "widgets/agent_home_my_history", module : "audit", zone : "agent-home", defaultGridSize : "col-12 col-md-6 d-flex", sortWeight : 700, requiredPermission : "tickets.view", dataProvider : "AuditService@audit", dataMethod : "recentForCurrentAgent" }
+                ]
+            }
+        };
         variables.routes   = [];
         variables.interceptorSettings = { customInterceptionPoints : [] };
         variables.interceptors = [];

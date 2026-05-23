@@ -1,0 +1,64 @@
+<bx:output>
+<bx:set local.rows = ( prc.widgetData.rows ?: [] ) >
+<div class="card flex-fill h-100">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title mb-0 flex-grow-1">
+            <i class="bi bi-clock-history me-2"></i>My history
+        </h3>
+        <a href="/agent/admin/audit?actorId=me" class="small">Full log <i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="card-body p-0">
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-secondary mb-0 p-3">No recent actions recorded.</p>
+        <bx:else>
+            <ul class="list-group list-group-flush" data-my-history>
+                <bx:loop array="#local.rows#" item="local.row">
+                    <li class="list-group-item d-flex align-items-start gap-2 small">
+                        <span class="badge text-bg-light text-black" style="min-width:6.5rem;text-align:left;">
+                            #encodeForHTML( local.row.eventType )#
+                        </span>
+                        <span class="flex-grow-1 text-body-secondary">
+                            <bx:if len( local.row.entityType )>
+                                #encodeForHTML( local.row.entityType )#<bx:if len( local.row.entityId )>&nbsp;<span class="text-body-tertiary">#encodeForHTML( left( local.row.entityId, 8 ) )#&hellip;</span></bx:if>
+                            </bx:if>
+                        </span>
+                        <span class="text-body-tertiary text-nowrap">#encodeForHTML( local.row.createdAt )#</span>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.my-history" ] = {
+        update : function( payload, card ){
+            if ( !payload || !payload.rows ) return;
+            var ul = card.querySelector( "[data-my-history]" );
+            if ( !ul ) return;
+            var html = "";
+            payload.rows.forEach( function( r ){
+                var entity = "";
+                if ( r.entityType ) {
+                    entity = escape( r.entityType );
+                    if ( r.entityId ) entity += "&nbsp;<span class=\"text-body-tertiary\">" + escape( String( r.entityId ).slice( 0, 8 ) ) + "&hellip;</span>";
+                }
+                html += "<li class=\"list-group-item d-flex align-items-start gap-2 small\">" +
+                    "<span class=\"badge text-bg-light text-black\" style=\"min-width:6.5rem;text-align:left;\">" + escape( r.eventType ) + "</span>" +
+                    "<span class=\"flex-grow-1 text-body-secondary\">" + entity + "</span>" +
+                    "<span class=\"text-body-tertiary text-nowrap\">" + escape( r.createdAt ) + "</span>" +
+                "</li>";
+            } );
+            ul.innerHTML = html;
+        }
+    };
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+})();
+</script>
+</bx:output>
