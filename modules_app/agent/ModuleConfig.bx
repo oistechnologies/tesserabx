@@ -65,6 +65,7 @@ class {
                 ],
                 ticketPanels : [
                     { id : "summary",          position : "right", label : "AI summary",            partial : "panels/summary",          module : "agent", sortWeight : 100,  requiredPermission : "tickets.view", requiresAi : true                  },
+                    { id : "escalation-risk",  position : "right", label : "Escalation risk",       partial : "panels/escalation_risk",  module : "agent", sortWeight : 150,  requiredPermission : "tickets.view", requiresAi : true                  },
                     { id : "kb-draft",         position : "right", label : "Draft KB article",      partial : "panels/kb_draft",         module : "agent", sortWeight : 200,  requiredPermission : "tickets.view", requiresAi : true                  },
                     { id : "related-articles", position : "right", label : "Related articles",      partial : "panels/related_articles", module : "agent", sortWeight : 300,  requiredPermission : "tickets.view", requiresAi : true                  },
                     { id : "custom-fields",    position : "right", label : "Custom fields",         partial : "panels/custom_fields",    module : "agent", sortWeight : 400,  requiredPermission : "tickets.view"                                     },

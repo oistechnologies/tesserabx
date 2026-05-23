@@ -38,6 +38,11 @@ class {
                 class      : "#moduleMapping#.interceptors.KbIndexingInterceptor",
                 name       : "KbIndexingInterceptor",
                 properties : {}
+            },
+            {
+                class      : "#moduleMapping#.interceptors.EscalationRiskInterceptor",
+                name       : "EscalationRiskInterceptor",
+                properties : {}
             }
         ];
     }
@@ -76,6 +81,9 @@ class {
               .asSingleton();
         binder.map( "ReplyToneService@ai" )
               .to( "#moduleMapping#.models.ReplyToneService" )
+              .asSingleton();
+        binder.map( "EscalationRiskService@ai" )
+              .to( "#moduleMapping#.models.EscalationRiskService" )
               .asSingleton();
 
         // Phase 7 registries.

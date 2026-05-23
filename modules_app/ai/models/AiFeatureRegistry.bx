@@ -117,7 +117,8 @@ class singleton=true {
             { id : "reply-tone",      label : "Reply tone review",      description : "Score a draft reply for tone and suggest specific improvements.",     kind : "completion" },
             { id : "kb-draft",        label : "KB article draft",       description : "Generate an unpublished KB article from a resolved ticket.",          kind : "completion" },
             { id : "kb-index",        label : "KB article embedding",   description : "Embed a published article into pgvector for semantic search.",        kind : "embedding"  },
-            { id : "kb-suggest",      label : "KB article suggestions", description : "Return the top-N most relevant articles for a ticket subject + body.", kind : "completion" }
+            { id : "kb-suggest",      label : "KB article suggestions", description : "Return the top-N most relevant articles for a ticket subject + body.", kind : "completion" },
+            { id : "escalation-risk", label : "Escalation risk score",  description : "Score 0-100 of how likely the ticket is to escalate, with rationale.",  kind : "completion" }
         ];
         for ( var s in seeds ) addEntry( s, "core" );
     }

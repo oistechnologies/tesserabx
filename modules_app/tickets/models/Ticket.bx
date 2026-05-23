@@ -48,6 +48,17 @@ class
     // aiSummaryAt stamps when it was generated. Both null until the
     // first run; subsequent runs overwrite.
     property name="aiSummary"   column="ai_summary";
+
+    // B9: AI escalation-risk score. Null until the first scoring run;
+    // EscalationRiskService writes these on ticket create + status
+    // change when AI_ENABLED=true and the `escalationRisk` feature is
+    // active. The ticket panel reads them with a color-coded badge.
+    // sqltype="integer" prevents qb from binding an unset value as
+    // varchar against the smallint column on save. See BoxLang JDBC
+    // type-coercion gotcha.
+    property name="escalationRiskScore"     column="escalation_risk_score"     sqltype="integer";
+    property name="escalationRiskRationale" column="escalation_risk_rationale";
+    property name="escalationRiskAt"        column="escalation_risk_at" sqltype="timestamp";
     property name="aiSummaryAt" column="ai_summary_at" sqltype="timestamp";
 
     function applyGlobalScopes( builder ){

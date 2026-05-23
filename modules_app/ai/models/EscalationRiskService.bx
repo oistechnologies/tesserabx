@@ -1,0 +1,134 @@
+/**
+ * EscalationRiskService: score a ticket's escalation risk on a
+ * 0-100 scale (follow-up B9).
+ *
+ * Asks the model to read ticket subject + the most recent message
+ * plus priority + SLA + assignment state, and return
+ *   { score : 0-100, rationale : "..." }
+ *
+ * Score buckets the panel renders:
+ *   0-30   low risk    (green)
+ *   31-69  medium risk (yellow)
+ *   70-100 high risk   (red)
+ *
+ * Mirrors TriageService's structure: synchronous `scoreFor()`
+ * entrypoint plus `apply()` policy boundary. The async cbq wrapper
+ * is a follow-up; today the interceptor runs synchronously inside
+ * the create/status-change call. Provider latency on a single
+ * completion is small enough to live in-band for now.
+ */
+class singleton=true {
+
+    property name="capability"     inject="AiCapability@ai";
+    property name="middleware"     inject="AiMiddleware@ai";
+    property name="promptService"  inject="AiSystemPromptService@ai";
+    property name="ticketsService" inject="TicketsService@tickets";
+
+    variables.FEATURE_KEY = "escalation-risk";
+    variables.FALLBACK_SYSTEM_PROMPT = "Score the ticket's escalation risk. Reply with strict JSON: {""score"": <0-100 integer>, ""rationale"": ""one-sentence explanation""}. Score above 70 means very likely to escalate; below 30 means routine.";
+
+    /**
+     * Score a ticket. Returns
+     *   { available, outcome, score, rationale }
+     * `available=false` when AI is off; `outcome=ok` on success.
+     */
+    public struct function scoreFor( required string ticketId ){
+        var off = { "available" : false, "outcome" : "disabled", "score" : 0, "rationale" : "" };
+        if ( !capability.isFeatureEnabled( variables.FEATURE_KEY ) ) return off;
+
+        var ticket = ticketsService.getTicket( arguments.ticketId );
+        if ( isNull( ticket ) ) return { "available" : true, "outcome" : "error", "score" : 0, "rationale" : "Ticket not found" };
+
+        var template = promptService.getForFeature( variables.FEATURE_KEY );
+        if ( !len( template ) ) template = variables.FALLBACK_SYSTEM_PROMPT;
+        var systemPrompt = promptService.renderTemplate( template, {} );
+
+        var userPrompt = buildUserPrompt( ticket );
+        var result = middleware.complete(
+            feature : variables.FEATURE_KEY,
+            prompt  : userPrompt,
+            options : {
+                systemPrompt   : systemPrompt,
+                organizationId : ticket.getOrganizationId() ?: "",
+                ticketId       : ticket.getId(),
+                temperature    : 0.2,
+                maxTokens      : 200
+            }
+        );
+
+        if ( result.outcome != "ok" ) {
+            return { "available" : true, "outcome" : result.outcome, "score" : 0, "rationale" : result.error ?: "" };
+        }
+        var parsed = parseModelJson( result.text );
+        parsed.available = true;
+        parsed.outcome   = "ok";
+        return parsed;
+    }
+
+    /**
+     * Persist the scored result on the ticket. Idempotent: when the
+     * outcome is anything but "ok", no write happens (leaves the
+     * previous score untouched so a transient provider error does
+     * not blow away a known-good score).
+     */
+    public void function apply( required string ticketId, required struct result ){
+        if ( ( arguments.result.outcome ?: "" ) != "ok" ) return;
+        var score = clampScore( arguments.result.score ?: 0 );
+        queryExecute(
+            "UPDATE tickets
+                SET escalation_risk_score     = cast( :s as smallint ),
+                    escalation_risk_rationale = :r,
+                    escalation_risk_at        = NOW()
+              WHERE id = :id",
+            {
+                id : arguments.ticketId,
+                s  : toString( score ),
+                r  : arguments.result.rationale ?: ""
+            }
+        );
+    }
+
+    // ---------------- internals ----------------
+
+    private numeric function clampScore( required any raw ){
+        var n = isNumeric( arguments.raw ) ? int( arguments.raw ) : 0;
+        if ( n < 0 )   return 0;
+        if ( n > 100 ) return 100;
+        return n;
+    }
+
+    private struct function parseModelJson( required string raw ){
+        var fallback = { "score" : 0, "rationale" : "" };
+        var jsonStr = middleware.extractJsonObject( arguments.raw );
+        if ( !len( jsonStr ) ) return fallback;
+        try {
+            var data = jsonDeserialize( jsonStr );
+            if ( !isStruct( data ) ) return fallback;
+            return {
+                "score"     : isNumeric( data.score ?: 0 ) ? int( data.score ) : 0,
+                "rationale" : toString( data.rationale ?: "" )
+            };
+        } catch ( any e ) {
+            return fallback;
+        }
+    }
+
+    private string function buildUserPrompt( required any ticket ){
+        var messages = ticketsService.listMessagesForTicket( arguments.ticket.getId(), true );
+        var lines = [
+            "Subject: "  & arguments.ticket.getSubject(),
+            "Priority: " & ( arguments.ticket.getPriority() ?: "" ),
+            "Status: "   & ( arguments.ticket.getStatus()   ?: "" ),
+            "Assigned: " & ( len( arguments.ticket.getAssignedToAgentId() ?: "" ) ? "yes" : "no" ),
+            ""
+        ];
+        for ( var m in messages ) {
+            if ( m.getIsInternal() ?: false ) continue;
+            lines.append( "Latest public message:" );
+            lines.append( m.getBody() ?: "" );
+            break;
+        }
+        return lines.toList( char( 10 ) );
+    }
+
+}
