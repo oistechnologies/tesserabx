@@ -1,11 +1,176 @@
 /**
- * agent Home handler. Renders the technician dashboard landing on /agent.
+ * agent Home handler. Renders the technician dashboard landing on
+ * /agent and exposes the JSON poll + persistence endpoints that back
+ * the dashboard's auto-refresh and per-agent layout customisation.
+ *
+ * Pipeline:
+ *   - index(): listForViewerWithHidden("agent-home") -> prc.visibleWidgets +
+ *              prc.hiddenWidgets. View renders each visible partial wrapped
+ *              in card chrome with drag handles + a hide button; hidden
+ *              entries surface in a "Restore" dropdown.
+ *   - poll(): fetches each visible widget's data provider (when declared)
+ *             and returns one JSON document keyed by widget id. The client
+ *             JS updates per-widget DOM in place every N seconds.
+ *   - saveOrder() / saveHidden() / resetPreferences(): write through
+ *             AgentDashboardPreferencesService.
+ *
+ * The four POST/DELETE actions return JSON status (no flash), since the
+ * client JS handles the UI side. The poll endpoint never throws on a
+ * broken individual widget; the JSON for that widget carries
+ * { "error": "label" } so the client can show a quiet error chip.
  */
 class {
 
+    property name="auth"       inject="AuthenticationService@cbauth";
+    property name="registry"   inject="DashboardWidgetRegistry@reporting";
+    property name="prefs"      inject="AgentDashboardPreferencesService@agent";
+
     function index( event, rc, prc ){
         prc.pageTitle = "Agent Dashboard";
+        prc.pageId    = "agent-home";
         event.setLayout( name = "Agent", module = "core" );
+
+        var both = registry.listForViewerWithHidden( tbxViewer(), "agent-home" );
+        prc.visibleWidgets = both.visible;
+        prc.hiddenWidgets  = both.hidden;
+    }
+
+    /**
+     * GET /agent/home/poll
+     * Returns: { generatedAt, widgets : { <id> : <payload> | { error : "..." } } }
+     */
+    function poll( event, rc, prc ){
+        if ( !auth.isLoggedIn() ) {
+            event.renderData( data = { "loggedIn" : false }, type = "json" );
+            return;
+        }
+        var widgets = registry.listForViewer( tbxViewer(), "agent-home" );
+        var out     = {};
+        for ( var w in widgets ) {
+            try {
+                if ( len( w.dataProvider ?: "" ) && len( w.dataMethod ?: "" ) ) {
+                    out[ w.id ] = registry.fetchWidgetData( w );
+                } else {
+                    out[ w.id ] = {};
+                }
+            } catch ( any e ) {
+                out[ w.id ] = { "error" : "widget-error" };
+            }
+        }
+        event.renderData(
+            data = {
+                "loggedIn"    : true,
+                "generatedAt" : dateTimeFormat( now(), "iso" ),
+                "widgets"     : out
+            },
+            type = "json"
+        );
+    }
+
+    /**
+     * POST /agent/home/preferences/order
+     * Body: { order : [ "widget-id-1", "widget-id-2", ... ] }
+     *
+     * The submitted order MUST be a subset of the agent's currently
+     * visible widgets. Submitting an id the agent has no permission
+     * for is rejected (no quiet bypass of the perm gate).
+     */
+    function saveOrder( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            event.renderData( data = { "ok" : false, "error" : "not-logged-in" }, type = "json", statusCode = 401 );
+            return;
+        }
+        var submitted = parseOrderList( rc );
+        var both      = registry.listForViewerWithHidden( tbxViewer(), "agent-home" );
+        var allowed   = {};
+        for ( var w in both.visible ) allowed[ w.id ] = true;
+        for ( var w in both.hidden  ) allowed[ w.id ] = true;
+        for ( var id in submitted ) {
+            if ( !structKeyExists( allowed, id ) ) {
+                event.renderData( data = { "ok" : false, "error" : "unknown-widget" }, type = "json", statusCode = 409 );
+                return;
+            }
+        }
+        prefs.setOrder( agentId, "agent-home", submitted );
+        event.renderData( data = { "ok" : true }, type = "json" );
+    }
+
+    /**
+     * POST /agent/home/preferences/hidden
+     * Body: { widgetId : "...", hidden : true|false }
+     */
+    function saveHidden( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            event.renderData( data = { "ok" : false, "error" : "not-logged-in" }, type = "json", statusCode = 401 );
+            return;
+        }
+        var widgetId = rc.widgetId ?: "";
+        if ( !len( widgetId ) ) {
+            event.renderData( data = { "ok" : false, "error" : "missing-widget-id" }, type = "json", statusCode = 400 );
+            return;
+        }
+        var both    = registry.listForViewerWithHidden( tbxViewer(), "agent-home" );
+        var allowed = {};
+        for ( var w in both.visible ) allowed[ w.id ] = true;
+        for ( var w in both.hidden  ) allowed[ w.id ] = true;
+        if ( !structKeyExists( allowed, widgetId ) ) {
+            event.renderData( data = { "ok" : false, "error" : "unknown-widget" }, type = "json", statusCode = 409 );
+            return;
+        }
+        // Form-encoded bodies arrive as strings; coerce explicitly so
+        // "false" doesn't evaluate truthy via the boolean cast.
+        var rawHidden = toString( rc.hidden ?: "" );
+        var hidden    = ( rawHidden == "true" || rawHidden == "1" );
+        prefs.setHidden( agentId, "agent-home", widgetId, hidden );
+        event.renderData( data = { "ok" : true }, type = "json" );
+    }
+
+    /**
+     * POST /agent/home/preferences/reset
+     * Drops every per-agent override for the agent-home zone.
+     */
+    function resetPreferences( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            event.renderData( data = { "ok" : false, "error" : "not-logged-in" }, type = "json", statusCode = 401 );
+            return;
+        }
+        prefs.resetZone( agentId, "agent-home" );
+        event.renderData( data = { "ok" : true }, type = "json" );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * The Sortable client posts `order` either as a comma-delimited
+     * string ("id1,id2,id3") or as a JSON array. Accept both. Strip
+     * empty / whitespace entries.
+     */
+    private array function parseOrderList( required struct rc ){
+        var raw = arguments.rc.order ?: "";
+        if ( isArray( raw ) ) {
+            var arr = raw;
+        } else if ( isJSON( raw ) ) {
+            var parsed = jsonDeserialize( raw );
+            var arr = isArray( parsed ) ? parsed : [];
+        } else {
+            var arr = listToArray( raw, "," );
+        }
+        var out = [];
+        for ( var v in arr ) {
+            var t = trim( toString( v ) );
+            if ( len( t ) ) out.append( t );
+        }
+        return out;
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
     }
 
 }

@@ -34,6 +34,18 @@ class {
                 helpPages : [
                     { id : "tickets.working-the-queue", section : "tickets", title : "Working the ticket queue", audience : "agent",  sortWeight : 10, source : "resources/help/working-the-queue.md", searchable : true, keywords : [ "queue", "ticket", "assign", "claim" ] },
                     { id : "tickets.submitting",        section : "tickets", title : "Submitting a ticket",     audience : "client", sortWeight : 20, source : "resources/help/submitting.md",        searchable : true, keywords : [ "submit", "open", "request", "ticket" ] }
+                ],
+                // /agent home dashboard widgets. Phase C scaffolding:
+                // the four stat cards render a stub metric of "0" so
+                // the home page has something to render through the
+                // registry-driven loop. Phase D will replace the stub
+                // partials with real per-agent counts wired through a
+                // TicketsService dataProvider.
+                dashboardWidgets : [
+                    { id : "agent-home.my-open-tickets",   title : "Open tickets",     partial : "widgets/agent_home_my_open_tickets",   module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 100, requiredPermission : "tickets.view" },
+                    { id : "agent-home.my-awaiting-reply", title : "Awaiting reply",   partial : "widgets/agent_home_my_awaiting_reply", module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 200, requiredPermission : "tickets.view" },
+                    { id : "agent-home.my-sla-at-risk",    title : "SLA at risk",      partial : "widgets/agent_home_my_sla_at_risk",    module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 300, requiredPermission : "tickets.view" },
+                    { id : "agent-home.my-resolved-today", title : "Resolved today",   partial : "widgets/agent_home_my_resolved_today", module : "tickets", zone : "agent-home", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 400, requiredPermission : "tickets.view" }
                 ]
             }
         };

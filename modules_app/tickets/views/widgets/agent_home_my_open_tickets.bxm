@@ -1,0 +1,11 @@
+<bx:output>
+<!--- Phase C scaffolding: stub metric. Phase D wires TicketsService.countOpenAssignedToMe. --->
+#view( view = "_partials/small_box", module = "core", args = {
+    color     : "primary",
+    metric    : "<span data-metric>0</span>",
+    label     : "Open tickets",
+    icon      : "bi bi-ticket-detailed",
+    link      : "/agent/tickets?status=open",
+    linkLabel : "View open queue"
+} )#
+</bx:output>

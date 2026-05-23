@@ -13,7 +13,15 @@
 class {
 
     function configure(){
-        // /agent landing
+        // /agent landing + dashboard preference endpoints. The four
+        // /home/* endpoints back the auto-refresh poll, drag-and-drop
+        // reorder, hide/restore button, and reset-to-default action.
+        // All four are POST-only (or GET for poll) and return JSON;
+        // the client JS handles UI updates without a page navigation.
+        route( "home/poll"                ).withVerbs( "GET"  ).to( "Home.poll" );
+        route( "home/preferences/order"   ).withVerbs( "POST" ).to( "Home.saveOrder" );
+        route( "home/preferences/hidden"  ).withVerbs( "POST" ).to( "Home.saveHidden" );
+        route( "home/preferences/reset"   ).withVerbs( "POST" ).to( "Home.resetPreferences" );
         route( "/" ).to( "Home.index" );
 
         // Auth

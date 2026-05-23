@@ -1,67 +1,157 @@
 <bx:output>
-<!--
-    Agent dashboard placeholder tiles. The reporting module owns
-    the real KPI widgets (DashboardWidgetRegistry contributions); this
-    home page is the agent's first landing after sign-in and currently
-    shows static zero counts. When B2 wires the live counts here we
-    keep the same .small-box markup via the core partial; only the
-    metric/link args change.
--->
-<div class="row g-3">
-    <div class="col-12 col-md-6 col-xl-3">
-        #view( view = "_partials/small_box", module = "core", args = {
-            color     : "primary",
-            metric    : "0",
-            label     : "Open tickets",
-            icon      : "bi bi-ticket-detailed",
-            link      : "/agent/tickets?status=open",
-            linkLabel : "View open queue"
-        } )#
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        #view( view = "_partials/small_box", module = "core", args = {
-            color     : "warning",
-            metric    : "0",
-            label     : "Awaiting reply",
-            icon      : "bi bi-hourglass-split",
-            link      : "/agent/tickets?status=pending",
-            linkLabel : "View pending"
-        } )#
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        #view( view = "_partials/small_box", module = "core", args = {
-            color     : "danger",
-            metric    : "0",
-            label     : "SLA at risk",
-            icon      : "bi bi-exclamation-triangle",
-            link      : "/agent/tickets?sla=at-risk",
-            linkLabel : "View at-risk"
-        } )#
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-        #view( view = "_partials/small_box", module = "core", args = {
-            color     : "success",
-            metric    : "0",
-            label     : "Resolved today",
-            icon      : "bi bi-check2-circle",
-            link      : "/agent/tickets?status=resolved",
-            linkLabel : "View resolved"
-        } )#
-    </div>
+<!---
+    Agent dashboard home page.
 
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title mb-0">Welcome</h3>
+    Renders the per-agent home dashboard at /agent. Every card comes
+    from DashboardWidgetRegistry@reporting (zone="agent-home"). The
+    handler resolved the loop once into prc.visibleWidgets and
+    prc.hiddenWidgets via listForViewerWithHidden(); this view emits
+    the chrome (drag handle + hide button per card) plus the "Restore"
+    dropdown and the small JS bootstrap.
+
+    Widget partials are responsible for their own card body markup.
+    They may also register an updater on
+    window.tbxDashboard.widgets[<id>] so the periodic poll can refresh
+    the partial in place without a navigation. See
+    /includes/js/agent-dashboard.js for the contract.
+--->
+
+<bx:set local.hasVisible = arrayLen( prc.visibleWidgets ) >
+<bx:set local.hasHidden  = arrayLen( prc.hiddenWidgets )  >
+
+<bx:if ( !local.hasVisible ) && local.hasHidden>
+    <!--- All widgets hidden by this agent. Friendly empty state with --->
+    <!--- a one-click path back to the Restore dropdown below.        --->
+    <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+        <i class="bi bi-layout-text-window me-2"></i>
+        <span class="flex-grow-1">Your dashboard is empty. Restore widgets from the Manage widgets menu below.</span>
+    </div>
+</bx:if>
+
+<div id="agent-dashboard"
+     class="row g-3 align-items-stretch"
+     data-poll-url="/agent/home/poll"
+     data-poll-interval="30000"
+     data-save-order-url="/agent/home/preferences/order"
+     data-save-hidden-url="/agent/home/preferences/hidden"
+     data-reset-url="/agent/home/preferences/reset">
+    <bx:loop array="#prc.visibleWidgets#" item="local.w">
+        <bx:if len( local.w.partial )>
+            <div class="#encodeForHTMLAttribute( local.w.defaultGridSize )#"
+                 data-widget-id="#encodeForHTMLAttribute( local.w.id )#">
+                <!---
+                    Wrapper must be BOTH a flex item that fills its grid
+                    column AND a flex container itself, so partials that
+                    use `flex-fill` internally (e.g. the small_box) can
+                    actually stretch. The reports page achieves this by
+                    rendering the partial directly inside the d-flex
+                    column; on the home page we add this extra layer
+                    for the drag/hide chrome, so we forward the flex
+                    semantics through with `d-flex flex-column flex-fill`.
+                    h-100 is a fallback for grid sizes that omit d-flex.
+                --->
+                <div class="position-relative widget-card h-100 flex-fill d-flex flex-column">
+                    <!---
+                        Drag handle + hide button are absolutely positioned
+                        so the small_box and full card partials stay
+                        visually intact. They appear on hover/focus and
+                        are reachable via tab order for keyboard users.
+                    --->
+                    <div class="widget-chrome">
+                        <button type="button"
+                                class="btn btn-sm btn-light drag-handle"
+                                aria-label="Reorder #encodeForHTMLAttribute( local.w.title )#"
+                                title="Drag to reorder">
+                            <i class="bi bi-grip-vertical"></i>
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm btn-light hide-widget"
+                                aria-label="Hide #encodeForHTMLAttribute( local.w.title )#"
+                                title="Hide widget">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                    #view( view = local.w.partial, module = local.w.module )#
+                </div>
             </div>
-            <div class="card-body">
-                <p class="mb-0">
-                    Agent dashboard placeholder. The full live dashboard is at
-                    <a href="/agent/reports">Reports</a>; once B2 wires the live
-                    counts above, this page becomes the primary landing.
-                </p>
-            </div>
-        </div>
+        </bx:if>
+    </bx:loop>
+</div>
+
+<div class="d-flex justify-content-end mt-3">
+    <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                type="button"
+                data-bs-toggle="dropdown"
+                aria-expanded="false">
+            <i class="bi bi-grid-3x3-gap me-1"></i>
+            Manage widgets
+            <bx:if local.hasHidden>
+                <span class="badge text-bg-secondary ms-1">#arrayLen( prc.hiddenWidgets )# hidden</span>
+            </bx:if>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            <bx:if local.hasHidden>
+                <li><h6 class="dropdown-header">Restore hidden widgets</h6></li>
+                <bx:loop array="#prc.hiddenWidgets#" item="local.h">
+                    <li>
+                        <a class="dropdown-item restore-widget"
+                           href="##"
+                           data-widget-id="#encodeForHTMLAttribute( local.h.id )#">
+                            <i class="bi bi-arrow-counterclockwise me-2"></i>#encodeForHTML( local.h.title )#
+                        </a>
+                    </li>
+                </bx:loop>
+                <li><hr class="dropdown-divider"></li>
+            </bx:if>
+            <li>
+                <a class="dropdown-item reset-dashboard" href="##">
+                    <i class="bi bi-arrow-clockwise me-2"></i>Reset to default layout
+                </a>
+            </li>
+        </ul>
     </div>
 </div>
+
+<style>
+    /* Widget card chrome: a small floating cluster of buttons in the */
+    /* top-right corner of every card. Visible on hover/focus so it   */
+    /* doesn't clutter the resting state but stays reachable via tab. */
+    ##agent-dashboard .widget-chrome {
+        position: absolute;
+        top: .35rem;
+        right: .35rem;
+        z-index: 5;
+        display: flex;
+        gap: .25rem;
+        opacity: 0;
+        transition: opacity .12s ease-in-out;
+        pointer-events: none;
+    }
+    ##agent-dashboard .widget-card:hover .widget-chrome,
+    ##agent-dashboard .widget-card:focus-within .widget-chrome,
+    ##agent-dashboard .widget-chrome:focus-within {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    ##agent-dashboard .widget-chrome .btn {
+        padding: .1rem .35rem;
+        line-height: 1;
+    }
+    ##agent-dashboard .widget-chrome .drag-handle { cursor: grab; }
+    ##agent-dashboard .widget-chrome .drag-handle:active { cursor: grabbing; }
+    ##agent-dashboard .agent-dashboard-ghost {
+        opacity: .35;
+        background-color: var(--bs-secondary-bg);
+    }
+    ##agent-dashboard .widget-poll-error {
+        outline: 2px solid var(--bs-warning);
+        outline-offset: -2px;
+    }
+</style>
+
+<!-- SortableJS for drag-and-drop, loaded from CDN (mirrors the
+     Chart.js approach used by /agent/reports). -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script src="/includes/js/agent-dashboard.js"></script>
 </bx:output>

@@ -1,0 +1,11 @@
+<bx:output>
+<!--- Phase C scaffolding: stub metric. Phase D wires TicketsService.countSlaAtRiskAssignedToMe. --->
+#view( view = "_partials/small_box", module = "core", args = {
+    color     : "danger",
+    metric    : "<span data-metric>0</span>",
+    label     : "SLA at risk",
+    icon      : "bi bi-exclamation-triangle",
+    link      : "/agent/tickets?sla=at-risk",
+    linkLabel : "View at-risk"
+} )#
+</bx:output>
