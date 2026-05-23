@@ -64,6 +64,16 @@ jobs:
           DB_SSL: "false"
           DB_SCHEMA: public
         run: |
+          # tasks/Migrate stage copies every add-on migration
+          # (sample-addons/<addon>/migrations, modules_app/<addon>/migrations,
+          # modules/<TesseraBX-marked>/migrations) into
+          # resources/database/migrations/_addon_<slug>_*.cfc so the
+          # standard cfmigrations runner picks them up. Staged files
+          # are gitignored, so CI MUST stage before migrating or the
+          # example-sync add-on's tickets_example_sync table won't
+          # exist and Phase13HardeningSpec's cross-org leak probe
+          # fails. See commit 7f31678 for the staging design.
+          box task run tasks/Migrate stage
           box migrate install
           box migrate up --force
 
