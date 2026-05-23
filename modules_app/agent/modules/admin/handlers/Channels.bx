@@ -1,0 +1,69 @@
+/**
+ * /agent/admin/channels handler.
+ *
+ * Lists every registered channel adapter and lets an operator
+ * verify each adapter's live configuration via its verifyConfig()
+ * method. Adapters come from two places:
+ *
+ *   - Core seeds (currently the email adapter at
+ *     EmailChannelAdapter@channels).
+ *   - Add-on contributions declared in
+ *     settings.tesserabx.channelAdapters = [ { mapping : "..." } ]
+ *     and resolved through WireBox at boot.
+ *
+ * Verify passes an empty config struct, which the adapter interprets
+ * as "use the already-configured credentials" (env vars, addon-
+ * settings overrides, etc.). Adapters that need explicit per-call
+ * config can grow that surface later; the registry just orchestrates.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*; the
+ * AdminPagesRegistry card requires `admin.settings.manage`.
+ */
+class {
+
+    property name="registry"   inject="ChannelAdapterRegistry@channels";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Channels";
+        prc.adapters  = registry.listAdapters();
+        event.setView( "channels/index" );
+    }
+
+    /**
+     * POST /agent/admin/channels/:id/verify
+     * Calls the adapter's verifyConfig({}) and renders the outcome
+     * via messagebox before relocating back to the listing.
+     */
+    function verify( event, rc, prc ){
+        param rc.id = "";
+        if ( !len( rc.id ) ) {
+            messagebox.error( "Missing channel id." );
+            relocate( uri = "/agent/admin/channels" );
+            return;
+        }
+        var adapter = registry.adapterFor( rc.id );
+        if ( isNull( adapter ) ) {
+            messagebox.error( "No channel adapter registered with id [#rc.id#]." );
+            relocate( uri = "/agent/admin/channels" );
+            return;
+        }
+        var outcome = {};
+        try {
+            outcome = adapter.verifyConfig( {} );
+        } catch ( any e ) {
+            outcome = { ok : false, error : ( e.type ?: "AdapterError" ) & ": " & ( e.message ?: "" ) };
+        }
+        if ( !!( outcome.ok ?: false ) ) {
+            messagebox.info( "Channel [#rc.id#] verified successfully." );
+        } else {
+            messagebox.error( "Channel [#rc.id#] verification failed: " & ( outcome.error ?: "(no detail)" ) );
+        }
+        relocate( uri = "/agent/admin/channels" );
+    }
+
+}

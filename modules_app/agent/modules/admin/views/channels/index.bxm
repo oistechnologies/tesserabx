@@ -1,0 +1,65 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h5 mb-0">Channels</h2>
+        <p class="text-body-secondary small mb-0">
+            Inbound / outbound channel adapters registered with TesseraBX. Core adapters and add-on adapters surface here side-by-side. Use Verify to check the adapter's current configuration end-to-end.
+        </p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><strong>Registered adapters</strong></div>
+    <div class="card-body p-0">
+        <bx:if !arrayLen( prc.adapters )>
+            <div class="p-3 text-body-secondary">No channel adapters registered.</div>
+        <bx:else>
+            <table class="table table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>Adapter</th>
+                        <th>Channel id</th>
+                        <th>Source</th>
+                        <th class="text-center">Pull-based?</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:loop array="#prc.adapters#" item="a">
+                        <tr>
+                            <td>
+                                <bx:if len( a.icon ?: "" )>
+                                    <i class="#encodeForHTMLAttribute( a.icon )# me-1"></i>
+                                </bx:if>
+                                #encodeForHTML( a.displayName )#
+                            </td>
+                            <td><code>#encodeForHTML( a.channelId )#</code></td>
+                            <td>
+                                <bx:if a.source eq "core">
+                                    <span class="badge text-bg-secondary">core</span>
+                                <bx:else>
+                                    <span class="badge text-bg-info">#encodeForHTML( a.source )#</span>
+                                </bx:if>
+                            </td>
+                            <td class="text-center">
+                                <bx:if a.isPullBased>
+                                    <span class="badge text-bg-light text-black">Pull</span>
+                                <bx:else>
+                                    <span class="badge text-bg-light text-black">Push</span>
+                                </bx:if>
+                            </td>
+                            <td class="text-end">
+                                <form method="post" action="/agent/admin/channels/#encodeForHTMLAttribute( a.channelId )#/verify" class="d-inline">
+                                    <button class="btn btn-sm btn-outline-primary" type="submit">
+                                        <i class="bi bi-check2-circle"></i> Verify
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

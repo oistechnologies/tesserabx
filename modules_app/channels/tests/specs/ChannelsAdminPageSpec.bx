@@ -1,0 +1,65 @@
+/**
+ * ChannelsAdminPageSpec: follow-up B5.
+ *
+ * Verifies the wiring of the admin Channels page:
+ *   - The AdminPagesRegistry exposes a `admin.channels` card.
+ *   - The card declares the documented permission.
+ *   - ChannelAdapterRegistry.listAdapters() returns at least the
+ *     core email adapter (the listing's data source).
+ *   - The route resolves (verified by integration: a GET against
+ *     /agent/admin/channels returns 403 on an unauthenticated
+ *     request, NOT 404).
+ *
+ * The handler itself is too thin for a meaningful unit test (it
+ * delegates to the registry and renders a view); the registry has
+ * its own coverage in ChannelAdapterRegistrySpec.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.adminPages  = wb.getInstance( "AdminPagesRegistry@admin" );
+        variables.registry    = wb.getInstance( "ChannelAdapterRegistry@channels" );
+    }
+
+    function run(){
+        describe( "B5: admin Channels page is wired", function(){
+
+            it( "AdminPagesRegistry exposes the admin.channels card", function(){
+                var ids = variables.adminPages.listAll().map( ( p ) => p.id );
+                expect( ids ).toInclude( "admin.channels" );
+            } );
+
+            it( "the admin.channels card declares admin.settings.manage permission", function(){
+                // BoxLang scope-walker drops `var x = javaCast("null","")`
+                // declarations; build the match by filtering instead.
+                var matches = variables.adminPages.listAll().filter( ( c ) => c.id == "admin.channels" );
+                expect( arrayLen( matches ) ).toBe( 1 );
+                expect( matches[ 1 ].requiredPermission ).toBe( "admin.settings.manage" );
+                expect( matches[ 1 ].route              ).toBe( "/agent/admin/channels" );
+            } );
+
+            it( "ChannelAdapterRegistry exposes at least the core email adapter", function(){
+                var adapters = variables.registry.listAdapters();
+                expect( arrayLen( adapters ) ).toBeGT( 0 );
+                var ids = [];
+                for ( var a in adapters ) ids.append( a.channelId );
+                expect( ids ).toInclude( "email" );
+            } );
+
+            it( "each registered adapter struct carries the fields the view needs", function(){
+                for ( var a in variables.registry.listAdapters() ) {
+                    expect( a ).toHaveKey( "channelId" );
+                    expect( a ).toHaveKey( "displayName" );
+                    expect( a ).toHaveKey( "icon" );
+                    expect( a ).toHaveKey( "isPullBased" );
+                    expect( a ).toHaveKey( "source" );
+                }
+            } );
+
+        } );
+    }
+
+}

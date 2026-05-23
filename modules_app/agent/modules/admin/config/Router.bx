@@ -14,6 +14,10 @@ class {
         // Audit log search UI.
         route( "audit" ).to( "Audit.index" );
 
+        // Channel adapter listing + per-adapter verifyConfig.
+        route( "channels/:id/verify" ).withVerbs( "POST" ).to( "Channels.verify" );
+        route( "channels" ).to( "Channels.index" );
+
         // Channel blacklist management.
         route( "blacklist/:id/toggle" ).withVerbs( "POST" ).to( "Blacklist.toggle" );
         route( "blacklist/:id/remove" ).withVerbs( "POST" ).to( "Blacklist.remove" );
