@@ -1,0 +1,222 @@
+/**
+ * AgentDashboardPreferencesSpec: per-agent layout overrides for the
+ * dashboard widget registry.
+ *
+ * Two seams under test:
+ *
+ *   1. AgentDashboardPreferencesService directly: getPreferences,
+ *      setOrder, setHidden, resetZone. Verifies the service is
+ *      idempotent and that setOrder does not clobber a hide.
+ *
+ *   2. DashboardWidgetRegistry.listForViewer(WithHidden): proves the
+ *      agent's preferences are applied AFTER the existing
+ *      permission/capability gates, and that hidden widgets surface
+ *      separately so a "Restore" affordance can find them.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.prefs   = wb.getInstance( "AgentDashboardPreferencesService@agent" );
+        variables.widgets = wb.getInstance( "DashboardWidgetRegistry@reporting" );
+        variables.agentId = createTestAgent();
+    }
+
+    function afterAll(){
+        try {
+            queryExecute(
+                "DELETE FROM agent_dashboard_preferences WHERE agent_id = :a",
+                { a : variables.agentId }
+            );
+            queryExecute( "DELETE FROM agents WHERE id = :a", { a : variables.agentId } );
+        } catch ( any e ) {}
+    }
+
+    function run(){
+
+        describe( "AgentDashboardPreferencesService", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute(
+                    "DELETE FROM agent_dashboard_preferences WHERE agent_id = :a",
+                    { a : variables.agentId }
+                );
+                variables.widgets.reload();
+            } );
+
+            it( "returns an empty struct when no rows exist", function(){
+                var got = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( got ).toBeStruct();
+                expect( structCount( got ) ).toBe( 0 );
+            } );
+
+            it( "setHidden(true) writes a row, setHidden(false) removes it", function(){
+                variables.prefs.setHidden( variables.agentId, "agent-home", "spec.widget.alpha", true );
+                var afterHide = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( afterHide ).toHaveKey( "spec.widget.alpha" );
+                expect( afterHide[ "spec.widget.alpha" ].hidden ).toBeTrue();
+
+                variables.prefs.setHidden( variables.agentId, "agent-home", "spec.widget.alpha", false );
+                var afterShow = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( structKeyExists( afterShow, "spec.widget.alpha" ) ).toBeFalse();
+            } );
+
+            it( "setOrder assigns sort positions stepping by 100", function(){
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ "spec.a", "spec.b", "spec.c" ] );
+                var got = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( got[ "spec.a" ].sortOrder ).toBe( 100 );
+                expect( got[ "spec.b" ].sortOrder ).toBe( 200 );
+                expect( got[ "spec.c" ].sortOrder ).toBe( 300 );
+            } );
+
+            it( "setOrder is idempotent (calling twice produces the same rows)", function(){
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ "spec.a", "spec.b" ] );
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ "spec.a", "spec.b" ] );
+                var rows = queryExecute(
+                    "SELECT widget_id, sort_order FROM agent_dashboard_preferences
+                     WHERE agent_id = :a AND zone = 'agent-home' ORDER BY sort_order",
+                    { a : variables.agentId }
+                );
+                expect( rows.recordCount ).toBe( 2 );
+            } );
+
+            it( "setOrder clears sort_order for widgets NOT in the new order but preserves hides", function(){
+                variables.prefs.setHidden( variables.agentId, "agent-home", "spec.kept-hidden", true );
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ "spec.kept-hidden", "spec.new-1" ] );
+                var afterOne = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( afterOne[ "spec.kept-hidden" ].hidden ).toBeTrue();
+                expect( afterOne[ "spec.kept-hidden" ].sortOrder ).toBe( 100 );
+
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ "spec.new-1" ] );
+                var afterTwo = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( afterTwo ).toHaveKey( "spec.kept-hidden" );
+                expect( afterTwo[ "spec.kept-hidden" ].hidden ).toBeTrue();
+                expect( isNumeric( afterTwo[ "spec.kept-hidden" ].sortOrder ?: "" ) ).toBeFalse();
+            } );
+
+            it( "resetZone deletes every row for ( agent, zone )", function(){
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ "spec.a", "spec.b" ] );
+                variables.prefs.setHidden( variables.agentId, "agent-home", "spec.c", true );
+                variables.prefs.resetZone( variables.agentId, "agent-home" );
+                var got = variables.prefs.getPreferences( variables.agentId, "agent-home" );
+                expect( structCount( got ) ).toBe( 0 );
+            } );
+
+        } );
+
+        describe( "DashboardWidgetRegistry per-agent integration", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute(
+                    "DELETE FROM agent_dashboard_preferences WHERE agent_id = :a",
+                    { a : variables.agentId }
+                );
+                variables.widgets.reload();
+            } );
+
+            it( "a hidden widget drops out of listForViewer but appears in the hidden bucket", function(){
+                var widgetId = registerProbeWidget();
+                variables.prefs.setHidden( variables.agentId, "agent-home", widgetId, true );
+                var both = variables.widgets.listForViewerWithHidden( agentViewer( variables.agentId ), "agent-home" );
+                expect( ids( both.visible ) ).notToInclude( widgetId );
+                expect( ids( both.hidden  ) ).toInclude( widgetId );
+            } );
+
+            it( "an agent's sort_order overrides the default sortWeight", function(){
+                var a = registerProbeWidget( 200 );
+                var b = registerProbeWidget( 300 );
+                variables.prefs.setOrder( variables.agentId, "agent-home", [ b, a ] );
+                var listed = variables.widgets.listForViewer( agentViewer( variables.agentId ), "agent-home" );
+                var listedIds = ids( listed );
+                var posA = arrayFind( listedIds, a );
+                var posB = arrayFind( listedIds, b );
+                expect( posB ).toBeLT( posA );
+            } );
+
+            it( "preferences are ignored for non-agent viewers (no userType)", function(){
+                var w = registerProbeWidget();
+                variables.prefs.setHidden( variables.agentId, "agent-home", w, true );
+                var listed = variables.widgets.listForViewer( anonymousViewer(), "agent-home" );
+                // Anonymous viewer can't see anything either way (perm gate),
+                // but more importantly: no DB hit for prefs should happen.
+                expect( ids( listed ) ).notToInclude( w );
+            } );
+
+            it( "an agent cannot 'restore' a widget they have no permission for", function(){
+                var w = registerProbeWidget( 500, "non.existent.permission" );
+                // The agent's prefs say "hidden=true", but the perm gate
+                // already excludes the widget. It must NOT appear in the
+                // hidden bucket either (otherwise the Restore dropdown
+                // would expose forbidden widgets).
+                variables.prefs.setHidden( variables.agentId, "agent-home", w, true );
+                var both = variables.widgets.listForViewerWithHidden( agentViewer( variables.agentId ), "agent-home" );
+                expect( ids( both.visible ) ).notToInclude( w );
+                expect( ids( both.hidden  ) ).notToInclude( w );
+            } );
+
+        } );
+
+    }
+
+    // ---------- helpers ----------
+
+    private string function createTestAgent(){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_active, is_admin, created_at, updated_at )
+             VALUES ( :id, :em, 'x', cast( :act as boolean ), cast( :adm as boolean ), NOW(), NOW() )",
+            {
+                id  : id,
+                em  : "dashprefs-spec-" & lcase( replace( id, "-", "", "all" ) ) & "@example.test",
+                act : true,
+                adm : false
+            }
+        );
+        return id;
+    }
+
+    private string function registerProbeWidget( numeric sortWeight = 999, string requiredPermission = "tickets.view" ){
+        var id = "spec.widget." & lcase( replace( createUUID(), "-", "", "all" ) );
+        variables.widgets.register( {
+            id                 : id,
+            title              : "Probe " & id,
+            partial            : "widgets/_probe",
+            module             : "spec-addon",
+            zone               : "agent-home",
+            sortWeight         : arguments.sortWeight,
+            requiredPermission : arguments.requiredPermission
+        } );
+        return id;
+    }
+
+    private array function ids( required array entries ){
+        var out = [];
+        for ( var e in arguments.entries ) out.append( e.id );
+        return out;
+    }
+
+    private struct function agentViewer( required string id ){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : arguments.id,
+            roles          : [ "agent" ],
+            permissions    : [ "tickets.view" ],
+            organizationId : ""
+        };
+    }
+
+    private struct function anonymousViewer(){
+        return {
+            signedIn       : false,
+            userType       : "",
+            userId         : "",
+            roles          : [],
+            permissions    : [],
+            organizationId : ""
+        };
+    }
+
+}

@@ -65,19 +65,50 @@ class singleton=true {
     }
 
     public array function listForViewer( required struct viewer, string zone = "reports" ){
+        return listForViewerWithHidden( arguments.viewer, arguments.zone ).visible;
+    }
+
+    /**
+     * Same filtering pipeline as listForViewer, but also returns the
+     * entries the agent has personally hidden so the "Restore hidden
+     * widgets" affordance can list them. Hidden entries are those
+     * the agent WOULD have been allowed to see (passing all org
+     * overrides, permission, capability, and AI gates) but whose
+     * per-agent preference row has `hidden=true`. An entry the agent
+     * has no permission to see never appears in either list.
+     *
+     * Returns: { visible : [], hidden : [] }
+     *
+     * Both arrays are sorted ascending by sortWeight (with the
+     * agent's sort_order override applied).
+     */
+    public struct function listForViewerWithHidden( required struct viewer, string zone = "reports" ){
         ensureLoaded();
-        var overrides = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
-        var out = [];
+        var overrides   = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
+        var agentPrefs  = loadAgentPreferences( arguments.viewer, arguments.zone );
+        var visible     = [];
+        var hidden      = [];
         for ( var id in variables.cache ) {
             var e = variables.cache[ id ];
             if ( e.zone != arguments.zone ) continue;
             var resolved = applyOverride( e, overrides );
             if ( isNull( resolved ) ) continue;
             if ( !isVisible( resolved, arguments.viewer ) ) continue;
-            out.append( resolved );
+            var pref = agentPrefs[ resolved.id ] ?: javaCast( "null", "" );
+            if ( !isNull( pref ) ) {
+                if ( isNumeric( pref.sortOrder ?: "" ) ) {
+                    resolved.sortWeight = pref.sortOrder;
+                }
+                if ( pref.hidden ?: false ) {
+                    hidden.append( resolved );
+                    continue;
+                }
+            }
+            visible.append( resolved );
         }
-        out.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
-        return out;
+        visible.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        hidden.sort( function( a, b ){ return val( a.sortWeight ) - val( b.sortWeight ); } );
+        return { visible : visible, hidden : hidden };
     }
 
     public array function listAll(){
@@ -185,6 +216,25 @@ class singleton=true {
             return false;
         } catch ( any e ) {
             return false;
+        }
+    }
+
+    /**
+     * Per-agent overrides for ( agentId, zone ). Returns {} when the
+     * viewer is not a signed-in agent or when the agent module is
+     * not loaded in this surface. The agent module is a runtime
+     * dependency for the agent-home zone, but the reporting zone is
+     * surfaced to non-agent contexts too (api / scheduler), so we
+     * resolve the service lazily and swallow lookup failures.
+     */
+    private struct function loadAgentPreferences( required struct viewer, required string zone ){
+        if ( ( arguments.viewer.userType ?: "" ) != "agent" ) return {};
+        if ( !len( arguments.viewer.userId ?: "" ) ) return {};
+        try {
+            var prefs = wirebox.getInstance( "AgentDashboardPreferencesService@agent" );
+            return prefs.getPreferences( arguments.viewer.userId, arguments.zone );
+        } catch ( any e ) {
+            return {};
         }
     }
 

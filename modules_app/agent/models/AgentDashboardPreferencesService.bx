@@ -1,0 +1,303 @@
+/**
+ * AgentDashboardPreferencesService: per-agent layout and visibility
+ * overrides for the dashboard widget registry.
+ *
+ * Reads and writes live in `agent_dashboard_preferences` (see the
+ * migration of the same name). The DashboardWidgetRegistry consults
+ * this service through `getPreferences()` on every `listForViewer()`
+ * call for an agent viewer; the persistence endpoints in
+ * `agent/handlers/Home.bx` call `setOrder()` / `setHidden()` /
+ * `resetZone()` when an agent reorders or hides a widget.
+ *
+ * Storage shape per row:
+ *   ( agent_id, zone, widget_id, sort_order?, hidden, updated_at )
+ *
+ * No row exists for a widget the agent has not personalised; the
+ * default sortWeight from the registry applies in that case.
+ *
+ * Writes are audited via AuditService with
+ *   event_type = "agent.dashboard.preferences_changed"
+ * so an admin can see who reshuffled their dashboard. Reads are not
+ * audited.
+ */
+class singleton=true {
+
+    property name="wirebox"      inject="wirebox";
+    property name="auditService" inject="AuditService@audit";
+
+    /**
+     * Return the agent's preferences for one zone, keyed by widget_id.
+     *
+     *   {
+     *       "widget-1" : { sortOrder : 250, hidden : false },
+     *       "widget-2" : { sortOrder : null, hidden : true }
+     *   }
+     *
+     * Widgets with no row are simply absent from the result.
+     */
+    public struct function getPreferences( required string agentId, required string zone ){
+        var out = {};
+        if ( !len( arguments.agentId ) || !len( arguments.zone ) ) return out;
+        var rows = queryExecute(
+            "SELECT widget_id, sort_order, hidden
+             FROM   agent_dashboard_preferences
+             WHERE  agent_id = :aid AND zone = :z",
+            { aid : arguments.agentId, z : arguments.zone }
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out[ rows.widget_id[ i ] ] = {
+                sortOrder : isNumeric( rows.sort_order[ i ] ?: "" ) ? rows.sort_order[ i ] : javaCast( "null", "" ),
+                hidden    : !!rows.hidden[ i ]
+            };
+        }
+        return out;
+    }
+
+    /**
+     * Set the explicit ordering for the supplied widget ids. Any
+     * widget not in the array is treated as "use the default order";
+     * any existing sort_order rows for widgets NOT in the array are
+     * cleared (their `hidden` state is preserved).
+     *
+     * Each id in the array is assigned a sort_order based on its
+     * position, starting at 100 and stepping by 100. The default
+     * sort weights in the registry are also multiples of 100, so an
+     * agent's override interleaves naturally with any new widget
+     * that appears later (its default position falls between two
+     * overrides).
+     *
+     * Idempotent: calling with the same array twice produces the
+     * same rows.
+     */
+    public void function setOrder(
+        required string agentId,
+        required string zone,
+        required array orderedWidgetIds,
+        string actorAgentId = ""
+    ){
+        if ( !len( arguments.agentId ) || !len( arguments.zone ) ) return;
+
+        // Clear sort_order on any prior overrides not covered by the
+        // new order. We DELETE rows whose only contribution was a
+        // sort_order (no hidden=true), and we set sort_order=NULL on
+        // rows that also carry hidden=true so the agent does not lose
+        // their hide preference.
+        if ( arrayLen( arguments.orderedWidgetIds ) ) {
+            var placeholders = [];
+            var binds        = { aid : arguments.agentId, z : arguments.zone };
+            var p            = 0;
+            for ( var wid in arguments.orderedWidgetIds ) {
+                p++;
+                placeholders.append( ":w" & p );
+                binds[ "w" & p ] = wid;
+            }
+            queryExecute(
+                "UPDATE agent_dashboard_preferences
+                 SET    sort_order = NULL,
+                        updated_at = NOW()
+                 WHERE  agent_id  = :aid
+                 AND    zone      = :z
+                 AND    hidden    = cast( :hide as boolean )
+                 AND    widget_id NOT IN ( " & placeholders.toList( "," ) & " )",
+                duplicate( binds ).append( { hide : true } )
+            );
+            queryExecute(
+                "DELETE FROM agent_dashboard_preferences
+                 WHERE agent_id  = :aid
+                 AND   zone      = :z
+                 AND   hidden    = cast( :hide as boolean )
+                 AND   widget_id NOT IN ( " & placeholders.toList( "," ) & " )",
+                duplicate( binds ).append( { hide : false } )
+            );
+        } else {
+            // Empty array = clear every override (without dropping hides).
+            queryExecute(
+                "UPDATE agent_dashboard_preferences
+                 SET    sort_order = NULL,
+                        updated_at = NOW()
+                 WHERE  agent_id = :aid AND zone = :z AND hidden = cast( :hide as boolean )",
+                { aid : arguments.agentId, z : arguments.zone, hide : true }
+            );
+            queryExecute(
+                "DELETE FROM agent_dashboard_preferences
+                 WHERE  agent_id = :aid AND zone = :z AND hidden = cast( :hide as boolean )",
+                { aid : arguments.agentId, z : arguments.zone, hide : false }
+            );
+        }
+
+        var position = 0;
+        for ( var widgetId in arguments.orderedWidgetIds ) {
+            position += 100;
+            upsertRow(
+                agentId  : arguments.agentId,
+                zone     : arguments.zone,
+                widgetId : widgetId,
+                sortOrder: position,
+                hidden   : javaCast( "null", "" )
+            );
+        }
+
+        auditService.record(
+            eventType : "agent.dashboard.preferences_changed",
+            entityType: "agent",
+            entityId  : arguments.agentId,
+            actorType : "agent",
+            actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : arguments.agentId,
+            metadata  : { zone : arguments.zone, action : "reorder", widgets : arguments.orderedWidgetIds }
+        );
+    }
+
+    /**
+     * Hide or unhide a single widget. Hidden=false on a widget the
+     * agent never hid is a no-op (no row need exist).
+     */
+    public void function setHidden(
+        required string agentId,
+        required string zone,
+        required string widgetId,
+        required boolean hidden,
+        string actorAgentId = ""
+    ){
+        if ( !len( arguments.agentId ) || !len( arguments.zone ) || !len( arguments.widgetId ) ) return;
+
+        if ( arguments.hidden ) {
+            upsertRow(
+                agentId  : arguments.agentId,
+                zone     : arguments.zone,
+                widgetId : arguments.widgetId,
+                sortOrder: javaCast( "null", "" ),
+                hidden   : true
+            );
+        } else {
+            // Unhiding: if the row only existed for the hide, drop it
+            // entirely. If the row also had a sort_order, just clear
+            // hidden.
+            queryExecute(
+                "UPDATE agent_dashboard_preferences
+                 SET    hidden     = cast( :h as boolean ),
+                        updated_at = NOW()
+                 WHERE  agent_id   = :aid
+                 AND    zone       = :z
+                 AND    widget_id  = :wid",
+                {
+                    h   : false,
+                    aid : arguments.agentId,
+                    z   : arguments.zone,
+                    wid : arguments.widgetId
+                }
+            );
+            queryExecute(
+                "DELETE FROM agent_dashboard_preferences
+                 WHERE  agent_id  = :aid
+                 AND    zone      = :z
+                 AND    widget_id = :wid
+                 AND    sort_order IS NULL
+                 AND    hidden    = cast( :h as boolean )",
+                {
+                    aid : arguments.agentId,
+                    z   : arguments.zone,
+                    wid : arguments.widgetId,
+                    h   : false
+                }
+            );
+        }
+
+        auditService.record(
+            eventType : "agent.dashboard.preferences_changed",
+            entityType: "agent",
+            entityId  : arguments.agentId,
+            actorType : "agent",
+            actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : arguments.agentId,
+            metadata  : {
+                zone     : arguments.zone,
+                action   : arguments.hidden ? "hide" : "show",
+                widgetId : arguments.widgetId
+            }
+        );
+    }
+
+    /**
+     * Clear every preference row for ( agent, zone ). The agent
+     * reverts to the default registry order with every widget
+     * visible.
+     */
+    public void function resetZone(
+        required string agentId,
+        required string zone,
+        string actorAgentId = ""
+    ){
+        if ( !len( arguments.agentId ) || !len( arguments.zone ) ) return;
+        queryExecute(
+            "DELETE FROM agent_dashboard_preferences WHERE agent_id = :aid AND zone = :z",
+            { aid : arguments.agentId, z : arguments.zone }
+        );
+        auditService.record(
+            eventType : "agent.dashboard.preferences_changed",
+            entityType: "agent",
+            entityId  : arguments.agentId,
+            actorType : "agent",
+            actorId   : len( arguments.actorAgentId ) ? arguments.actorAgentId : arguments.agentId,
+            metadata  : { zone : arguments.zone, action : "reset" }
+        );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Upsert one row. sortOrder=null leaves the existing sort_order
+     * alone (does not zero it out). hidden=null does the same for
+     * the hidden flag. This lets setOrder and setHidden share the
+     * same write path without one stomping the other's column.
+     */
+    private void function upsertRow(
+        required string agentId,
+        required string zone,
+        required string widgetId,
+        any sortOrder,
+        any hidden
+    ){
+        var existing = queryExecute(
+            "SELECT id FROM agent_dashboard_preferences
+             WHERE  agent_id = :aid AND zone = :z AND widget_id = :wid",
+            { aid : arguments.agentId, z : arguments.zone, wid : arguments.widgetId }
+        );
+
+        if ( existing.recordCount ) {
+            var setParts = [ "updated_at = NOW()" ];
+            var binds    = { aid : arguments.agentId, z : arguments.zone, wid : arguments.widgetId };
+            if ( !isNull( arguments.sortOrder ) ) {
+                setParts.append( "sort_order = cast( :so as integer )" );
+                binds.so = arguments.sortOrder;
+            }
+            if ( !isNull( arguments.hidden ) ) {
+                setParts.append( "hidden = cast( :h as boolean )" );
+                binds.h = arguments.hidden;
+            }
+            if ( arrayLen( setParts ) > 1 ) {
+                queryExecute(
+                    "UPDATE agent_dashboard_preferences
+                     SET    " & setParts.toList( ", " ) & "
+                     WHERE  agent_id  = :aid
+                     AND    zone      = :z
+                     AND    widget_id = :wid",
+                    binds
+                );
+            }
+        } else {
+            queryExecute(
+                "INSERT INTO agent_dashboard_preferences
+                       ( id, agent_id, zone, widget_id, sort_order, hidden, updated_at )
+                 VALUES ( :id, :aid, :z, :wid, cast( :so as integer ), cast( :h as boolean ), NOW() )",
+                {
+                    id  : createUUID(),
+                    aid : arguments.agentId,
+                    z   : arguments.zone,
+                    wid : arguments.widgetId,
+                    so  : isNull( arguments.sortOrder ) ? javaCast( "null", "" ) : arguments.sortOrder,
+                    h   : isNull( arguments.hidden )    ? false                  : arguments.hidden
+                }
+            );
+        }
+    }
+
+}
