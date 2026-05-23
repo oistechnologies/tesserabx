@@ -1,0 +1,20 @@
+/**
+ * StubTicketForOutbound: minimal stand-in for a Ticket entity used
+ * by OutboundDispatchInterceptorSpec. Only exposes getSource() and
+ * getId(); the dispatch path needs nothing else.
+ */
+class accessors=true {
+
+    property name="source";
+    property name="id";
+
+    function init( required string source, string id = "stub-ticket-1" ){
+        variables.source = arguments.source;
+        variables.id     = arguments.id;
+        return this;
+    }
+
+    public string function getSource(){ return variables.source; }
+    public string function getId()    { return variables.id; }
+
+}

@@ -1,0 +1,48 @@
+/**
+ * StubChannelAdapter: spec-only adapter used by
+ * OutboundDispatchInterceptorSpec to observe dispatch calls without
+ * touching real email plumbing.
+ *
+ * Reports a unique channelId so the dispatcher resolves it for
+ * tickets whose source matches.
+ */
+class accessors=true {
+
+    property name="calls";
+    property name="failOnNextCall";
+
+    function init(){
+        variables.calls = [];
+        variables.failOnNextCall = false;
+        return this;
+    }
+
+    public string  function getChannelId()     { return "spec-stub-channel"; }
+    public string  function getDisplayName()   { return "Spec Stub Channel"; }
+    public string  function getIcon()          { return ""; }
+    public boolean function isPullBased()      { return false; }
+    public numeric function pollOnce()         { return 0; }
+
+    public struct function verifyConfig( required struct config ){
+        return { ok : true, error : "" };
+    }
+
+    public struct function normalizeInbound( required any rawPayload ){
+        return {};
+    }
+
+    public struct function sendOutbound( required any ticketMessage, required any ticket ){
+        variables.calls.append( { messageId : arguments.ticketMessage.getId() } );
+        if ( variables.failOnNextCall ) {
+            variables.failOnNextCall = false;
+            throw( type : "StubChannelAdapter.Boom", message : "spec-forced failure" );
+        }
+        return { ok : true, error : "", channelMessageId : arguments.ticketMessage.getId() & "-out" };
+    }
+
+    public void function reset(){
+        variables.calls = [];
+        variables.failOnNextCall = false;
+    }
+
+}

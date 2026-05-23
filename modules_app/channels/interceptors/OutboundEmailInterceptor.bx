@@ -1,15 +1,22 @@
 /**
- * OutboundEmailInterceptor: bridges the tickets module's announces
- * to the channels module's outbound dispatch.
+ * OutboundEmailInterceptor: email-specific outbound behavior that
+ * does not fit the generic IChannelAdapter contract.
  *
  * Listens for:
- *   onTicketCreated      -> dispatch auto-acknowledgement
- *   onTicketMessageAdded -> dispatch agent reply
+ *   onTicketCreated -> dispatch auto-acknowledgement
  *
- * Both listeners are best-effort: a send failure logs and continues
- * so the ticket lifecycle itself never fails because the mail server
- * blinked. cbmailservices in dev points at Mailpit, so a real
- * outbound failure only happens when production mail config is bad.
+ * The agent-reply dispatch (onTicketMessageAdded) moved to
+ * OutboundDispatchInterceptor (B6), which resolves the right channel
+ * adapter via ChannelAdapterRegistry and calls
+ * adapter.sendOutbound(). EmailChannelAdapter.sendOutbound delegates
+ * to OutboundEmailService.sendAgentReply, so email behavior is
+ * unchanged.
+ *
+ * The auto-acknowledgement stays here because "send an unprompted
+ * welcome message when a ticket is created" is not channel-universal
+ * (SMS, Slack, etc. don't typically auto-ack). The IChannelAdapter
+ * contract has no method for it; future channels that want this
+ * behavior can opt in via their own listener.
  *
  * Resolves OutboundEmailService through wirebox on each invocation
  * rather than via property injection. The interceptor is constructed
@@ -30,22 +37,6 @@ class {
         } catch ( any e ) {
             writeLog(
                 text : "OutboundEmail auto-ack failed: " & e.message,
-                log  : "tesserabx",
-                type : "error"
-            );
-        }
-    }
-
-    function onTicketMessageAdded( event, interceptData, rc, prc ){
-        try {
-            wirebox.getInstance( "OutboundEmailService@channels" )
-                .sendAgentReply(
-                    message = arguments.interceptData.message,
-                    ticket  = arguments.interceptData.ticket
-                );
-        } catch ( any e ) {
-            writeLog(
-                text : "OutboundEmail agent reply failed: " & e.message,
                 log  : "tesserabx",
                 type : "error"
             );

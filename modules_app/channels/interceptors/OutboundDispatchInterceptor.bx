@@ -1,0 +1,70 @@
+/**
+ * OutboundDispatchInterceptor: generic outbound dispatch for any
+ * channel adapter (follow-up B6).
+ *
+ * Listens for onTicketMessageAdded. For non-internal messages, looks
+ * up the channel adapter matching the ticket's `source` via
+ * ChannelAdapterRegistry and calls `adapter.sendOutbound(message,
+ * ticket)`. Add-on adapters (SMS, Slack, custom channels) gain the
+ * outbound path without each declaring its own interceptor.
+ *
+ * Why this is separate from OutboundEmailInterceptor:
+ *   The auto-acknowledgement on ticket-created is email-specific UX
+ *   (not every channel sends an unprompted welcome). That handler
+ *   stays inline in OutboundEmailInterceptor. This interceptor owns
+ *   only the reply path, which IS channel-universal because the
+ *   IChannelAdapter contract defines sendOutbound.
+ *
+ * Filter rules:
+ *   - Internal messages (m.getIsInternal() == true) are skipped at
+ *     this level even though most adapters also filter; defense in
+ *     depth keeps an under-implemented add-on adapter from leaking
+ *     internal notes outward.
+ *   - Ticket source resolves directly to a registered adapter when
+ *     possible (e.g. source = "email" -> EmailChannelAdapter).
+ *   - When the source has NO matching adapter (e.g. "agent",
+ *     "portal", "contact-form", "widget", "scheduler"), the
+ *     dispatcher falls back to the email adapter. This preserves
+ *     the pre-B6 behavior where every agent reply reached the
+ *     requester via email regardless of ticket source. Future
+ *     add-ons that register a non-email source-specific adapter
+ *     take precedence over the fallback.
+ *   - When no source AND no email adapter are available, the
+ *     dispatch is silently skipped.
+ *   - Failures log and swallow; one slow or broken adapter must not
+ *     block the originating request's response.
+ */
+class accessors=true {
+
+    property name="wirebox" inject="wirebox";
+
+    function configure(){}
+
+    function onTicketMessageAdded( event, interceptData, rc, prc ){
+        var m = arguments.interceptData.message ?: "";
+        var t = arguments.interceptData.ticket  ?: "";
+        if ( !isObject( m ) || !isObject( t ) ) return;
+        if ( m.getIsInternal() ) return;
+
+        var registry = wirebox.getInstance( "ChannelAdapterRegistry@channels" );
+        var src      = t.getSource() ?: "";
+        var adapter  = len( src ) ? registry.adapterFor( src ) : javaCast( "null", "" );
+        if ( isNull( adapter ) ) {
+            // Fallback: every reply reaches the requester via email
+            // unless a non-email adapter is wired for the source.
+            adapter = registry.adapterFor( "email" );
+        }
+        if ( isNull( adapter ) ) return;
+
+        try {
+            adapter.sendOutbound( ticketMessage = m, ticket = t );
+        } catch ( any e ) {
+            writeLog(
+                file = "OutboundDispatch",
+                text = "Adapter dispatch (source [#src#]) sendOutbound failed for message #m.getId()#: " & e.message,
+                type = "error"
+            );
+        }
+    }
+
+}

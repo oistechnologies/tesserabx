@@ -1,0 +1,122 @@
+/**
+ * OutboundDispatchInterceptorSpec: follow-up B6.
+ *
+ * Verifies the generic outbound dispatcher routes onTicketMessageAdded
+ * payloads to the right channel adapter:
+ *
+ *   - Non-internal message with source = "email" -> EmailChannelAdapter
+ *     receives sendOutbound.
+ *   - Non-internal message with source = "<unknown>" -> falls back to
+ *     EmailChannelAdapter (preserves the pre-B6 behavior where every
+ *     reply reached the requester via email).
+ *   - Non-internal message with source = "<spec-adapter-id>" -> the
+ *     adapter registered with that id receives sendOutbound.
+ *   - Internal message -> no adapter call (defense in depth even when
+ *     adapters filter themselves).
+ *
+ * Uses a stub adapter registered at spec time so the spec can observe
+ * sendOutbound calls without depending on the IMAP/SMTP plumbing in
+ * EmailChannelAdapter.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.registry = wb.getInstance( "ChannelAdapterRegistry@channels" );
+
+        // Register a stub adapter exposed under a unique id so the
+        // registry's source-based dispatch resolves it deterministically.
+        if ( !wb.getBinder().mappingExists( "StubChannelAdapter@spec" ) ) {
+            wb.getBinder().map( "StubChannelAdapter@spec" )
+                          .to( "tests.support.StubChannelAdapter" )
+                          .asSingleton();
+        }
+        variables.stub = wb.getInstance( "StubChannelAdapter@spec" );
+        variables.registry.register( "StubChannelAdapter@spec" );
+
+        // Instantiate the interceptor directly so we can drive
+        // preProcess / onTicketMessageAdded without spinning up a real
+        // ColdBox event. Same approach the ApiAuthInterceptor spec uses.
+        variables.interceptor = new tesserabx.modules.channels.interceptors.OutboundDispatchInterceptor();
+        variables.interceptor.configure();
+        // No DI runs on `new`; set the wirebox property explicitly.
+        // The interceptor class is accessors=true so the setter is
+        // auto-generated.
+        variables.interceptor.setWirebox( wb );
+    }
+
+    function afterAll(){
+        // Re-seed the registry so the stub doesn't leak into other
+        // specs' channel id space.
+        variables.registry.reload();
+        super.afterAll();
+    }
+
+    function run(){
+        describe( "B6: OutboundDispatchInterceptor", function(){
+
+            beforeEach( function( currentSpec ){
+                variables.stub.reset();
+            } );
+
+            it( "dispatches a non-internal message to the adapter matching the ticket source", function(){
+                var fakeT = new tests.support.StubTicketForOutbound( source : variables.stub.getChannelId() );
+                var fakeM = new tests.support.StubMessageForOutbound( isInternal : false, id : "msg-1" );
+                variables.interceptor.onTicketMessageAdded(
+                    event         : {},
+                    interceptData : { message : fakeM, ticket : fakeT },
+                    rc            : {},
+                    prc           : {}
+                );
+                expect( variables.stub.calls.len() ).toBe( 1 );
+                expect( variables.stub.calls[ 1 ].messageId ).toBe( "msg-1" );
+            } );
+
+            it( "falls back to the email adapter when the source has no registered match", function(){
+                var fakeT = new tests.support.StubTicketForOutbound( source : "made-up-channel-no-adapter" );
+                var fakeM = new tests.support.StubMessageForOutbound( isInternal : false, id : "msg-2" );
+                // The stub doesn't get called; the real email adapter
+                // would be invoked. Assert just that the stub was NOT
+                // invoked. The email adapter's sendAgentReply is
+                // exercised by the existing outbound-email integration.
+                variables.interceptor.onTicketMessageAdded(
+                    event         : {},
+                    interceptData : { message : fakeM, ticket : fakeT },
+                    rc            : {},
+                    prc           : {}
+                );
+                expect( variables.stub.calls.len() ).toBe( 0 );
+            } );
+
+            it( "skips internal messages without calling any adapter", function(){
+                var fakeT = new tests.support.StubTicketForOutbound( source : variables.stub.getChannelId() );
+                var fakeM = new tests.support.StubMessageForOutbound( isInternal : true, id : "msg-3" );
+                variables.interceptor.onTicketMessageAdded(
+                    event         : {},
+                    interceptData : { message : fakeM, ticket : fakeT },
+                    rc            : {},
+                    prc           : {}
+                );
+                expect( variables.stub.calls.len() ).toBe( 0 );
+            } );
+
+            it( "swallows adapter exceptions so the originating request keeps going", function(){
+                var fakeT = new tests.support.StubTicketForOutbound( source : variables.stub.getChannelId() );
+                var fakeM = new tests.support.StubMessageForOutbound( isInternal : false, id : "msg-4" );
+                variables.stub.failOnNextCall = true;
+                // Should not throw; failure is logged and swallowed.
+                variables.interceptor.onTicketMessageAdded(
+                    event         : {},
+                    interceptData : { message : fakeM, ticket : fakeT },
+                    rc            : {},
+                    prc           : {}
+                );
+                expect( variables.stub.calls.len() ).toBe( 1 );
+            } );
+
+        } );
+    }
+
+}

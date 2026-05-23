@@ -36,7 +36,19 @@ class {
         // assignment is explicit. Each entry needs class, name, and
         // properties keys; registerInterceptor blows up on a missing
         // .name.
+        // OutboundDispatchInterceptor (B6) is the generic
+        // adapter-dispatching listener for onTicketMessageAdded.
+        // OutboundEmailInterceptor stays for the email-specific
+        // auto-acknowledgement on onTicketCreated, which is not in
+        // the IChannelAdapter contract. Registered in dispatch order:
+        // the dispatcher runs first so the email interceptor's
+        // auto-ack does not race with a real outbound reply.
         variables.interceptors        = [
+            {
+                class      : "#moduleMapping#.interceptors.OutboundDispatchInterceptor",
+                name       : "OutboundDispatchInterceptor",
+                properties : {}
+            },
             {
                 class      : "#moduleMapping#.interceptors.OutboundEmailInterceptor",
                 name       : "OutboundEmailInterceptor",

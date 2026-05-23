@@ -1,0 +1,20 @@
+/**
+ * StubMessageForOutbound: minimal stand-in for a TicketMessage entity
+ * used by OutboundDispatchInterceptorSpec. Only exposes getIsInternal()
+ * and getId().
+ */
+class accessors=true {
+
+    property name="isInternal";
+    property name="id";
+
+    function init( boolean isInternal = false, string id = "stub-msg-1" ){
+        variables.isInternal = arguments.isInternal;
+        variables.id         = arguments.id;
+        return this;
+    }
+
+    public boolean function getIsInternal(){ return variables.isInternal; }
+    public string  function getId()        { return variables.id; }
+
+}
