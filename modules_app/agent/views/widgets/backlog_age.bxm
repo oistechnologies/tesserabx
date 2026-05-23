@@ -1,0 +1,27 @@
+<bx:output>
+<div class="card flex-fill">
+    <div class="card-header bg-warning-subtle">
+        <i class="bi bi-hourglass-split text-warning me-1"></i>
+        <strong>Backlog age</strong>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <tbody>
+                <bx:loop array="#prc.backlog#" item="local.b">
+                    <bx:set local.bColor = local.b.label eq "< 24h"      ? "success"
+                                        : ( local.b.label eq "1 to 3 days" ? "info"
+                                        : ( local.b.label eq "3 to 7 days" ? "warning"
+                                        :                                    "danger" ) ) >
+                    <tr>
+                        <td class="ps-3">
+                            <span class="badge text-bg-#local.bColor# me-2">&nbsp;</span>
+                            #encodeForHTML( local.b.label )#
+                        </td>
+                        <td class="text-end pe-3"><strong>#encodeForHTML( local.b.count )#</strong></td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,19 @@
+<bx:output>
+<bx:set local.tiles = prc.tiles >
+<div class="card text-bg-warning flex-fill">
+    <div class="card-body d-flex justify-content-between align-items-center">
+        <div>
+            <div class="small opacity-75">Avg first response</div>
+            <div class="display-6 fw-semibold">
+                <bx:if local.tiles.avgFirstResponseMinutes gt 0>
+                    #encodeForHTML( local.tiles.avgFirstResponseMinutes )# <small class="fs-6 opacity-75">min</small>
+                <bx:else>
+                    -
+                </bx:if>
+            </div>
+            <div class="small opacity-75">last 30 days</div>
+        </div>
+        <i class="bi bi-stopwatch fs-1 opacity-50"></i>
+    </div>
+</div>
+</bx:output>

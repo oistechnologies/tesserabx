@@ -1,0 +1,10 @@
+<bx:output>
+<div class="card flex-fill">
+    <div class="card-header bg-danger-subtle">
+        <i class="bi bi-exclamation-triangle text-danger me-1"></i><strong>By priority</strong>
+    </div>
+    <div class="card-body">
+        <canvas id="chart-priority" height="160"></canvas>
+    </div>
+</div>
+</bx:output>

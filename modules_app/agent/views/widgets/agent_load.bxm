@@ -1,0 +1,32 @@
+<bx:output>
+<div class="card flex-fill">
+    <div class="card-header bg-secondary-subtle">
+        <i class="bi bi-people text-secondary me-1"></i><strong>Agent open load</strong>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr><th>Agent</th><th>Email</th><th class="text-end">Open</th></tr>
+            </thead>
+            <tbody>
+                <bx:if !arrayLen( prc.agentLoad )>
+                    <tr><td colspan="3" class="text-body-secondary text-center py-3">No agents.</td></tr>
+                </bx:if>
+                <bx:loop array="#prc.agentLoad#" item="local.row">
+                    <bx:set local.loadColor = local.row.openCount eq 0   ? "success"
+                                           : ( local.row.openCount lte 3 ? "info"
+                                           : ( local.row.openCount lte 7 ? "warning"
+                                           :                                "danger" ) ) >
+                    <tr>
+                        <td>#encodeForHTML( local.row.name )#</td>
+                        <td class="text-body-secondary">#encodeForHTML( local.row.email )#</td>
+                        <td class="text-end">
+                            <span class="badge text-bg-#local.loadColor#">#encodeForHTML( local.row.openCount )#</span>
+                        </td>
+                    </tr>
+                </bx:loop>
+            </tbody>
+        </table>
+    </div>
+</div>
+</bx:output>

@@ -1,213 +1,33 @@
 <bx:output>
-<bx:set local.tiles = prc.tiles >
-
 <div class="d-flex justify-content-end mb-3">
     <a class="btn btn-outline-secondary btn-sm" href="/agent/reports/export/tickets.csv">
         <i class="bi bi-download"></i> Export tickets (CSV)
     </a>
 </div>
 
-<bx:set local.slaPct = local.tiles.slaCompliancePct ?: 0 >
-<bx:set local.slaColor = local.tiles.slaTotal gt 0
-                       ? ( local.slaPct gte 90 ? "success"
-                       : ( local.slaPct gte 70 ? "warning"
-                       :                          "danger" ) )
-                       : "secondary" >
-
-<div class="row g-3 mb-3 align-items-stretch">
-    <div class="col-12 col-md-6 col-xl-3 d-flex">
-        <div class="card text-bg-primary flex-fill">
-            <div class="card-body d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="small opacity-75">Open tickets</div>
-                    <div class="display-6 fw-semibold">#encodeForHTML( local.tiles.openTickets )#</div>
-                </div>
-                <i class="bi bi-card-list fs-1 opacity-50"></i>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3 d-flex">
-        <div class="card text-bg-info flex-fill">
-            <div class="card-body d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="small opacity-75">Created today</div>
-                    <div class="display-6 fw-semibold">#encodeForHTML( local.tiles.createdToday )#</div>
-                </div>
-                <i class="bi bi-plus-circle fs-1 opacity-50"></i>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3 d-flex">
-        <div class="card text-bg-warning flex-fill">
-            <div class="card-body d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="small opacity-75">Avg first response</div>
-                    <div class="display-6 fw-semibold">
-                        <bx:if local.tiles.avgFirstResponseMinutes gt 0>
-                            #encodeForHTML( local.tiles.avgFirstResponseMinutes )# <small class="fs-6 opacity-75">min</small>
-                        <bx:else>
-                            -
-                        </bx:if>
-                    </div>
-                    <div class="small opacity-75">last 30 days</div>
-                </div>
-                <i class="bi bi-stopwatch fs-1 opacity-50"></i>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3 d-flex">
-        <div class="card text-bg-#local.slaColor# flex-fill">
-            <div class="card-body d-flex justify-content-between align-items-center">
-                <div>
-                    <div class="small opacity-75">SLA first-response compliance</div>
-                    <div class="display-6 fw-semibold">
-                        <bx:if local.tiles.slaTotal gt 0>
-                            #encodeForHTML( local.tiles.slaCompliancePct )#<small class="fs-6 opacity-75">%</small>
-                        <bx:else>
-                            -
-                        </bx:if>
-                    </div>
-                    <div class="small opacity-75">
-                        <bx:if local.tiles.slaTotal gt 0>
-                            #encodeForHTML( local.tiles.slaMet )# of #encodeForHTML( local.tiles.slaTotal )# met (30d)
-                        <bx:else>
-                            no SLA tickets in window
-                        </bx:if>
-                    </div>
-                </div>
-                <i class="bi bi-shield-check fs-1 opacity-50"></i>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-3 align-items-stretch">
-    <div class="col-12 col-xl-8 d-flex">
-        <div class="card flex-fill">
-            <div class="card-header bg-primary-subtle">
-                <i class="bi bi-graph-up text-primary me-1"></i>
-                <strong>Ticket volume</strong>
-                <span class="text-body-secondary small ms-1">last 30 days</span>
-            </div>
-            <div class="card-body">
-                <canvas id="chart-volume" height="120"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-xl-4 d-flex">
-        <div class="card flex-fill">
-            <div class="card-header bg-warning-subtle">
-                <i class="bi bi-hourglass-split text-warning me-1"></i>
-                <strong>Backlog age</strong>
-            </div>
-            <div class="card-body p-0">
-                <table class="table table-sm mb-0">
-                    <tbody>
-                        <bx:loop array="#prc.backlog#" item="local.b">
-                            <bx:set local.bColor = local.b.label eq "< 24h"      ? "success"
-                                                : ( local.b.label eq "1 to 3 days" ? "info"
-                                                : ( local.b.label eq "3 to 7 days" ? "warning"
-                                                :                                    "danger" ) ) >
-                            <tr>
-                                <td class="ps-3">
-                                    <span class="badge text-bg-#local.bColor# me-2">&nbsp;</span>
-                                    #encodeForHTML( local.b.label )#
-                                </td>
-                                <td class="text-end pe-3"><strong>#encodeForHTML( local.b.count )#</strong></td>
-                            </tr>
-                        </bx:loop>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-3 align-items-stretch">
-    <div class="col-12 col-md-4 d-flex">
-        <div class="card flex-fill">
-            <div class="card-header bg-info-subtle">
-                <i class="bi bi-tag text-info me-1"></i><strong>By status</strong>
-            </div>
-            <div class="card-body">
-                <canvas id="chart-status" height="160"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-4 d-flex">
-        <div class="card flex-fill">
-            <div class="card-header bg-danger-subtle">
-                <i class="bi bi-exclamation-triangle text-danger me-1"></i><strong>By priority</strong>
-            </div>
-            <div class="card-body">
-                <canvas id="chart-priority" height="160"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-4 d-flex">
-        <div class="card flex-fill">
-            <div class="card-header bg-success-subtle">
-                <i class="bi bi-inbox text-success me-1"></i><strong>By source</strong>
-            </div>
-            <div class="card-body">
-                <canvas id="chart-source" height="160"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header bg-secondary-subtle">
-                <i class="bi bi-people text-secondary me-1"></i><strong>Agent open load</strong>
-            </div>
-            <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr><th>Agent</th><th>Email</th><th class="text-end">Open</th></tr>
-                    </thead>
-                    <tbody>
-                        <bx:if !arrayLen( prc.agentLoad )>
-                            <tr><td colspan="3" class="text-body-secondary text-center py-3">No agents.</td></tr>
-                        </bx:if>
-                        <bx:loop array="#prc.agentLoad#" item="local.row">
-                            <bx:set local.loadColor = local.row.openCount eq 0   ? "success"
-                                                   : ( local.row.openCount lte 3 ? "info"
-                                                   : ( local.row.openCount lte 7 ? "warning"
-                                                   :                                "danger" ) ) >
-                            <tr>
-                                <td>#encodeForHTML( local.row.name )#</td>
-                                <td class="text-body-secondary">#encodeForHTML( local.row.email )#</td>
-                                <td class="text-end">
-                                    <span class="badge text-bg-#local.loadColor#">#encodeForHTML( local.row.openCount )#</span>
-                                </td>
-                            </tr>
-                        </bx:loop>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!--
-    Add-on dashboard widgets. Renders every widget an add-on
-    contributed via settings.tesserabx.dashboardWidgets that the
-    current viewer is allowed to see. Widgets render after the core
-    inline tiles + charts above. The registry resolves each widget's
-    dataProvider/dataMethod and passes the result through prc.widgetData
-    so the partial can render data without doing its own queries.
+    Follow-up B2: every dashboard widget is contributed through
+    DashboardWidgetRegistry. The agent module's manifest registers
+    the ten core widgets (tiles, charts, backlog table, agent load);
+    add-ons contribute additional widgets via
+    settings.tesserabx.dashboardWidgets. The registry sorts by
+    sortWeight, applies the viewer's audience filter + requiresAi
+    check, and wraps each widget in its declared defaultGridSize
+    column. A widget that declares a dataProvider has its data
+    pre-fetched into prc.widgetData; widgets that read prc.* directly
+    leave dataProvider blank.
 -->
-<bx:set local.addonWidgets = tbxDashboardWidgets() >
-<bx:if arrayLen( local.addonWidgets )>
-    <div class="row g-3 mt-3">
-        <bx:loop array="#local.addonWidgets#" item="local.w">
+<bx:set local.allWidgets = tbxDashboardWidgets() >
+<bx:if arrayLen( local.allWidgets )>
+    <div class="row g-3 align-items-stretch">
+        <bx:loop array="#local.allWidgets#" item="local.w">
             <bx:if len( local.w.partial )>
-                <bx:set prc.widgetData = application.wirebox
-                    .getInstance( "DashboardWidgetRegistry@reporting" )
-                    .fetchWidgetData( local.w ) >
-                <div class="#encodeForHTMLAttribute( local.w.defaultGridSize )# d-flex">
+                <bx:if len( local.w.dataProvider ?: "" ) && len( local.w.dataMethod ?: "" )>
+                    <bx:set prc.widgetData = application.wirebox
+                        .getInstance( "DashboardWidgetRegistry@reporting" )
+                        .fetchWidgetData( local.w ) >
+                </bx:if>
+                <div class="#encodeForHTMLAttribute( local.w.defaultGridSize )#">
                     #view( view = local.w.partial, module = local.w.module )#
                 </div>
             </bx:if>

@@ -43,6 +43,26 @@ class {
                 // baseline for "anyone who can already see the
                 // ticket"; tightening individual panels is a separate
                 // pass.
+                // Follow-up B2: the ten dashboard widgets on
+                // /agent/reports are registered through
+                // DashboardWidgetRegistry. The partials live under
+                // modules_app/agent/views/widgets/ and read prc.*
+                // directly (no dataProvider/dataMethod). Chart.js
+                // initialization stays inline at the bottom of
+                // reports/index.bxm since it references prc.* and
+                // the canvas ids are stable.
+                dashboardWidgets : [
+                    { id : "open-tickets",        title : "Open tickets",                partial : "widgets/open_tickets",       module : "agent", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 100,  requiredPermission : "tickets.view" },
+                    { id : "created-today",       title : "Created today",               partial : "widgets/created_today",      module : "agent", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 200,  requiredPermission : "tickets.view" },
+                    { id : "avg-first-response",  title : "Avg first response",          partial : "widgets/avg_first_response", module : "agent", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 300,  requiredPermission : "tickets.view" },
+                    { id : "sla-compliance",      title : "SLA first-response compliance", partial : "widgets/sla_compliance",   module : "agent", defaultGridSize : "col-12 col-md-6 col-xl-3 d-flex", sortWeight : 400,  requiredPermission : "tickets.view" },
+                    { id : "volume-chart",        title : "Ticket volume",               partial : "widgets/volume_chart",       module : "agent", defaultGridSize : "col-12 col-xl-8 d-flex",          sortWeight : 500,  requiredPermission : "tickets.view" },
+                    { id : "backlog-age",         title : "Backlog age",                 partial : "widgets/backlog_age",        module : "agent", defaultGridSize : "col-12 col-xl-4 d-flex",          sortWeight : 600,  requiredPermission : "tickets.view" },
+                    { id : "by-status",           title : "By status",                   partial : "widgets/by_status",          module : "agent", defaultGridSize : "col-12 col-md-4 d-flex",          sortWeight : 700,  requiredPermission : "tickets.view" },
+                    { id : "by-priority",         title : "By priority",                 partial : "widgets/by_priority",        module : "agent", defaultGridSize : "col-12 col-md-4 d-flex",          sortWeight : 800,  requiredPermission : "tickets.view" },
+                    { id : "by-source",           title : "By source",                   partial : "widgets/by_source",          module : "agent", defaultGridSize : "col-12 col-md-4 d-flex",          sortWeight : 900,  requiredPermission : "tickets.view" },
+                    { id : "agent-load",          title : "Agent open load",             partial : "widgets/agent_load",         module : "agent", defaultGridSize : "col-12 d-flex",                   sortWeight : 1000, requiredPermission : "tickets.view" }
+                ],
                 ticketPanels : [
                     { id : "summary",          position : "right", label : "AI summary",            partial : "panels/summary",          module : "agent", sortWeight : 100,  requiredPermission : "tickets.view", requiresAi : true                  },
                     { id : "kb-draft",         position : "right", label : "Draft KB article",      partial : "panels/kb_draft",         module : "agent", sortWeight : 200,  requiredPermission : "tickets.view", requiresAi : true                  },

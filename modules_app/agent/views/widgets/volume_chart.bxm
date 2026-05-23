@@ -1,0 +1,12 @@
+<bx:output>
+<div class="card flex-fill">
+    <div class="card-header bg-primary-subtle">
+        <i class="bi bi-graph-up text-primary me-1"></i>
+        <strong>Ticket volume</strong>
+        <span class="text-body-secondary small ms-1">last 30 days</span>
+    </div>
+    <div class="card-body">
+        <canvas id="chart-volume" height="120"></canvas>
+    </div>
+</div>
+</bx:output>

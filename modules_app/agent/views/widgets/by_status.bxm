@@ -1,0 +1,10 @@
+<bx:output>
+<div class="card flex-fill">
+    <div class="card-header bg-info-subtle">
+        <i class="bi bi-tag text-info me-1"></i><strong>By status</strong>
+    </div>
+    <div class="card-body">
+        <canvas id="chart-status" height="160"></canvas>
+    </div>
+</div>
+</bx:output>

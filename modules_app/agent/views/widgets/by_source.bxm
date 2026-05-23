@@ -1,0 +1,10 @@
+<bx:output>
+<div class="card flex-fill">
+    <div class="card-header bg-success-subtle">
+        <i class="bi bi-inbox text-success me-1"></i><strong>By source</strong>
+    </div>
+    <div class="card-body">
+        <canvas id="chart-source" height="160"></canvas>
+    </div>
+</div>
+</bx:output>

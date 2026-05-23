@@ -1,0 +1,121 @@
+/**
+ * CoreWidgetDogfoodSpec: follow-up B2.
+ *
+ * Verifies that the ten dashboard widgets on /agent/reports are
+ * registered through DashboardWidgetRegistry exactly like an add-on
+ * widget. Before B2 these widgets were hard-coded inline in
+ * agent/views/reports/index.bxm and the registry contract was only
+ * exercised by add-ons.
+ *
+ * Asserted contract:
+ *   - All ten core widget ids appear in the registry.
+ *   - Each declares a partial, sortWeight, requiredPermission, and
+ *     defaultGridSize.
+ *   - sortWeights produce the documented visual order (tiles first,
+ *     then volume+backlog, then donuts, then agent load).
+ *   - Each partial file exists on disk so a registry hit does not
+ *     fail at render time.
+ *   - Source is "agent" (manifest path), not "imperative"/"core"
+ *     (which would bypass A8's dogfooding).
+ *   - A8 warning collector has zero entries for any core widget id
+ *     since every one carries requiredPermission.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.widgets   = getController().getWireBox().getInstance( "DashboardWidgetRegistry@reporting" );
+        variables.agentPath = getController().getSetting( "modules" )[ "agent" ].path;
+    }
+
+    function run(){
+        describe( "B2: core dashboard widgets are registered, not inlined", function(){
+
+            it( "the registry contains all ten core widget ids", function(){
+                var actual = variables.widgets.listAll().map( ( w ) => w.id );
+                for ( var id in coreIds() ) expect( actual ).toInclude( id );
+            } );
+
+            it( "every core widget declares partial, sortWeight, requiredPermission, defaultGridSize", function(){
+                for ( var id in coreIds() ) {
+                    var entry = findWidgetById( id );
+                    expect( entry ).notToBeNull();
+                    expect( len( entry.partial ?: "" )            ).toBeGT( 0, "partial set for " & id );
+                    expect( entry.sortWeight                       ).toBeGT( 0, "sortWeight set for " & id );
+                    expect( len( entry.requiredPermission ?: "" )  ).toBeGT( 0, "requiredPermission set for " & id );
+                    expect( len( entry.defaultGridSize ?: "" )     ).toBeGT( 0, "defaultGridSize set for " & id );
+                }
+            } );
+
+            it( "every core widget's partial file exists on disk", function(){
+                for ( var id in coreIds() ) {
+                    var entry = findWidgetById( id );
+                    var path = variables.agentPath & "/views/" & entry.partial & ".bxm";
+                    expect( fileExists( path ) ).toBeTrue( "missing partial file " & path & " for widget " & id );
+                }
+            } );
+
+            it( "sortWeight order matches the documented visual sequence", function(){
+                var expectedOrder = [
+                    "open-tickets", "created-today", "avg-first-response", "sla-compliance",
+                    "volume-chart", "backlog-age",
+                    "by-status", "by-priority", "by-source",
+                    "agent-load"
+                ];
+                var sorted = variables.widgets.listAll();
+                arraySort( sorted, function( a, b ){
+                    return ( a.sortWeight < b.sortWeight ) ? -1 : ( a.sortWeight > b.sortWeight ? 1 : 0 );
+                } );
+                var sortedCoreIds = [];
+                for ( var w in sorted ) {
+                    if ( arrayFindNoCase( expectedOrder, w.id ) ) sortedCoreIds.append( w.id );
+                }
+                expect( sortedCoreIds ).toBe( expectedOrder );
+            } );
+
+            it( "registration source is `agent` (manifest), not `imperative` or `core`", function(){
+                for ( var id in coreIds() ) {
+                    expect( findWidgetById( id ).source ).toBe( "agent" );
+                }
+            } );
+
+            it( "no core widget triggers an A8 missing-permission warning", function(){
+                var collector = getController().getWireBox().getInstance( "RegistrationWarningCollector@core" );
+                var warnings = collector.listForRegistry( "DashboardWidgetRegistry" );
+                var coreWarningIds = [];
+                for ( var w in warnings ) {
+                    if ( arrayFindNoCase( coreIds(), w.entryId ) ) coreWarningIds.append( w.entryId );
+                }
+                expect( coreWarningIds ).toBeEmpty();
+            } );
+
+            it( "core widgets do NOT declare a dataProvider (they read prc directly)", function(){
+                for ( var id in coreIds() ) {
+                    var entry = findWidgetById( id );
+                    expect( len( entry.dataProvider ?: "" ) ).toBe( 0, id & " should not declare a dataProvider" );
+                }
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private array function coreIds(){
+        return [
+            "open-tickets", "created-today", "avg-first-response", "sla-compliance",
+            "volume-chart", "backlog-age",
+            "by-status", "by-priority", "by-source",
+            "agent-load"
+        ];
+    }
+
+    private any function findWidgetById( required string id ){
+        for ( var w in variables.widgets.listAll() ) {
+            if ( w.id == arguments.id ) return w;
+        }
+        return javaCast( "null", "" );
+    }
+
+}
