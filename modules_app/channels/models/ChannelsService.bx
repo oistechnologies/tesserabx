@@ -150,6 +150,41 @@ class singleton=true {
         return q.orderBy( "received_at", "desc" ).limit( arguments.limit ).get();
     }
 
+    // ---------- Agent home dashboard reads ----------
+
+    /**
+     * Inbound email volume grouped by outcome (success / blocked /
+     * failed / etc.) over a recent window. Returns:
+     *   { hours : N, total : N, rows : [ { outcome, count } ] }
+     *
+     * Used by the agent-home "Inbound pulse" widget. The widget is
+     * admin-gated (admin.settings.manage) so org-wide counts are
+     * an appropriate read. Group BY outcome lets the widget paint
+     * a stacked-bar / pill row without further client work.
+     */
+    public struct function inboundOutcomesSince( numeric hours = 24 ){
+        var rows = queryExecute(
+            "SELECT outcome, COUNT(*) AS c
+             FROM   inbound_emails
+             WHERE  received_at >= NOW() - make_interval( hours => cast( :h as integer ) )
+             GROUP  BY outcome
+             ORDER  BY c DESC",
+            { h : arguments.hours }
+        );
+        var out   = [];
+        var total = 0;
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var n = rows.c[ i ] ?: 0;
+            total += n;
+            out.append( { "outcome" : rows.outcome[ i ] ?: "", "count" : n } );
+        }
+        return {
+            "hours" : arguments.hours,
+            "total" : total,
+            "rows"  : out
+        };
+    }
+
     // ---------- Internals ----------
 
     private any function addBlacklistEntry(

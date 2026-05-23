@@ -25,7 +25,19 @@ class {
     this.dependencies       = [ "contacts", "audit", "tickets", "knowledgebase" ];
 
     function configure(){
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                // /agent home dashboard widget. requiresAi=true so the
+                // registry auto-hides it when AI_ENABLED=false (the
+                // hard constraint from CLAUDE.md: no AI UI surfaces
+                // when AI is off). The data provider reads from
+                // ai_interactions, which is empty in an AI-off
+                // deployment anyway.
+                dashboardWidgets : [
+                    { id : "agent-home.ai-activity", title : "My AI activity (7d)", partial : "widgets/agent_home_ai_activity", module : "ai", zone : "agent-home", defaultGridSize : "col-12 d-flex", sortWeight : 1000, requiredPermission : "tickets.view", requiresAi : true, dataProvider : "AiMiddleware@ai", dataMethod : "activitySummaryForCurrentAgent" }
+                ]
+            }
+        };
         variables.routes   = [];
         variables.interceptorSettings = { customInterceptionPoints : [] };
         variables.interceptors = [

@@ -1,0 +1,94 @@
+<bx:output>
+<bx:set local.data  = prc.widgetData ?: {} >
+<bx:set local.rows  = ( local.data.rows  ?: [] ) >
+<bx:set local.total = ( local.data.total ?: 0  ) >
+<bx:set local.hours = ( local.data.hours ?: 24 ) >
+<div class="card flex-fill h-100">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title mb-0 flex-grow-1">
+            <i class="bi bi-envelope-paper me-2"></i>Inbound pulse
+        </h3>
+        <span class="text-body-tertiary small">
+            <span data-pulse-total>#encodeForHTML( local.total )#</span>
+            in #encodeForHTML( local.hours )#h
+        </span>
+    </div>
+    <div class="card-body">
+        <bx:if !arrayLen( local.rows )>
+            <p class="text-body-tertiary small mb-0">No inbound emails in the last #encodeForHTML( local.hours )# hours.</p>
+        <bx:else>
+            <!--- Stacked-bar style: a single colored row of segments
+                  proportional to the outcome counts, plus a legend
+                  below it. Cheaper than Chart.js for a five-bucket
+                  breakdown and accessible by keyboard. --->
+            <div class="d-flex w-100 mb-3" style="height:1.5rem; border-radius:.25rem; overflow:hidden;" data-pulse-bar>
+                <bx:loop array="#local.rows#" item="local.r">
+                    <bx:set local.pct = ( local.total > 0 ) ? ( local.r.count / local.total * 100 ) : 0 >
+                    <div class="bg-#( local.r.outcome eq 'success' ? 'success' : ( local.r.outcome eq 'blocked' ? 'warning' : ( local.r.outcome eq 'failed' ? 'danger' : 'secondary' ) ) )#"
+                         style="width:#numberFormat( local.pct, '0.0' )#%;"
+                         title="#encodeForHTMLAttribute( local.r.outcome )#: #encodeForHTMLAttribute( local.r.count )#"
+                         aria-label="#encodeForHTMLAttribute( local.r.outcome )#: #encodeForHTMLAttribute( local.r.count )#">
+                    </div>
+                </bx:loop>
+            </div>
+            <ul class="list-unstyled mb-0 small" data-pulse-legend>
+                <bx:loop array="#local.rows#" item="local.r">
+                    <li class="d-flex align-items-center justify-content-between py-1">
+                        <span>
+                            <span class="badge text-bg-#( local.r.outcome eq 'success' ? 'success' : ( local.r.outcome eq 'blocked' ? 'warning' : ( local.r.outcome eq 'failed' ? 'danger' : 'secondary' ) ) ) #">
+                                #encodeForHTML( local.r.outcome )#
+                            </span>
+                        </span>
+                        <span class="badge text-bg-light text-black">#encodeForHTML( local.r.count )#</span>
+                    </li>
+                </bx:loop>
+            </ul>
+        </bx:if>
+    </div>
+</div>
+<script>
+(function(){
+    function color( outcome ){
+        if ( outcome === "success" ) return "success";
+        if ( outcome === "blocked" ) return "warning";
+        if ( outcome === "failed"  ) return "danger";
+        return "secondary";
+    }
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.inbound-pulse" ] = {
+        update : function( payload, card ){
+            if ( !payload ) return;
+            var totalEl = card.querySelector( "[data-pulse-total]" );
+            if ( totalEl && typeof payload.total !== "undefined" ) totalEl.textContent = payload.total;
+            var bar = card.querySelector( "[data-pulse-bar]" );
+            var leg = card.querySelector( "[data-pulse-legend]" );
+            var rows  = payload.rows  || [];
+            var total = payload.total || 0;
+            if ( bar ) {
+                bar.innerHTML = rows.map( function( r ){
+                    var pct = ( total > 0 ) ? ( r.count / total * 100 ) : 0;
+                    return "<div class=\"bg-" + color( r.outcome ) + "\" " +
+                        "style=\"width:" + pct.toFixed( 1 ) + "%;\" " +
+                        "title=\"" + escape( r.outcome ) + ": " + escape( r.count ) + "\" " +
+                        "aria-label=\"" + escape( r.outcome ) + ": " + escape( r.count ) + "\"></div>";
+                } ).join( "" );
+            }
+            if ( leg ) {
+                leg.innerHTML = rows.map( function( r ){
+                    return "<li class=\"d-flex align-items-center justify-content-between py-1\">" +
+                        "<span><span class=\"badge text-bg-" + color( r.outcome ) + "\">" + escape( r.outcome ) + "</span></span>" +
+                        "<span class=\"badge text-bg-light text-black\">" + escape( r.count ) + "</span>" +
+                    "</li>";
+                } ).join( "" );
+            }
+        }
+    };
+})();
+</script>
+</bx:output>

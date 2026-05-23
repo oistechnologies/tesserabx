@@ -1,0 +1,37 @@
+<bx:output>
+<!---
+    Static quick-action tile bar. No dataProvider; the poll endpoint
+    skips this widget. Buttons link to the most common agent landing
+    points: open the queue, file a new ticket, browse the KB, search,
+    or jump to the account page.
+--->
+<div class="card flex-fill h-100">
+    <div class="card-header">
+        <h3 class="card-title mb-0">
+            <i class="bi bi-lightning-charge me-2"></i>Quick actions
+        </h3>
+    </div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap gap-2">
+            <a href="/agent/tickets/new" class="btn btn-primary">
+                <i class="bi bi-plus-lg me-1"></i>New ticket
+            </a>
+            <a href="/agent/tickets?assignee=me" class="btn btn-outline-primary">
+                <i class="bi bi-person-lines-fill me-1"></i>My queue
+            </a>
+            <a href="/agent/tickets" class="btn btn-outline-secondary">
+                <i class="bi bi-collection me-1"></i>All tickets
+            </a>
+            <a href="/agent/admin/knowledgebase/articles" class="btn btn-outline-secondary">
+                <i class="bi bi-book me-1"></i>Knowledge base
+            </a>
+            <a href="/agent/reports" class="btn btn-outline-secondary">
+                <i class="bi bi-bar-chart-line me-1"></i>Reports
+            </a>
+            <a href="/agent/account" class="btn btn-outline-secondary">
+                <i class="bi bi-person-gear me-1"></i>My account
+            </a>
+        </div>
+    </div>
+</div>
+</bx:output>

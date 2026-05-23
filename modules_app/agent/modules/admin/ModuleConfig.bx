@@ -29,7 +29,16 @@ class {
     function configure(){
         // `variables.` prefix is REQUIRED. See gotcha log in
         // docs/EXTENSIBILITY-PLAN.md.
-        variables.settings = {};
+        variables.settings = {
+            tesserabx : {
+                // /agent home dashboard widget. Admin-gated pulse of
+                // the most recent org-wide audit events; partner to
+                // the audit module's per-agent "My history" widget.
+                dashboardWidgets : [
+                    { id : "agent-home.system-pulse", title : "System pulse", partial : "widgets/agent_home_system_pulse", module : "admin", zone : "agent-home", defaultGridSize : "col-12 col-md-6 d-flex", sortWeight : 1150, requiredPermission : "admin.audit.view", dataProvider : "AuditService@audit", dataMethod : "recentSystemEvents" }
+                ]
+            }
+        };
 
         variables.routes = [
             { pattern : "/",                handler : "Home", action : "index" },

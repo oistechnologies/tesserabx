@@ -1,0 +1,89 @@
+<bx:output>
+<bx:set local.data       = prc.widgetData ?: {} >
+<bx:set local.total      = ( local.data.last7DaysCount ?: 0 ) >
+<bx:set local.ok         = ( local.data.last7DaysOk    ?: 0 ) >
+<bx:set local.byFeature  = ( local.data.byFeature      ?: [] ) >
+<bx:set local.byOutcome  = ( local.data.byOutcome      ?: [] ) >
+<div class="card flex-fill h-100">
+    <div class="card-header d-flex align-items-center">
+        <h3 class="card-title mb-0 flex-grow-1">
+            <i class="bi bi-robot me-2"></i>My AI activity (7d)
+        </h3>
+        <span class="text-body-tertiary small">
+            <span data-ai-total>#encodeForHTML( local.total )#</span> calls,
+            <span data-ai-ok>#encodeForHTML( local.ok )#</span> ok
+        </span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
+                <h4 class="small text-body-secondary mb-2">By feature</h4>
+                <bx:if !arrayLen( local.byFeature )>
+                    <p class="text-body-tertiary small mb-0">No AI calls in the last 7 days.</p>
+                <bx:else>
+                    <ul class="list-unstyled mb-0 small" data-ai-features>
+                        <bx:loop array="#local.byFeature#" item="local.f">
+                            <li class="d-flex align-items-center justify-content-between py-1">
+                                <span>#encodeForHTML( local.f.feature )#</span>
+                                <span class="badge text-bg-light text-black">#encodeForHTML( local.f.count )#</span>
+                            </li>
+                        </bx:loop>
+                    </ul>
+                </bx:if>
+            </div>
+            <div class="col-12 col-md-6">
+                <h4 class="small text-body-secondary mb-2">By outcome</h4>
+                <bx:if !arrayLen( local.byOutcome )>
+                    <p class="text-body-tertiary small mb-0">No AI calls in the last 7 days.</p>
+                <bx:else>
+                    <ul class="list-unstyled mb-0 small" data-ai-outcomes>
+                        <bx:loop array="#local.byOutcome#" item="local.o">
+                            <li class="d-flex align-items-center justify-content-between py-1">
+                                <span class="badge text-bg-#( local.o.outcome eq 'ok' ? 'success' : ( local.o.outcome eq 'disabled' ? 'secondary' : 'warning' ) )#">
+                                    #encodeForHTML( local.o.outcome )#
+                                </span>
+                                <span class="badge text-bg-light text-black">#encodeForHTML( local.o.count )#</span>
+                            </li>
+                        </bx:loop>
+                    </ul>
+                </bx:if>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function(){
+    window.tbxDashboard = window.tbxDashboard || { widgets : {} };
+    window.tbxDashboard.widgets[ "agent-home.ai-activity" ] = {
+        update : function( payload, card ){
+            if ( !payload ) return;
+            var total = card.querySelector( "[data-ai-total]" );
+            var ok    = card.querySelector( "[data-ai-ok]" );
+            if ( total && typeof payload.last7DaysCount !== "undefined" ) total.textContent = payload.last7DaysCount;
+            if ( ok    && typeof payload.last7DaysOk    !== "undefined" ) ok.textContent    = payload.last7DaysOk;
+            renderList( card.querySelector( "[data-ai-features]" ), payload.byFeature, function( r ){
+                return "<span>" + escape( r.feature ) + "</span>" +
+                       "<span class=\"badge text-bg-light text-black\">" + escape( r.count ) + "</span>";
+            } );
+            renderList( card.querySelector( "[data-ai-outcomes]" ), payload.byOutcome, function( r ){
+                var color = ( r.outcome === "ok" ) ? "success" : ( r.outcome === "disabled" ? "secondary" : "warning" );
+                return "<span class=\"badge text-bg-" + color + "\">" + escape( r.outcome ) + "</span>" +
+                       "<span class=\"badge text-bg-light text-black\">" + escape( r.count ) + "</span>";
+            } );
+        }
+    };
+    function renderList( ul, rows, fmt ){
+        if ( !ul || !rows ) return;
+        ul.innerHTML = rows.map( function( r ){
+            return "<li class=\"d-flex align-items-center justify-content-between py-1\">" + fmt( r ) + "</li>";
+        } ).join( "" );
+    }
+    function escape( s ){
+        return String( s == null ? "" : s )
+            .replace( /&/g, "&amp;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+})();
+</script>
+</bx:output>

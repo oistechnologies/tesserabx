@@ -244,6 +244,30 @@ class singleton=true {
         return { "rows" : out };
     }
 
+    /**
+     * Recent org-wide audit events for the admin "System pulse"
+     * dashboard widget. No actor or organization filter — surfaces
+     * the freshest events across the whole deployment. The widget
+     * is admin-gated via the registry's requiredPermission so this
+     * read-all behaviour does not leak to a regular agent.
+     */
+    public struct function recentSystemEvents( numeric limit = 8 ){
+        var events = search( limit : arguments.limit );
+        var out = [];
+        for ( var e in events ) {
+            out.append( {
+                "id"         : e.getId(),
+                "eventType"  : e.getEventType()  ?: "",
+                "entityType" : e.getEntityType() ?: "",
+                "entityId"   : e.getEntityId()   ?: "",
+                "actorType"  : e.getActorType()  ?: "",
+                "actorId"    : e.getActorId()    ?: "",
+                "createdAt"  : dateTimeFormat( e.getOccurredAt(), "yyyy-mm-dd HH:nn" )
+            } );
+        }
+        return { "rows" : out };
+    }
+
     // ---------------- helpers ----------------
 
     private string function newId(){

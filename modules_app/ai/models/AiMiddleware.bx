@@ -31,6 +31,7 @@ class singleton=true {
 
     property name="wirebox"          inject="wirebox";
     property name="capability"       inject="AiCapability@ai";
+    property name="auth"             inject="AuthenticationService@cbauth";
     // Follow-up A1: the middleware now routes through the provider
     // registry so add-ons can ship alternate providers (Anthropic
     // direct, Azure OpenAI, in-house, offline stub). BxAiProvider
@@ -395,6 +396,79 @@ class singleton=true {
         if ( len( arguments.options.contactId ?: "" ) )      row.setContactId( arguments.options.contactId );
         if ( len( arguments.options.agentId ?: "" ) )        row.setAgentId( arguments.options.agentId );
         row.save();
+    }
+
+    // ---------------- agent home dashboard reads ----------------
+
+    /**
+     * Activity summary for the currently signed-in agent, used by the
+     * agent-home "AI activity" widget. The widget itself is hidden
+     * by the registry when AI is disabled (requiresAi : true), so
+     * this method assumes the call only happens when the capability
+     * is on — but still degrades gracefully when no agent is in
+     * scope or when no rows exist for the window.
+     *
+     * Returns:
+     *   {
+     *     last7DaysCount : numeric,
+     *     last7DaysOk    : numeric,
+     *     byFeature      : [ { feature, count } ],
+     *     byOutcome      : [ { outcome, count } ]
+     *   }
+     */
+    public struct function activitySummaryForCurrentAgent(){
+        var agentId = "";
+        try {
+            if ( auth.isLoggedIn() ) {
+                var u = auth.getUser();
+                if ( !isNull( u ) ) agentId = u.getId();
+            }
+        } catch ( any e ) {}
+        var empty = {
+            "last7DaysCount" : 0,
+            "last7DaysOk"    : 0,
+            "byFeature"      : [],
+            "byOutcome"      : []
+        };
+        if ( !len( agentId ) ) return empty;
+        var binds = { aid : agentId };
+        var totals = queryExecute(
+            "SELECT COUNT(*) AS total,
+                    SUM( CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END ) AS ok
+             FROM   ai_interactions
+             WHERE  agent_id = :aid
+             AND    created_at >= NOW() - INTERVAL '7 days'",
+            binds
+        );
+        var byFeature = queryExecute(
+            "SELECT feature, COUNT(*) AS c
+             FROM   ai_interactions
+             WHERE  agent_id = :aid
+             AND    created_at >= NOW() - INTERVAL '7 days'
+             GROUP  BY feature
+             ORDER  BY c DESC
+             LIMIT  6",
+            binds
+        );
+        var byOutcome = queryExecute(
+            "SELECT outcome, COUNT(*) AS c
+             FROM   ai_interactions
+             WHERE  agent_id = :aid
+             AND    created_at >= NOW() - INTERVAL '7 days'
+             GROUP  BY outcome
+             ORDER  BY c DESC",
+            binds
+        );
+        var fRows = [];
+        for ( var i = 1; i <= byFeature.recordCount; i++ ) fRows.append( { "feature" : byFeature.feature[ i ] ?: "", "count" : byFeature.c[ i ] ?: 0 } );
+        var oRows = [];
+        for ( var i = 1; i <= byOutcome.recordCount; i++ ) oRows.append( { "outcome" : byOutcome.outcome[ i ] ?: "", "count" : byOutcome.c[ i ] ?: 0 } );
+        return {
+            "last7DaysCount" : totals.recordCount ? ( totals.total[ 1 ] ?: 0 ) : 0,
+            "last7DaysOk"    : totals.recordCount ? ( totals.ok[ 1 ]    ?: 0 ) : 0,
+            "byFeature"      : fRows,
+            "byOutcome"      : oRows
+        };
     }
 
     // ---------------- internals ----------------

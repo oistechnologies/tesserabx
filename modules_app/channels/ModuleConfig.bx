@@ -25,7 +25,17 @@ class {
     this.dependencies       = [ "tickets", "contacts", "audit" ];
 
     function configure(){
-        variables.settings            = {};
+        variables.settings            = {
+            tesserabx : {
+                // /agent home dashboard widget. Inbound email volume
+                // grouped by outcome over the last 24h. Admin-gated
+                // (admin.settings.manage) since it surfaces org-wide
+                // traffic; a non-admin agent doesn't see the widget.
+                dashboardWidgets : [
+                    { id : "agent-home.inbound-pulse", title : "Inbound pulse (24h)", partial : "widgets/agent_home_inbound_pulse", module : "channels", zone : "agent-home", defaultGridSize : "col-12 col-md-6 d-flex", sortWeight : 1100, requiredPermission : "admin.settings.manage", dataProvider : "ChannelsService@channels", dataMethod : "inboundOutcomesSince" }
+                ]
+            }
+        };
         variables.routes              = [];
         variables.interceptorSettings = { customInterceptionPoints : [] };
         // Bridges tickets' onTicketCreated / onTicketMessageAdded
