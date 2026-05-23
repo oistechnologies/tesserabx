@@ -92,6 +92,38 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( entry.mementifierIncludes ).toBeArray();
             } );
 
+            // B7: findByRequest resolves entries by HTTP method +
+            // request path, handling :placeholder segments. Powers the
+            // ApiAuthInterceptor per-permission gate.
+
+            it( "B7: findByRequest matches a static path", function(){
+                var entry = variables.apiResources.findByRequest( "GET", "/api/v1/tickets" );
+                expect( entry ).notToBeNull();
+                expect( entry.id ).toBe( "api.tickets.index" );
+            } );
+
+            it( "B7: findByRequest matches a parameterized path", function(){
+                var entry = variables.apiResources.findByRequest( "GET", "/api/v1/tickets/abc-123" );
+                expect( entry ).notToBeNull();
+                expect( entry.id ).toBe( "api.tickets.show" );
+            } );
+
+            it( "B7: findByRequest distinguishes methods on the same path", function(){
+                var getEntry  = variables.apiResources.findByRequest( "GET",  "/api/v1/tickets" );
+                var postEntry = variables.apiResources.findByRequest( "POST", "/api/v1/tickets" );
+                expect( getEntry.id  ).toBe( "api.tickets.index" );
+                expect( postEntry.id ).toBe( "api.tickets.create" );
+            } );
+
+            it( "B7: findByRequest returns null when no entry matches", function(){
+                expect( variables.apiResources.findByRequest( "GET", "/api/v1/no-such-route" ) ).toBeNull();
+            } );
+
+            it( "B7: findByRequest is case-insensitive on method", function(){
+                var entry = variables.apiResources.findByRequest( "get", "/api/v1/tickets" );
+                expect( entry ).notToBeNull();
+            } );
+
         } );
 
         describe( "WebhookEventRegistry", function(){

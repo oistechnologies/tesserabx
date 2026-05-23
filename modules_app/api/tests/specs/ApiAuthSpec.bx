@@ -65,6 +65,32 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupAgent( seeded.id );
             } );
 
+            // B7: tokens now carry a `permissions` claim derived from
+            // RoleRegistry. The interceptor reads this against the
+            // route's requiredPermission.
+
+            it( "B7: tokens carry a permissions claim with the agent's full permission set", function(){
+                // Seed an agent and grant a known role so we can
+                // assert specific permissions land in the claim.
+                var seeded = seedAgent();
+                queryExecute(
+                    "INSERT INTO agent_roles ( id, agent_id, role_key ) VALUES ( :rid, :aid, :rk )",
+                    { rid : createUUID(), aid : seeded.id, rk : "agent-admin" }
+                );
+                var agent  = getController().getWireBox().getInstance( "Agent@agent" )
+                    .where( "id", seeded.id )
+                    .first();
+                var token   = variables.jwtSvc.fromUser( agent );
+                var raw     = isStruct( token ) ? token.access_token : token;
+                var payload = variables.jwtSvc.decode( raw );
+                expect( payload ).toHaveKey( "permissions" );
+                expect( len( payload.permissions ?: "" ) ).toBeGT( 0 );
+                // agent-admin role grants admin.access at minimum
+                // (see RoleRegistry.seedCoreRoles).
+                expect( payload.permissions ).toInclude( "admin.access" );
+                cleanupAgent( seeded.id );
+            } );
+
         } );
     }
 

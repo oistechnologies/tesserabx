@@ -11,14 +11,21 @@ class accessors=true {
     property name="url";
     property name="state";
 
-    function init( required string url ){
-        variables.url   = arguments.url;
-        variables.state = { executed : true, rendered : false, statusCode : 0, data : {} };
+    property name="httpMethod";
+
+    function init( required string url, string httpMethod = "GET" ){
+        variables.url        = arguments.url;
+        variables.httpMethod = arguments.httpMethod;
+        variables.state      = { executed : true, rendered : false, statusCode : 0, data : {} };
         return this;
     }
 
     public string function getCurrentRoutedURL(){
         return variables.url;
+    }
+
+    public string function getHTTPMethod(){
+        return variables.httpMethod;
     }
 
     public any function noExecution(){

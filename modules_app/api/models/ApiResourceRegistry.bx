@@ -125,6 +125,51 @@ class singleton=true {
         return javaCast( "null", "" );
     }
 
+    /**
+     * Resolve an entry by HTTP method + incoming request path. Used
+     * by ApiAuthInterceptor (B7) to look up the required permission
+     * for a request. Path templates with `:placeholder` segments
+     * match any non-slash segment in the request path:
+     *
+     *   /api/v1/tickets/:id   matches  /api/v1/tickets/abc-123
+     *
+     * Method match is case-insensitive. Returns null when no entry
+     * matches; the interceptor's fallback is to allow the request
+     * through after the standard JWT + scope check (no per-permission
+     * gate when the route is unmanaged in the registry).
+     */
+    public any function findByRequest( required string method, required string requestPath ){
+        ensureLoaded();
+        var wantMethod = uCase( arguments.method );
+        var wantPath   = arguments.requestPath;
+        // Accept request paths with or without a leading slash.
+        if ( !len( wantPath ) ) return javaCast( "null", "" );
+        if ( left( wantPath, 1 ) != "/" ) wantPath = "/" & wantPath;
+        for ( var id in variables.cache ) {
+            var entry = variables.cache[ id ];
+            if ( ( entry.method ?: "" ) != wantMethod ) continue;
+            if ( pathTemplateMatches( entry.path ?: "", wantPath ) ) return entry;
+        }
+        return javaCast( "null", "" );
+    }
+
+    private boolean function pathTemplateMatches( required string template, required string requestPath ){
+        if ( !len( arguments.template ) ) return false;
+        // Turn `/api/v1/tickets/:id` into `^/api/v1/tickets/[^/]+$`.
+        var regex = reReplace( arguments.template, ":[a-zA-Z_][a-zA-Z0-9_]*", "[^/]+", "all" );
+        // Escape regex metacharacters the template might legitimately
+        // contain ("." in "/api/v1/swagger.json" etc.); we only need
+        // to neutralize "." here since other regex metachars are
+        // unlikely in route templates.
+        regex = replace( regex, ".", "\.", "all" );
+        // Restore the `[^/]+` substitution that the `.` escape just
+        // mangled. (`[^/]+` contained no dots, but the escape ran
+        // over the placeholder character class above. Order matters:
+        // we did the placeholder substitution first, which means
+        // the `.` replace only sees literal dots in the original.)
+        return reFind( "^" & regex & "$", arguments.requestPath ) > 0;
+    }
+
     public void function register( required struct entry ){
         ensureLoaded();
         addEntry( arguments.entry, structKeyExists( arguments.entry, "source" ) ? arguments.entry.source : "imperative" );

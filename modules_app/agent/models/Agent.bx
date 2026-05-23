@@ -188,8 +188,33 @@ class
     public struct function getJwtCustomClaims( required struct payload ){
         return {
             "account_type" : "agent",
-            "email"        : getEmail() ?: ""
+            "email"        : getEmail() ?: "",
+            // B7: union of permissions granted by every role the agent
+            // holds, resolved via RoleRegistry.permissionsFor(). Stored
+            // as a space-separated string to mirror cbsecurity's
+            // scope convention. ApiAuthInterceptor reads this against
+            // ApiResourceRegistry.requiredPermission for per-route
+            // gating.
+            "permissions"  : computePermissionsClaim()
         };
+    }
+
+    private string function computePermissionsClaim(){
+        var perms = {};
+        try {
+            var registry = variables._wirebox.getInstance( "RoleRegistry@agent" );
+            for ( var role in getRoles() ) {
+                for ( var p in registry.permissionsFor( role ) ) {
+                    perms[ p ] = true;
+                }
+            }
+        } catch ( any e ) {
+            // Registry not yet loaded (very early boot, test bootstrap
+            // before agent module is up). Fall through to an empty
+            // claim; ApiAuthInterceptor treats this the same as a
+            // missing claim and falls back to scope-only enforcement.
+        }
+        return structKeyArray( perms ).toList( " " );
     }
 
 }

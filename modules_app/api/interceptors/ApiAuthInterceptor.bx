@@ -29,15 +29,29 @@
  *   cheap because the JWT is already parsed by the time the handler
  *   runs.
  *
- * What this does NOT do:
- *   Per-permission gating from JWT claims. Today's tokens carry roles
- *   in `scope` (e.g. "agent"), not permissions. The registry entry's
- *   `requiredPermission` field stays descriptive until tokens include
- *   permission claims (separate refactor).
+ * Per-permission gating (B7):
+ *   ApiResourceRegistry.requiredPermission is enforced when the
+ *   incoming method + path matches a registered entry. The token's
+ *   `permissions` custom claim (populated by Agent.getJwtCustomClaims
+ *   from RoleRegistry.permissionsFor()) must contain the required
+ *   permission, or the request fails 403.
+ *
+ *   Tokens minted before B7 do not carry the `permissions` claim;
+ *   the interceptor treats a missing claim as "fall through to the
+ *   scope-only check" so existing sessions keep working until they
+ *   expire and re-mint. New tokens (and add-on resources) inherit
+ *   the per-permission gate immediately.
  */
 class accessors=true {
 
     property name="jwtService" inject="JwtService@cbsecurity";
+    property name="wirebox"    inject="wirebox";
+    // ApiResourceRegistry@api is mapped in this same module's onLoad,
+    // which fires AFTER configure() where the interceptor is
+    // constructed. Property injection at construction-time fails with
+    // "Instance not found". We hold the resolved instance lazily and
+    // look it up on first use.
+    variables.apiResources = "";
 
     // Paths under /api that may be reached without a bearer token.
     // The leading "api/" prefix matches event.getCurrentRoutedURL()'s
@@ -95,8 +109,43 @@ class accessors=true {
             return;
         }
 
+        // B7: per-permission gate. Look up the resource entry by
+        // method + path. If the entry declares a requiredPermission,
+        // the token's `permissions` claim must contain it. Tokens
+        // minted before B7 lack the claim entirely; treat that as a
+        // grandfather pass through to the scope-only check above so
+        // existing sessions keep working until they re-mint.
+        var method  = arguments.event.getHTTPMethod();
+        var entry   = lookupApiResources().findByRequest( method, "/" & routedPath );
+        if ( !isNull( entry ) && len( entry.requiredPermission ?: "" ) ) {
+            var requiredPerm = entry.requiredPermission;
+            var permsClaim   = payload.permissions ?: "";
+            if ( len( permsClaim ) && !listFindNoCase( permsClaim, requiredPerm, " " ) ) {
+                arguments.event.renderData(
+                    type       = "json",
+                    statusCode = 403,
+                    data       = { error : "Token does not carry the required permission [" & requiredPerm & "]." }
+                );
+                arguments.event.noExecution();
+                return;
+            }
+            // permsClaim empty => grandfather; fall through.
+        }
+
         // Token is valid and carries the agent role. The handler still
         // runs its own ensureAgent() guard for defense in depth.
+    }
+
+    /**
+     * Lazy resolver for ApiResourceRegistry@api. The mapping does not
+     * exist when configure() runs, but is guaranteed by the time
+     * preProcess fires on a real request.
+     */
+    private any function lookupApiResources(){
+        if ( !isObject( variables.apiResources ) ) {
+            variables.apiResources = wirebox.getInstance( "ApiResourceRegistry@api" );
+        }
+        return variables.apiResources;
     }
 
 }

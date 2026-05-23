@@ -24,6 +24,10 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         // call configure() so the interceptor is fully initialized.
         variables.interceptor = new tesserabx.modules.api.interceptors.ApiAuthInterceptor();
         variables.interceptor.setJwtService( getController().getWireBox().getInstance( "JwtService@cbsecurity" ) );
+        // ApiResourceRegistry@api is resolved lazily inside the
+        // interceptor on first use. Expose wirebox so the lazy lookup
+        // can find it.
+        variables.interceptor.setWirebox( getController().getWireBox() );
         variables.interceptor.configure();
     }
 
@@ -102,6 +106,57 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( ev.state.statusCode ).toBe( 401 );
             } );
 
+            // B7: per-permission gate. The seeded registry entries
+            // declare requiredPermission per route:
+            //   GET /api/v1/tickets        -> tickets.view
+            //   POST /api/v1/tickets/:id/assign -> tickets.assign
+            // Tests use those concrete entries.
+
+            it( "B7: rejects 403 when the token's permissions claim lacks the route's required permission", function(){
+                var ev = stubEvent( "api/v1/tickets", "GET" );
+                useStubJwt( "payload", { scope : "agent", permissions : "tickets.bulk help.developer" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeFalse();
+                expect( ev.state.statusCode ).toBe( 403 );
+                expect( ev.state.data.error ?: "" ).toInclude( "tickets.view" );
+            } );
+
+            it( "B7: allows the request when permissions claim contains the route's required permission", function(){
+                var ev = stubEvent( "api/v1/tickets", "GET" );
+                useStubJwt( "payload", { scope : "agent", permissions : "tickets.view tickets.assign" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+            } );
+
+            it( "B7: parameterized path /api/v1/tickets/<uuid>/assign requires tickets.assign", function(){
+                var ev = stubEvent( "api/v1/tickets/abc-123/assign", "POST" );
+                useStubJwt( "payload", { scope : "agent", permissions : "tickets.view" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeFalse();
+                expect( ev.state.statusCode ).toBe( 403 );
+            } );
+
+            it( "B7: tokens without a permissions claim grandfather through (scope-only check)", function(){
+                // Old tokens minted before B7 do not carry the
+                // permissions claim. Treat absent (empty) as a
+                // grandfather pass so existing sessions keep working
+                // until they re-mint.
+                var ev = stubEvent( "api/v1/tickets", "GET" );
+                useStubJwt( "payload", { scope : "agent" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+            } );
+
+            it( "B7: requests for paths NOT in the registry pass through after scope check", function(){
+                // /api/v1/example-sync/whatever has no registry entry,
+                // so the per-permission gate is skipped and the scope
+                // check is the only enforcement.
+                var ev = stubEvent( "api/v1/example-sync/whatever/deep", "GET" );
+                useStubJwt( "payload", { scope : "agent", permissions : "tickets.view" } );
+                variables.interceptor.preProcess( ev, {}, {}, {} );
+                expect( ev.state.executed ).toBeTrue();
+            } );
+
         } );
     }
 
@@ -113,8 +168,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
      * method syntax, so the stub must be a real class with real
      * methods.
      */
-    private any function stubEvent( required string routedUrl ){
-        return new tests.support.StubRequestContext( arguments.routedUrl );
+    private any function stubEvent( required string routedUrl, string httpMethod = "GET" ){
+        return new tests.support.StubRequestContext( arguments.routedUrl, arguments.httpMethod );
     }
 
     /**
