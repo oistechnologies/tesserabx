@@ -207,6 +207,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
 
     private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM notifications     WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );
         queryExecute( "DELETE FROM ticket_approvals  WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );
         queryExecute( "DELETE FROM ticket_events     WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );
         queryExecute( "DELETE FROM ticket_messages   WHERE ticket_id = :id", { id : arguments.fixture.ticket.getId() } );

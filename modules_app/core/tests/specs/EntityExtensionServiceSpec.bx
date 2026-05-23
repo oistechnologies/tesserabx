@@ -97,6 +97,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     expect( row.payload ).toBe( "first" );
                 } finally {
                     variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    queryExecute( "DELETE FROM notifications WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : ticket.getId() } );
                     queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
                 }
             } );
@@ -127,6 +130,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     expect( row.payload ).toBe( "second" );
                 } finally {
                     variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    queryExecute( "DELETE FROM notifications WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : ticket.getId() } );
                     queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
                 }
             } );
@@ -151,6 +157,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     // BoxLang scope walker; assert directly on the call.
                     expect( variables.svc.getRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" ) ).toBeNull();
                 } finally {
+                    queryExecute( "DELETE FROM notifications WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : ticket.getId() } );
                     queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
                 }
             } );
@@ -187,6 +196,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     expect( ok.external_key ).toBe( "T1" );
                 } finally {
                     queryExecute( "DELETE FROM tickets_spec_ext WHERE ticket_id = :tid", { tid : ticketId } );
+                    queryExecute( "DELETE FROM notifications WHERE ticket_id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : ticketId } );
                     queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticketId } );
                     queryExecute( "DELETE FROM organizations WHERE id = :id", { id : orgId } );
                 }
@@ -232,6 +244,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     ).toBeNull();
                 } finally {
                     queryExecute( "DELETE FROM tickets_spec_ext WHERE ticket_id = :tid", { tid : ticketId } );
+                    queryExecute( "DELETE FROM notifications WHERE ticket_id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : ticketId } );
+                    queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : ticketId } );
                     queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticketId } );
                     queryExecute( "DELETE FROM organizations WHERE id IN ( :a, :b )", { a : ownerOrg, b : foreignOrg } );
                 }
@@ -264,6 +279,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     expect( second.external_key ).toBe( "CACHE" );
                 } finally {
                     variables.svc.deleteRow( coreEntityType : "ticket", entityId : ticket.getId(), addonId : "spec_ext" );
+                    queryExecute( "DELETE FROM notifications WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : ticket.getId() } );
+                    queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : ticket.getId() } );
                     queryExecute( "DELETE FROM tickets WHERE id = :id", { id : ticket.getId() } );
                 }
             } );

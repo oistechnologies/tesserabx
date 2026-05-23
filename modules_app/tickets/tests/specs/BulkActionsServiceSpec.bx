@@ -131,6 +131,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     private void function cleanupTickets( required array ticketIds ){
         for ( var id in arguments.ticketIds ) {
             queryExecute( "DELETE FROM ticket_custom_field_values WHERE ticket_id = :id", { id : id } );
+            queryExecute( "DELETE FROM notifications    WHERE ticket_id = :id", { id : id } );
+            queryExecute( "DELETE FROM ticket_approvals WHERE ticket_id = :id", { id : id } );
             queryExecute( "DELETE FROM ticket_events  WHERE ticket_id = :id", { id : id } );
             queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : id } );
             queryExecute( "DELETE FROM ticket_tags    WHERE ticket_id = :id", { id : id } );

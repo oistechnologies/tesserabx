@@ -90,6 +90,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 var c  = newWire();
                 c.beginMfaEnroll();
                 expect( len( c.getData().mfaEnrollSecret ) ).toBeGTE( 16 );
+                cleanup( id );
             } );
 
             it( "confirmMfaEnroll rejects an obviously wrong code", function(){

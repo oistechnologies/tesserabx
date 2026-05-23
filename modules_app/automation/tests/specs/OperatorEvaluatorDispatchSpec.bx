@@ -143,6 +143,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
 
     private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM notifications    WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_approvals WHERE ticket_id = :id", { id : arguments.id } );
         queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
         queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
         queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );

@@ -304,6 +304,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
     private void function cleanupFixture( required struct fixture, array ticketIds = [] ){
         for ( var tid in arguments.ticketIds ) {
+            queryExecute( "DELETE FROM notifications    WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM ticket_approvals WHERE ticket_id = :id", { id : tid } );
             queryExecute( "DELETE FROM ticket_events WHERE ticket_id = :id", { id : tid } );
             queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : tid } );
             queryExecute( "DELETE FROM attachments WHERE ticket_id = :id", { id : tid } );
