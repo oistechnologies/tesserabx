@@ -663,7 +663,7 @@ Note for Phase 4: core's existing ticket-show panels (AI Summary, SLA, Assignmen
 
 ## Dashboard widgets
 
-Same shape for the `/agent/reports` dashboard:
+Same shape for both dashboard surfaces:
 
 ```boxlang
 settings.tesserabx.dashboardWidgets = [
@@ -676,12 +676,24 @@ settings.tesserabx.dashboardWidgets = [
         dataMethod         : "syncStatusForDashboard",              // optional
         defaultGridSize    : "col-12 col-md-6",
         sortWeight         : 500,
-        requiredPermission : "exampleJira.view"
+        requiredPermission : "exampleJira.view",
+        zone               : "reports"                              // optional, see below
     }
 ];
 ```
 
-The host loops `#tbxDashboardWidgets()#`, invokes each widget's data provider (when declared), and renders the named partial wrapped in the declared grid size. The same deferral applies: core's existing six dashboard widgets (overview tiles, ticket-volume line chart, three doughnut charts, backlog table, agent-load table) remain rendered inline and are not yet migrated to the registry.
+### Zones
+
+Each widget belongs to a `zone`. Two zones are supported:
+
+| Zone         | Surface          | Audience                                                                                                                                                  |
+|--------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `reports`    | `/agent/reports` | The org-wide aggregate dashboard. Widgets here typically show counts across all organizations and agents. This is the default when `zone` is omitted.     |
+| `agent-home` | `/agent`         | The agent's personal landing page. Widgets here are scoped to the logged-in agent (their tickets, their mentions, their activity, etc.).                  |
+
+An add-on opts into a surface by declaring `zone` on each widget entry. Omit `zone` (or set it to `"reports"`) to contribute to `/agent/reports`. Set `zone : "agent-home"` to contribute to the agent's personal home page. Add-ons can declare widgets in both zones by registering one entry per zone.
+
+The host loops `#tbxDashboardWidgets( "reports" )#` (or `tbxDashboardWidgets( "agent-home" )`), invokes each widget's data provider (when declared), and renders the named partial wrapped in the declared grid size. The same deferral applies on the `reports` zone: core's existing six dashboard widgets (overview tiles, ticket-volume line chart, three doughnut charts, backlog table, agent-load table) remain rendered inline and are not yet migrated to the registry.
 
 ### Reusable `.small-box` partial
 

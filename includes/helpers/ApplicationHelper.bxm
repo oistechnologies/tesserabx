@@ -183,12 +183,17 @@ array function tbxTicketPanels( required string position ){
 }
 
 /**
- * Dashboard widgets the viewer is allowed to see. Loop in
- * reports/index.bxm to render add-on widgets after the existing
- * inline core widgets.
+ * Dashboard widgets the viewer is allowed to see in a given zone.
+ * Two zones are supported:
+ *   - "reports"    (default): the org-wide aggregate dashboard at
+ *                  /agent/reports.
+ *   - "agent-home": the agent's personal landing page at /agent.
+ *
+ * Loop the result in the relevant view to render add-on widgets after
+ * (or alongside) the inline core widgets.
  */
-array function tbxDashboardWidgets(){
+array function tbxDashboardWidgets( string zone = "reports" ){
     var registry = application.wirebox.getInstance( "DashboardWidgetRegistry@reporting" );
-    return registry.listForViewer( tbxViewer() );
+    return registry.listForViewer( tbxViewer(), arguments.zone );
 }
 </bx:script>

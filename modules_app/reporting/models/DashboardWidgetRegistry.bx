@@ -21,7 +21,8 @@
  *       defaultGridSize    : "col-12 col-md-6",           // Bootstrap col classes
  *       sortWeight         : 500,
  *       requiredPermission : "exampleJira.view",
- *       capabilityFlag     : ""
+ *       capabilityFlag     : "",
+ *       zone               : "reports"                    // "reports" | "agent-home"
  *   }
  *
  * Add-ons declare in manifest:
@@ -30,12 +31,22 @@
  *       { id: "exampleJira.syncStatus", title: "Jira sync status", partial: "widgets/jira-sync-status", module: "example-jira", defaultGridSize: "col-12 col-md-6", sortWeight: 500, requiredPermission: "exampleJira.view" }
  *   ];
  *
+ * --- Zones ---
+ *
+ * Each widget belongs to a `zone`. Two zones are supported:
+ *   - "reports"    : the org-wide aggregate dashboard at /agent/reports (default
+ *                    when no zone is declared, for backwards compatibility).
+ *   - "agent-home" : the agent's personal landing page at /agent.
+ *
+ * Add-ons opt into a surface by declaring the zone on each widget entry.
+ * Callers ask for one zone at a time via `listForViewer( viewer, zone )`.
+ *
  * --- Resolution ---
  *
- * `listForViewer( viewer )` returns the filtered, sorted,
- * override-applied widgets the viewer is allowed to see. Overrides
- * live in `registry_overrides` (registry='dashboard_widgets'). The
- * view helper invokes each widget's `dataProvider.dataMethod()` (if
+ * `listForViewer( viewer, zone )` returns the filtered, sorted,
+ * override-applied widgets the viewer is allowed to see in that zone.
+ * Overrides live in `registry_overrides` (registry='dashboard_widgets').
+ * The view helper invokes each widget's `dataProvider.dataMethod()` (if
  * declared) before rendering the partial.
  */
 class singleton=true {
@@ -53,12 +64,13 @@ class singleton=true {
         variables.cache[ normalized.id ] = normalized;
     }
 
-    public array function listForViewer( required struct viewer ){
+    public array function listForViewer( required struct viewer, string zone = "reports" ){
         ensureLoaded();
         var overrides = loadOverridesForOrg( arguments.viewer.organizationId ?: "" );
         var out = [];
         for ( var id in variables.cache ) {
             var e = variables.cache[ id ];
+            if ( e.zone != arguments.zone ) continue;
             var resolved = applyOverride( e, overrides );
             if ( isNull( resolved ) ) continue;
             if ( !isVisible( resolved, arguments.viewer ) ) continue;
@@ -131,6 +143,7 @@ class singleton=true {
             requiredPermission : arguments.raw.requiredPermission ?: "",
             capabilityFlag     : arguments.raw.capabilityFlag     ?: "",
             requiresAi         : !!( arguments.raw.requiresAi     ?: false ),
+            zone               : len( arguments.raw.zone ?: "" ) ? arguments.raw.zone : "reports",
             source             : arguments.source
         };
         validatePermissionGate( entry );

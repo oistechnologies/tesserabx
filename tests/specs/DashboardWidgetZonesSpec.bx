@@ -1,0 +1,156 @@
+/**
+ * DashboardWidgetZonesSpec: covers the `zone` field on
+ * DashboardWidgetRegistry entries.
+ *
+ * The registry supports two zones today: "reports" (the org-wide
+ * dashboard at /agent/reports) and "agent-home" (the agent's
+ * personal landing at /agent). Entries that do not declare a zone
+ * default to "reports", which preserves the pre-zone behavior of
+ * every existing widget contribution.
+ *
+ * Concerns covered:
+ *   1. An entry with no zone is treated as zone="reports".
+ *   2. listForViewer( viewer, "agent-home" ) returns only entries
+ *      declared on that zone.
+ *   3. listForViewer( viewer, "reports" ) returns only entries
+ *      declared on that zone.
+ *   4. Unknown zones return an empty array (defensive — no fallback
+ *      to the default zone).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.widgets = getController().getWireBox().getInstance( "DashboardWidgetRegistry@reporting" );
+    }
+
+    function run(){
+
+        describe( "DashboardWidgetRegistry zone filtering", function(){
+
+            afterEach( function( currentSpec ){
+                variables.widgets.reload();
+            } );
+
+            it( "treats an entry without a zone as the default 'reports' zone", function(){
+                var probeId = "spec-zone-default-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id                 : probeId,
+                    title              : "Spec default-zone " & probeId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                var inReports   = ids( variables.widgets.listForViewer( adminViewer(), "reports"   ) );
+                var inAgentHome = ids( variables.widgets.listForViewer( adminViewer(), "agent-home" ) );
+                expect( inReports ).toInclude( probeId );
+                expect( inAgentHome ).notToInclude( probeId );
+            } );
+
+            it( "returns only agent-home entries when listForViewer asks for that zone", function(){
+                var homeId    = "spec-zone-home-"    & lcase( replace( createUUID(), "-", "", "all" ) );
+                var reportsId = "spec-zone-reports-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id                 : homeId,
+                    title              : "Spec home " & homeId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    zone               : "agent-home",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                variables.widgets.register( {
+                    id                 : reportsId,
+                    title              : "Spec reports " & reportsId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    zone               : "reports",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                var homeOut = ids( variables.widgets.listForViewer( adminViewer(), "agent-home" ) );
+                expect( homeOut ).toInclude( homeId );
+                expect( homeOut ).notToInclude( reportsId );
+            } );
+
+            it( "returns only reports entries when listForViewer asks for that zone", function(){
+                var homeId    = "spec-zone-home-r-"    & lcase( replace( createUUID(), "-", "", "all" ) );
+                var reportsId = "spec-zone-reports-r-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id                 : homeId,
+                    title              : "Spec home " & homeId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    zone               : "agent-home",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                variables.widgets.register( {
+                    id                 : reportsId,
+                    title              : "Spec reports " & reportsId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    zone               : "reports",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                var reportsOut = ids( variables.widgets.listForViewer( adminViewer(), "reports" ) );
+                expect( reportsOut ).toInclude( reportsId );
+                expect( reportsOut ).notToInclude( homeId );
+            } );
+
+            it( "returns an empty array when listForViewer asks for an unknown zone", function(){
+                var probeId = "spec-zone-unknown-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id                 : probeId,
+                    title              : "Spec known zone " & probeId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    zone               : "agent-home",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                var out = variables.widgets.listForViewer( adminViewer(), "this-zone-does-not-exist" );
+                expect( arrayLen( out ) ).toBe( 0 );
+            } );
+
+            it( "preserves backward compatibility: listForViewer with no zone arg defaults to 'reports'", function(){
+                var probeId = "spec-zone-back-compat-" & lcase( replace( createUUID(), "-", "", "all" ) );
+                variables.widgets.register( {
+                    id                 : probeId,
+                    title              : "Spec back-compat " & probeId,
+                    partial            : "widgets/spec",
+                    module             : "spec-addon",
+                    sortWeight         : 999,
+                    requiredPermission : ""
+                } );
+                var out = ids( variables.widgets.listForViewer( adminViewer() ) );
+                expect( out ).toInclude( probeId );
+            } );
+
+        } );
+
+    }
+
+    // ---------- helpers ----------
+
+    private array function ids( required array entries ){
+        var out = [];
+        for ( var e in arguments.entries ) out.append( e.id );
+        return out;
+    }
+
+    private struct function adminViewer(){
+        return {
+            signedIn       : true,
+            userType       : "agent",
+            userId         : "dashboard-zone-spec",
+            roles          : [ "agent-admin" ],
+            permissions    : [ "tickets.view" ],
+            organizationId : ""
+        };
+    }
+
+}
