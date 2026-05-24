@@ -1,0 +1,127 @@
+/**
+ * RouteClaimsRegistry: top-level URLs an add-on can claim and route
+ * to one of its handlers, regardless of the add-on's own entryPoint.
+ *
+ * ColdBox 8's module router auto-prefixes every route declared in a
+ * module's config/Router.bx with that module's entryPoint, which
+ * makes it impossible for an add-on whose entryPoint is, say,
+ * `tesserabx-pm` to claim `/pm` for a portal-surface landing or
+ * `/agent/admin/pm` for an /agent/admin landing card. Those URLs
+ * live outside the module's URL space.
+ *
+ * Add-ons that need to claim top-level URLs declare them in the
+ * manifest:
+ *
+ *   settings.tesserabx.routeClaims = [
+ *       {
+ *           path    : "/pm",                   // required
+ *           module  : "tesserabx-pm",          // required: which module owns the handler
+ *           handler : "Main",                  // required: handler name
+ *           action  : "portal",                // required: action method
+ *           verbs   : "GET",                   // optional: HTTP verbs (default = any)
+ *           name    : "pm.portal.landing"      // optional: ColdBox named route
+ *       },
+ *       { path : "/agent/admin/pm", module : "tesserabx-pm", handler : "Main",  action : "admin" },
+ *       { path : "/agent/pm",       module : "tesserabx-pm", handler : "Main",  action : "index" }
+ *   ];
+ *
+ * The AddonRouteClaimsRegistrar interceptor injects every claim
+ * into ColdBox's global routes array on `afterAspectsLoad`,
+ * prepended so claims match before the host's catch-all
+ * `:handler/:action?`.
+ *
+ * --- Public extension contract ---
+ *
+ *   var reg = wirebox.getInstance( "RouteClaimsRegistry@core" );
+ *   var all = reg.listAll();            // every declared claim
+ *   var hit = reg.findByPath( "/pm" );  // null if no claim
+ */
+class singleton=true {
+
+    property name="coldbox" inject="coldbox";
+
+    variables.REQUIRED_FIELDS = [ "path", "module", "handler", "action" ];
+
+    variables.cache       = {};
+    variables.cacheLoaded = false;
+
+    public array function listAll(){
+        ensureLoaded();
+        var out = [];
+        for ( var path in variables.cache ) out.append( variables.cache[ path ] );
+        out.sort( ( a, b ) => compare( a.path, b.path ) );
+        return out;
+    }
+
+    public any function findByPath( required string path ){
+        ensureLoaded();
+        if ( structKeyExists( variables.cache, arguments.path ) ) return variables.cache[ arguments.path ];
+        return javaCast( "null", "" );
+    }
+
+    public void function reload(){
+        variables.cache       = {};
+        variables.cacheLoaded = false;
+        ensureLoaded();
+    }
+
+    // ---------- internals ----------
+
+    private void function ensureLoaded(){
+        if ( variables.cacheLoaded ) return;
+        var moduleConfig = coldbox.getSetting( "modules" );
+        for ( var moduleName in moduleConfig ) {
+            var mod      = moduleConfig[ moduleName ];
+            var manifest = ( mod.settings.tesserabx ?: {} );
+            var declared = manifest.routeClaims ?: [];
+            if ( !isArray( declared ) ) continue;
+            for ( var c in declared ) {
+                if ( !validateClaim( c, moduleName ) ) continue;
+                variables.cache[ c.path ] = {
+                    path    : c.path,
+                    verbs   : c.verbs   ?: "",
+                    module  : c.module,
+                    handler : c.handler,
+                    action  : c.action,
+                    name    : c.name    ?: "",
+                    source  : moduleName
+                };
+            }
+        }
+        variables.cacheLoaded = true;
+    }
+
+    private boolean function validateClaim( required any claim, required string moduleName ){
+        if ( !isStruct( arguments.claim ) ) {
+            writeLog(
+                text : "RouteClaimsRegistry rejected non-struct claim from module [#arguments.moduleName#]",
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return false;
+        }
+        for ( var field in variables.REQUIRED_FIELDS ) {
+            if ( !structKeyExists( arguments.claim, field ) || !len( trim( arguments.claim[ field ] ?: "" ) ) ) {
+                writeLog(
+                    text : "RouteClaimsRegistry rejected claim from module [#arguments.moduleName#]: missing required field [#field#]",
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+                return false;
+            }
+        }
+        // Path must start with /; ColdBox's addRoute strips the
+        // leading slash internally, but rejecting paths without it
+        // catches typos at registration time.
+        if ( left( arguments.claim.path, 1 ) != "/" ) {
+            writeLog(
+                text : "RouteClaimsRegistry rejected claim from module [#arguments.moduleName#]: path [#arguments.claim.path#] must start with /",
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return false;
+        }
+        return true;
+    }
+
+}

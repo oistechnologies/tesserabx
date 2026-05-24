@@ -52,6 +52,11 @@ class {
                 class      : "#moduleMapping#.interceptors.AddonDiscoveryInterceptor",
                 name       : "AddonDiscoveryInterceptor",
                 properties : {}
+            },
+            {
+                class      : "#moduleMapping#.interceptors.AddonRouteClaimsRegistrar",
+                name       : "AddonRouteClaimsRegistrar",
+                properties : {}
             }
         ];
     }
@@ -87,6 +92,9 @@ class {
               .asSingleton();
         binder.map( "NavigationRegistry@core" )
               .to( "#moduleMapping#.models.NavigationRegistry" )
+              .asSingleton();
+        binder.map( "RouteClaimsRegistry@core" )
+              .to( "#moduleMapping#.models.RouteClaimsRegistry" )
               .asSingleton();
         binder.map( "RegistrationWarningCollector@core" )
               .to( "#moduleMapping#.models.RegistrationWarningCollector" )

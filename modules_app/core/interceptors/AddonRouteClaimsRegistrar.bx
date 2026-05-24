@@ -1,0 +1,61 @@
+/**
+ * AddonRouteClaimsRegistrar: registers every declared route claim
+ * with ColdBox's main router on app boot.
+ *
+ * Companion to RouteClaimsRegistry@core. The registry holds the
+ * declarations; this interceptor binds them to ColdBox's routing
+ * service so they actually serve traffic.
+ *
+ * Hooks on `afterAspectsLoad`, same hook the AddonDiscoveryInterceptor
+ * uses. By that point every loaded module's settings.tesserabx
+ * block is visible via controller.getSetting( "modules" ), which
+ * is what the registry walks.
+ *
+ * Each claim is prepended (append=false) so it matches BEFORE the
+ * host's catch-all `:handler/:action?` route. Claims compose into
+ * ColdBox event strings (`<module>:<Handler>.<action>`) and inherit
+ * any cbSecurity firewall covering their URL prefix.
+ */
+class {
+
+    property name="wirebox" inject="wirebox";
+    property name="controller" inject="coldbox";
+
+    function configure(){}
+
+    function afterAspectsLoad( event, interceptData, rc, prc ){
+        try {
+            var reg    = wirebox.getInstance( "RouteClaimsRegistry@core" );
+            var claims = reg.listAll();
+            if ( !claims.len() ) return;
+
+            var router = controller.getRoutingService().getRouter();
+            var added  = 0;
+
+            for ( var c in claims ) {
+                var routeEvent = c.module & ":" & c.handler & "." & c.action;
+                router.addRoute(
+                    pattern = c.path,
+                    event   = routeEvent,
+                    verbs   = c.verbs,
+                    name    = c.name,
+                    append  = false
+                );
+                added++;
+            }
+
+            writeLog(
+                text : "AddonRouteClaimsRegistrar registered #added# top-level route claim(s) from add-on manifests.",
+                log  : "tesserabx",
+                type : "information"
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "AddonRouteClaimsRegistrar failed: #e.message# :: #e.detail#",
+                log  : "tesserabx",
+                type : "error"
+            );
+        }
+    }
+
+}

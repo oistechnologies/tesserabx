@@ -35,6 +35,7 @@ The fastest path to a working add-on is to copy [`sample-addons/example-sync/`](
 - [Audit-event contributions](#audit-event-contributions)
 - [Roles and permissions](#roles-and-permissions)
 - [Navigation](#navigation)
+- [Route claims](#route-claims)
 - [Admin pages](#admin-pages)
 - [Ticket detail panels](#ticket-detail-panels)
 - [Dashboard widgets](#dashboard-widgets)
@@ -616,6 +617,42 @@ settings.tesserabx.navigation = [
 Resolution order: filter by `(surface, menu)`, apply overrides from `registry_overrides` (registry `'navigation'`), filter by viewer (`requiresAuth`, `requiresAnonymous`, `capabilityFlag`, `requiredPermission`), sort by `sortWeight`. Sparse `requiredPermission` allows public/login-flow entries (the portal "Sign in" link uses `requiresAnonymous : true`).
 
 The layout helper `#tbxNavigation( surface, menu )#` returns the visible entries for the current viewer; iterate it in the layout to emit each menu zone.
+
+---
+
+## Route claims
+
+Sometimes an add-on needs to claim a top-level URL that does not fall under its own `entryPoint`. Examples: a Project Management add-on wants `/agent/pm` (lives on the agent surface), `/pm` (lives on the portal surface), and `/agent/admin/pm` (lives inside the admin module's URL space) — none of those URLs are reachable from a module Router whose `entryPoint = "tesserabx-pm"` because ColdBox 8 auto-prefixes every route declared in a module Router with the module's `entryPoint`.
+
+The `routeClaims` manifest contract is the supported way for an add-on to bind handlers at arbitrary top-level URLs:
+
+```boxlang
+settings.tesserabx.routeClaims = [
+    {
+        path    : "/agent/pm",          // required, must start with /
+        verbs   : "GET",                // optional, defaults to any verb
+        module  : "tesserabx-pm",       // required, module that owns the handler
+        handler : "Main",               // required, handler name within the module
+        action  : "index",              // required, action method on the handler
+        name    : "pm.agent.landing"    // optional, ColdBox named route
+    },
+    { path : "/pm",             module : "tesserabx-pm", handler : "Main", action : "index" },
+    { path : "/agent/admin/pm", module : "tesserabx-pm", handler : "Main", action : "index" }
+];
+```
+
+**How it works:**
+
+1. `RouteClaimsRegistry@core` walks every loaded module's manifest at boot and validates each `routeClaims` entry (must be a struct with non-empty `path`, `module`, `handler`, and `action`; path must start with `/`). Invalid claims are skipped with a warning logged to the `tesserabx` log.
+2. The `AddonRouteClaimsRegistrar` interceptor listens for `afterAspectsLoad` and, for each valid claim, calls `controller.getRoutingService().getRouter().addRoute(...)` with `append=false` so the claim is **prepended** to the routes array. This guarantees the claim matches before the host's catch-all `:handler/:action?`.
+3. The resulting ColdBox event string composes as `<module>:<handler>.<action>` (the same format the host uses to route across modules in its own `config/Router.bx`, e.g. `route("/login").to("portal:Session.new")`).
+4. The claimed URL inherits whatever `cbSecurity` firewall covers its path prefix. `/agent/pm` rides the agent firewall (auth required), `/pm` rides the portal firewall, `/agent/admin/pm` rides the admin firewall. The add-on does not need to declare its own cbSecurity rules just because a route claim sits inside another surface.
+
+**When to use it:** when the URL you want is on another surface (agent vs portal), inside another module's entry-point space (e.g. `/agent/admin/*`), or otherwise unreachable from your own module Router. Most add-ons will not need route claims; their internal URLs live happily under their own entry point.
+
+**When NOT to use it:** if you just want a URL like `/<your-slug>/something`, declare it normally inside your add-on's `config/Router.bx`. Route claims are deliberately the heavier path because every claim is a hand-edited entry in a host-wide registry; declarations inside the module Router are the cheaper default.
+
+**Validation:** the `InstallSpec` shipped with each add-on should probe `RouteClaimsRegistry@core.findByPath( path )` for every claim to catch a silently-dropped registration (typo in a required field, missing path slash, etc.).
 
 ---
 
