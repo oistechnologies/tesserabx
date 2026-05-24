@@ -255,9 +255,10 @@ component extends="commandbox.system.BaseTask" {
     }
 
     /**
-     * Build the staged filename. We always prefix with `_addon_<slug>_`
-     * because the prefix is what `.gitignore` keys on, AND because it
-     * uniquely namespaces the component name in the global
+     * Build the staged filename. We inject an `_addon-<slug>_` infix
+     * between the timestamp and the rest of the filename. The hyphen
+     * between `addon-` and the slug is what `.gitignore` keys on, AND
+     * the marker uniquely namespaces the component name in the global
      * cfmigrations table when two add-ons happen to pick the same
      * timestamp.
      *

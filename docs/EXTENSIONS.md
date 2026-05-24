@@ -298,11 +298,16 @@ These are aliases in `box.json` that delegate to `box task run tasks/Migrate <su
 
 **Staging convention:**
 
-Each discovered file is copied into `resources/database/migrations/_addon_<slug>_<originalFilename>.cfc`. The `_addon_` prefix:
+Each discovered file is copied into `resources/database/migrations/<timestamp>_addon-<slug>_<rest>.cfc`, where `<timestamp>` is the original `YYYY_MM_DD_HHmmss` prefix and `<rest>` is everything after it in the source filename. For example, `modules/tesserabx-pm/migrations/2026_05_24_120000_create_pm_projects.cfc` stages as `resources/database/migrations/2026_05_24_120000_addon-tesserabx-pm_create_pm_projects.cfc`.
 
-- is matched by `.gitignore`, so staged copies are runtime artifacts, never committed
-- uniquely namespaces the component name in the global `cfmigrations` table when two add-ons happen to pick the same timestamp
-- is left alone on re-stage (idempotent)
+The hyphen between `addon-` and the slug is intentional:
+
+- it is the sentinel `.gitignore` matches on (`resources/database/migrations/*_addon-*_*.cfc`), so staged copies are runtime artifacts and never committed
+- it visually distinguishes staged add-on files from hand-written core migrations (whose names contain only underscores, e.g. `2026_05_20_000010_create_addon_tables.cfc`)
+- it uniquely namespaces the component name in the global `cfmigrations` table when two add-ons happen to pick the same timestamp
+- it is left alone on re-stage (idempotent)
+
+The timestamp MUST stay at the front of the staged filename because `cfmigrations` inspects only the first 10 characters and requires them to parse as a date. A previous layout that placed the `_addon-<slug>_` prefix before the timestamp was silently filtered out of every `box migrate up`, so add-on migrations never ran in CI.
 
 The stager writes `resources/database/migrations/.staged.json` listing every staged file plus its source, so an operator can audit what came from where.
 
