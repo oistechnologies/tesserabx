@@ -2,10 +2,19 @@
 <!---
 	TesseraBX — TestBox runner.
 
-	Executes the top-level /tests/specs and every module's
-	modules_app/<module>/tests/specs directory. Module specs are
-	auto-discovered so adding a new module does not require a
-	runner edit.
+	Auto-discovers spec directories under:
+
+	  - /tests/specs                                     (top-level)
+	  - /modules_app/<module>/tests/specs                (host modules)
+	  - /modules_app/<module>/modules/<nested>/tests/specs (nested host modules)
+	  - /sample-addons/<addon>/tests/specs               (in-tree demo add-ons)
+	  - /modules/<addon>/tests/specs                     (third-party add-ons,
+	                                                      filtered to those whose
+	                                                      ModuleConfig.bx declares
+	                                                      settings.tesserabx so
+	                                                      vendor dependencies like
+	                                                      cbsecurity / qb / cbfs
+	                                                      are not scanned)
 
 	Override via URL query params.
 --->
@@ -51,6 +60,29 @@ if ( !structKeyExists( url, "directory" ) || !len( url.directory ) ) {
             specPath = sampleAddonsRoot & "/" & entry.name & "/tests/specs";
             if ( directoryExists( specPath ) ) {
                 dirs.append( "sample-addons." & entry.name & ".tests.specs" );
+            }
+        }
+    }
+    // modules/ holds third-party TesseraBX add-ons (e.g. tesserabx-pm)
+    // installed via ForgeBox or bind-mounted from a sibling repo
+    // during development. Vendor dependencies (cbsecurity, qb, cbfs,
+    // ...) also live here, so we only walk folders whose
+    // ModuleConfig.bx declares a settings.tesserabx block. This
+    // mirrors the isTesseraBXAddon heuristic in tasks/Migrate.cfc.
+    addonsRoot = expandPath( "/modules" );
+    if ( directoryExists( addonsRoot ) ) {
+        for ( entry in directoryList( addonsRoot, false, "query" ) ) {
+            if ( entry.type != "Dir" ) continue;
+            configPath = addonsRoot & "/" & entry.name & "/ModuleConfig.bx";
+            if ( !fileExists( configPath ) ) continue;
+            cfg = fileRead( configPath );
+            if (
+                findNoCase( "settings.tesserabx", cfg ) == 0
+             && findNoCase( "tesserabx :",        cfg ) == 0
+            ) continue;
+            specPath = addonsRoot & "/" & entry.name & "/tests/specs";
+            if ( directoryExists( specPath ) ) {
+                dirs.append( "modules." & entry.name & ".tests.specs" );
             }
         }
     }
