@@ -44,6 +44,13 @@ modules/cbstreams/
 # Local Claude Code agent state
 .claude/
 
+# Developer compose overrides. Used to bind-mount third-party
+# add-ons (modules/<addon>/) from their own working trees into the
+# host's app, worker, and scheduler containers during development.
+# Local-only; never committed.
+compose.override.yaml
+compose.override.yml
+
 # Build artifacts
 build/
 dist/
