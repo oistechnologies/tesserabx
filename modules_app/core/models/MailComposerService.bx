@@ -1,0 +1,451 @@
+/**
+ * MailComposerService: the single entry point for composing
+ * outbound mail in TesseraBX.
+ *
+ * Every send site (`EmailChannel`, `OutboundEmailService`, the
+ * admin test-send button, password / email-change verification
+ * mails, scheduled-export notifications, and any add-on that needs
+ * to send mail) should funnel through `compose()`. The returned
+ * Mail object is configured with both an HTML body and a
+ * plain-text body, the configured branding chrome, the documented
+ * ops headers, and any caller-supplied custom headers. Caller
+ * decides when to call `mail.send()` (or this service's `send()`
+ * helper).
+ *
+ * v1 scope (this file):
+ *   - Branding resolution is global only. Per-organization
+ *     branding overrides land in step 9 of the plan via a new
+ *     BrandingService; the compose() signature already accepts an
+ *     `organizationId` so callers don't change when that lands.
+ *   - The default chrome lives in two .bxm views under
+ *     `modules_app/core/views/emails/`: `default_layout.bxm`
+ *     (notification chrome, full colored header band) and
+ *     `default_layout_reply.bxm` (thin person-to-person chrome
+ *     used for ticket-reply mail). The composer renders the view
+ *     when no `layoutTemplate` is supplied and falls back to an
+ *     in-code scaffold only if the view renderer is unavailable.
+ *
+ * Multipart shape: this composer uses cbmailservices' setHtml() +
+ * setText() pair. The spike at
+ * `modules_app/core/tests/specs/CbmailservicesMultipartSpec.bx`
+ * documents the bx-mail limitation (outer Content-Type is
+ * multipart/mixed, not multipart/alternative) we are accepting for
+ * v1.
+ *
+ * Reserved-scope reminder: BoxLang aliases `var url = ...` to the
+ * URL scope, so any local URL string variable is named differently
+ * (e.g., logoTarget, mailpitTarget, etc).
+ */
+class singleton=true {
+
+    property name="mailService"  inject="MailService@cbmailservices";
+    property name="settings"     inject="SettingsService@admin";
+    property name="branding"     inject="BrandingService@admin";
+    property name="htmlToText"   inject="HtmlToText@core";
+    property name="textToHtml"   inject="TextToHtml@core";
+    property name="controller"   inject="coldbox";
+    property name="appBaseUrl"   inject="coldbox:setting:appBaseUrl";
+
+    variables.DEFAULT_LOGO_PATH = "/includes/images/logos/tesserabx-logo-default.png";
+    variables.DEFAULT_FROM_FALLBACK = "no-reply@tesserabx.local";
+    variables.DEFAULT_PRIMARY_COLOR = "##0d6efd";
+
+    /**
+     * Compose a configured Mail object.
+     *
+     * @to                  Recipient address (required).
+     * @subject             Subject line (required).
+     * @from                Sender address. When blank, resolves to
+     *                      MAIL_FROM env / default.
+     * @replyTo             Optional Reply-To address.
+     * @body                Raw HTML body (string) or a token
+     *                      struct (when bodyTemplate is set).
+     *                      When bodyFormat is "text", this is
+     *                      treated as plain text and auto-rendered
+     *                      through TextToHtml.
+     * @bodyFormat          "html" (default) or "text". "text"
+     *                      triggers the auto-render path used by
+     *                      notification templates whose
+     *                      body_template column holds plain text.
+     * @text                Plain-text body. When blank, auto-
+     *                      generated from the rendered HTML via
+     *                      HtmlToText@core. If bodyFormat is
+     *                      "text", the original (unwrapped) body
+     *                      is preferred so the text/plain part
+     *                      stays clean.
+     * @bodyTemplate        Optional { module, partial } pointing
+     *                      at a view to render as the inner body.
+     * @layoutTemplate      Optional { module, partial } pointing
+     *                      at a view to render as the chrome. When
+     *                      blank, the placeholder layout below is
+     *                      used (until step 5 ships the default
+     *                      layout view).
+     * @organizationId      Tenant context (accepted for forward
+     *                      compatibility; ignored until step 9).
+     * @recipientType       "raw" | "agent" | "contact" (accepted
+     *                      for forward compatibility).
+     * @style               "notification" | "reply" — picks the
+     *                      layout variant.
+     * @preheader           Inbox preview text (hidden in body).
+     * @eventKey            X-TesseraBX-Event header value.
+     * @listUnsubscribeUrl  When non-blank and style=notification,
+     *                      emits RFC 8058 one-click unsubscribe
+     *                      headers.
+     * @tokens              Substitution data passed to body /
+     *                      layout views.
+     * @headers             Caller-supplied custom headers (e.g.
+     *                      Message-ID, In-Reply-To, References).
+     * @attachments         Reserved for future use; pass an empty
+     *                      array for now.
+     */
+    public any function compose(
+        required string  to,
+        required string  subject,
+        string           from               = "",
+        string           replyTo            = "",
+        any              body               = "",
+        string           bodyFormat         = "html",
+        string           text               = "",
+        struct           bodyTemplate       = {},
+        struct           layoutTemplate     = {},
+        string           organizationId     = "",
+        string           recipientType      = "raw",
+        string           style              = "notification",
+        string           preheader          = "",
+        string           eventKey           = "",
+        string           listUnsubscribeUrl = "",
+        struct           tokens             = {},
+        struct           headers            = {},
+        array            attachments        = []
+    ){
+        var brand        = resolveBrand( arguments.organizationId, arguments.recipientType );
+        var logoTarget   = resolveLogoTarget( brand );
+        var primaryColor = normalizePrimaryColor( brand.primaryColor ?: "" );
+
+        var preheader = len( arguments.preheader )
+            ? arguments.preheader
+            : variables.settings.getString( "email.preheader_default", "" );
+        var renderArgs = {
+            brand        : brand,
+            tokens       : isStruct( arguments.body ) ? duplicate( arguments.body ) : arguments.tokens,
+            appBaseUrl   : variables.appBaseUrl,
+            logoTarget   : logoTarget,
+            primaryColor : primaryColor,
+            style        : arguments.style,
+            preheader    : preheader,
+            eventKey     : arguments.eventKey
+        };
+        // If `body` was a struct, merge any explicit `tokens` over
+        // it; explicit tokens win.
+        if ( isStruct( arguments.body ) && !structIsEmpty( arguments.tokens ) ) {
+            structAppend( renderArgs.tokens, arguments.tokens, true );
+        }
+
+        var bodyHtml = renderBody(
+            body         : arguments.body,
+            bodyFormat   : arguments.bodyFormat,
+            bodyTemplate : arguments.bodyTemplate,
+            renderArgs   : renderArgs
+        );
+        var fullHtml = renderLayout(
+            bodyHtml       : bodyHtml,
+            layoutTemplate : arguments.layoutTemplate,
+            renderArgs     : renderArgs
+        );
+        // When bodyFormat is "text", prefer the original raw text
+        // as the plain-text part rather than reverse-engineering
+        // it from the auto-rendered HTML. Keeps the text/plain
+        // part close to what the notification template author
+        // intended.
+        var textBody = "";
+        if ( len( arguments.text ) ) {
+            textBody = arguments.text;
+        } else if ( arguments.bodyFormat == "text" && isSimpleValue( arguments.body ) ) {
+            textBody = toString( arguments.body );
+        } else {
+            textBody = variables.htmlToText.convert( fullHtml );
+        }
+
+        var fromAddr = resolveFromAddress( arguments.from, brand );
+        var replyTo  = len( arguments.replyTo )
+            ? arguments.replyTo
+            : variables.settings.getString( "email.reply_to", "" );
+
+        var mail = variables.mailService.newMail(
+            to      : arguments.to,
+            from    : fromAddr,
+            subject : arguments.subject
+        );
+        mail.setHtml( fullHtml );
+        mail.setText( textBody );
+
+        if ( len( replyTo ) ) {
+            mail.setProperty( "replyTo", replyTo );
+        }
+
+        // Caller-supplied custom headers first (Message-ID,
+        // In-Reply-To, References on threaded replies).
+        for ( var k in arguments.headers ) {
+            mail.addMailParam( name : k, value : arguments.headers[ k ] );
+        }
+
+        // Always-on ops headers. eventKey is optional; when blank
+        // the header is omitted so we never emit "X-TesseraBX-
+        // Event: " with no value.
+        if ( len( arguments.eventKey ) ) {
+            mail.addMailParam( name : "X-TesseraBX-Event", value : arguments.eventKey );
+        }
+        mail.addMailParam(
+            name  : "X-TesseraBX-Organization",
+            value : len( arguments.organizationId ) ? arguments.organizationId : "unknown"
+        );
+
+        // List-Unsubscribe for notification-style mail (RFC 2369
+        // + RFC 8058 one-click). Replies are conversational, not
+        // list-style; skip there.
+        if ( arguments.style == "notification" && len( arguments.listUnsubscribeUrl ) ) {
+            mail.addMailParam(
+                name  : "List-Unsubscribe",
+                value : "<" & arguments.listUnsubscribeUrl & ">"
+            );
+            mail.addMailParam(
+                name  : "List-Unsubscribe-Post",
+                value : "List-Unsubscribe=One-Click"
+            );
+        }
+
+        // Apply the admin-managed SMTP override (no-op when
+        // mail.enabled is false).
+        variables.settings.applyMailOverride( mail );
+
+        return mail;
+    }
+
+    /**
+     * Convenience wrapper: send a composed Mail synchronously.
+     * Future queueing (cbq) lands behind this same method.
+     */
+    public any function send( required any mail ){
+        return variables.mailService.send( arguments.mail );
+    }
+
+    // --------------- private ---------------
+
+    /**
+     * Resolve branding for the given tenant context.
+     *
+     * Provider-side mail (agent recipients, raw addresses, or
+     * accountless tickets with no orgId) uses the global brand.
+     * Contact-recipient mail with an orgId picks up the
+     * organization's brand overrides merged over global.
+     */
+    private struct function resolveBrand(
+        required string organizationId,
+        required string recipientType
+    ){
+        if ( !len( arguments.organizationId ) ) {
+            return variables.settings.getBranding();
+        }
+        if ( arguments.recipientType == "agent" ) {
+            // Agents see across organizations; their notifications
+            // use the global provider brand, not the per-org one.
+            return variables.settings.getBranding();
+        }
+        return variables.branding.resolveBranding( arguments.organizationId );
+    }
+
+    /**
+     * Pick the absolute logo URL the HTML <img> should reference.
+     * Configured value wins; otherwise the bundled default served
+     * out of the project-root /includes/images/logos/ path. When
+     * email.show_default_logo is false and no logo URL is
+     * configured, returns empty so the chrome falls back to the
+     * text-only product-name header.
+     */
+    private string function resolveLogoTarget( required struct brand ){
+        var configured = arguments.brand.logoUrl ?: "";
+        if ( len( configured ) ) return configured;
+        if ( !variables.settings.getBoolean( "email.show_default_logo", true ) ) return "";
+        return variables.appBaseUrl & variables.DEFAULT_LOGO_PATH;
+    }
+
+    /**
+     * Effective From header. Built as
+     *   "<email.from_name or brand.product_name> <bare-address>"
+     * so recipients see a friendly sender label instead of just
+     * the no-reply address. Falls through to the bare address
+     * when no friendly name resolves.
+     */
+    private string function resolveFromAddress(
+        required string explicit,
+        required struct brand
+    ){
+        var bare = len( arguments.explicit )
+            ? arguments.explicit
+            : getSystemSetting( "MAIL_FROM", variables.DEFAULT_FROM_FALLBACK );
+        var fromName = variables.settings.getString( "email.from_name", "" );
+        if ( !len( fromName ) ) fromName = arguments.brand.productName ?: "";
+        if ( !len( fromName ) ) return bare;
+        return fromName & " <" & bare & ">";
+    }
+
+    /**
+     * Ensure the primary color is a valid CSS hex literal.
+     * Stored values usually arrive as "#0d6efd"; defensive code
+     * handles missing leading hash and double-hash edge cases.
+     */
+    private string function normalizePrimaryColor( required string color ){
+        var c = trim( arguments.color );
+        if ( !len( c ) ) return variables.DEFAULT_PRIMARY_COLOR;
+        // Strip leading hashes, then add exactly one back.
+        // Note: in BoxLang string literals, ## escapes to a single
+        // literal # character (template-style semantics apply in
+        // .bx files too).
+        c = reReplace( c, "^##+", "", "one" );
+        return "##" & c;
+    }
+
+    private string function renderBody(
+        required any    body,
+        required string bodyFormat,
+        required struct bodyTemplate,
+        required struct renderArgs
+    ){
+        if ( !structIsEmpty( arguments.bodyTemplate ) ) {
+            return variables.controller.getRenderer().renderView(
+                view   : arguments.bodyTemplate.partial,
+                module : arguments.bodyTemplate.module ?: "",
+                args   : arguments.renderArgs
+            );
+        }
+        var rawBody = isSimpleValue( arguments.body ) ? toString( arguments.body ) : "";
+        if ( arguments.bodyFormat == "text" ) {
+            return variables.textToHtml.render( rawBody );
+        }
+        return rawBody;
+    }
+
+    private string function renderLayout(
+        required string bodyHtml,
+        required struct layoutTemplate,
+        required struct renderArgs
+    ){
+        var args = duplicate( arguments.renderArgs );
+        args.body = arguments.bodyHtml;
+
+        // Explicit override wins.
+        if ( !structIsEmpty( arguments.layoutTemplate ) ) {
+            return variables.controller.getRenderer().renderView(
+                view   : arguments.layoutTemplate.partial,
+                module : arguments.layoutTemplate.module ?: "",
+                args   : args
+            );
+        }
+        // Default chrome lives in views. Reply style uses the
+        // thinner person-to-person variant.
+        var defaultView = ( args.style ?: "notification" ) == "reply"
+            ? "emails/default_layout_reply"
+            : "emails/default_layout";
+        try {
+            return variables.controller.getRenderer().renderView(
+                view   : defaultView,
+                module : "core",
+                args   : args
+            );
+        } catch ( any e ) {
+            // Last-resort fallback: if view rendering fails (e.g.
+            // during an early-boot test that runs before module
+            // views have registered), use the in-code scaffold.
+            return placeholderLayout( args );
+        }
+    }
+
+    /**
+     * A minimum-viable email shell so the composer is end-to-end
+     * functional before the proper default_layout.bxm lands. Same
+     * variables in scope as the future layout view, so step 5
+     * just lifts this verbatim into the .bxm view.
+     */
+    private string function placeholderLayout( required struct args ){
+        var brand        = arguments.args.brand;
+        var primaryColor = arguments.args.primaryColor;
+        var logoTarget   = arguments.args.logoTarget;
+        var productName  = brand.productName ?: "TesseraBX";
+        var tagline      = brand.tagline ?: "";
+        var footerText   = brand.footerText ?: "";
+        var preheader    = arguments.args.preheader ?: "";
+        var style        = arguments.args.style ?: "notification";
+        var bodyHtml     = arguments.args.body ?: "";
+
+        var preheaderHtml = len( preheader )
+            ? "<div style=""display:none;max-height:0;overflow:hidden;color:transparent;line-height:0;font-size:0;"">"
+                & preheader
+                & "</div>"
+            : "";
+
+        // Reply mode strips the big color band so the message
+        // feels like person-to-person mail. Notification mode
+        // gets the full chrome.
+        var headerCell = style == "reply"
+            ? renderReplyHeader( productName, primaryColor )
+            : renderNotificationHeader( productName, tagline, logoTarget, primaryColor );
+
+        var footerCell = len( footerText )
+            ? "<tr><td style=""padding:24px 32px;font-size:12px;color:##666;border-top:1px solid ##eee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"">"
+                & footerText
+                & "</td></tr>"
+            : "";
+
+        return "<!DOCTYPE html>"
+            & "<html><head>"
+            & "<meta charset=""utf-8"">"
+            & "<meta name=""viewport"" content=""width=device-width,initial-scale=1"">"
+            & "<title>" & productName & "</title>"
+            & "</head>"
+            & "<body style=""margin:0;padding:0;background:##f5f6f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:##212529;"">"
+            & preheaderHtml
+            & "<table role=""presentation"" cellpadding=""0"" cellspacing=""0"" border=""0"" width=""100%"" style=""background:##f5f6f7;""><tr><td align=""center"">"
+            & "<table role=""presentation"" cellpadding=""0"" cellspacing=""0"" border=""0"" width=""600"" style=""max-width:600px;background:##ffffff;margin:24px 0;"">"
+            & headerCell
+            & "<tr><td style=""padding:32px;font-size:16px;line-height:1.5;color:##212529;"">"
+            & bodyHtml
+            & "</td></tr>"
+            & footerCell
+            & "</table>"
+            & "</td></tr></table>"
+            & "</body></html>";
+    }
+
+    private string function renderNotificationHeader(
+        required string productName,
+        required string tagline,
+        required string logoTarget,
+        required string primaryColor
+    ){
+        var logo = len( arguments.logoTarget )
+            ? "<img src=""" & arguments.logoTarget & """ alt=""" & arguments.productName
+                & """ width=""180"" style=""display:inline-block;border:0;outline:none;text-decoration:none;height:auto;"">"
+            : "<span style=""color:##ffffff;font-size:24px;font-weight:600;"">" & arguments.productName & "</span>";
+        var taglineHtml = len( arguments.tagline )
+            ? "<div style=""margin-top:8px;color:##ffffff;opacity:0.85;font-size:14px;"">" & arguments.tagline & "</div>"
+            : "";
+        return "<tr><td style=""padding:24px 32px;background:" & arguments.primaryColor & ";text-align:left;"">"
+            & logo
+            & taglineHtml
+            & "</td></tr>";
+    }
+
+    private string function renderReplyHeader(
+        required string productName,
+        required string primaryColor
+    ){
+        // A single thin line of product name only; nothing that
+        // says "marketing email" since this is a person-to-person
+        // ticket reply.
+        return "<tr><td style=""padding:12px 32px;border-bottom:2px solid " & arguments.primaryColor
+            & ";font-size:13px;color:##666;font-weight:500;"">"
+            & arguments.productName
+            & "</td></tr>";
+    }
+
+}

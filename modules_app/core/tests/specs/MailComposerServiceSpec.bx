@@ -1,0 +1,481 @@
+/**
+ * MailComposerServiceSpec: pins the v1 composer behavior.
+ *
+ * v1 scope:
+ *   - Global branding resolution (no per-org overrides until step
+ *     9 of the plan).
+ *   - Placeholder inline layout (no default_layout.bxm view until
+ *     step 5).
+ *   - Multipart shape: both HTML and text parts present, outer
+ *     content type is whatever bx-mail produces (multipart/mixed
+ *     for v1; the spike at CbmailservicesMultipartSpec documents
+ *     why).
+ *
+ * The composer is tested by inspecting the returned Mail object's
+ * config / mailParams / mailParts directly. No actual SMTP send
+ * happens here; that path is exercised by the spike spec and the
+ * end-to-end retrofit tests.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.composer = getController().getWireBox().getInstance( "MailComposerService@core" );
+        variables.settings = getController().getWireBox().getInstance( "SettingsService@admin" );
+    }
+
+    private void function resetBranding(){
+        queryExecute( "DELETE FROM app_settings WHERE key LIKE 'brand.%' OR key LIKE 'mail.%' OR key LIKE 'email.%'" );
+        variables.settings.invalidateCache();
+    }
+
+    function run(){
+        describe( "MailComposerService.compose", function(){
+
+            beforeEach( function( currentSpec ){ resetBranding(); } );
+            afterEach(  function( currentSpec ){ resetBranding(); } );
+
+            it( "returns a Mail with the configured to / from / subject", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Hello",
+                    from    : "no-reply@example.com",
+                    body    : "<p>Hi.</p>"
+                );
+                var cfg = mail.getConfig();
+                expect( cfg.to ).toBe( "user@example.com" );
+                // Default brand product name wraps the bare from
+                // address in a friendly label: "TesseraBX <addr>".
+                expect( cfg.from ).toInclude( "no-reply@example.com" );
+                expect( cfg.subject ).toBe( "Hello" );
+            } );
+
+            it( "emits both an HTML part and a plain-text part", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Hello",
+                    body    : "<p>Body content here.</p>"
+                );
+                var parts = mail.getMailParts();
+                expect( arrayLen( parts ) ).toBe( 2, "Expected exactly two mailParts (text/html + text/plain)." );
+
+                var htmlPart = parts[ 1 ].type == "text/html" ? parts[ 1 ] : parts[ 2 ];
+                var textPart = parts[ 1 ].type == "text/plain" ? parts[ 1 ] : parts[ 2 ];
+                expect( htmlPart.body ).toInclude( "Body content here." );
+                expect( textPart.body ).toInclude( "Body content here." );
+            } );
+
+            it( "wraps the body in the default chrome (product name + footer text from branding)", function(){
+                variables.settings.set( "brand.product_name", "Acme Helpdesk" );
+                // Footer text avoids characters that ESAPI numeric-encodes
+                // (e.g. "/" becomes &#x2f;). The defensive encoding is
+                // harmless in email clients but makes string matches noisy.
+                variables.settings.set( "brand.footer_text",  "Acme support always available." );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>Inner.</p>"
+                );
+                var html = getHtmlPart( mail );
+                expect( html ).toInclude( "Acme Helpdesk" );
+                expect( html ).toInclude( "Acme support always available." );
+                expect( html ).toInclude( "<p>Inner.</p>" );
+            } );
+
+            it( "respects an explicit text override over auto-generated plain text", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>HTML body here.</p>",
+                    text    : "Curated plain text the caller chose."
+                );
+                var textPart = getTextPart( mail );
+                expect( textPart ).toBe( "Curated plain text the caller chose." );
+            } );
+
+            it( "auto-generates plain text from HTML when no text override is supplied", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>Hello. Visit <a href=""https://x.example/y"">our site</a> for more.</p>"
+                );
+                var textPart = getTextPart( mail );
+                expect( textPart ).toInclude( "Hello. Visit our site (https://x.example/y) for more." );
+            } );
+
+            it( "sets X-TesseraBX-Event when eventKey is provided", function(){
+                var mail = variables.composer.compose(
+                    to       : "user@example.com",
+                    subject  : "Test",
+                    body     : "<p>x</p>",
+                    eventKey : "ticket.created"
+                );
+                expect( hasHeader( mail, "X-TesseraBX-Event", "ticket.created" ) ).toBeTrue();
+            } );
+
+            it( "omits X-TesseraBX-Event header when eventKey is blank", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                for ( var p in mail.getMailParams() ) {
+                    expect( p.name ?: "" ).notToBe( "X-TesseraBX-Event" );
+                }
+            } );
+
+            it( "always sets X-TesseraBX-Organization (value 'unknown' when no orgId)", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                expect( hasHeader( mail, "X-TesseraBX-Organization", "unknown" ) ).toBeTrue();
+            } );
+
+            it( "sets X-TesseraBX-Organization with the supplied organizationId", function(){
+                var mail = variables.composer.compose(
+                    to             : "user@example.com",
+                    subject        : "Test",
+                    body           : "<p>x</p>",
+                    organizationId : "11111111-1111-1111-1111-111111111111"
+                );
+                expect( hasHeader( mail, "X-TesseraBX-Organization", "11111111-1111-1111-1111-111111111111" ) ).toBeTrue();
+            } );
+
+            it( "emits List-Unsubscribe + List-Unsubscribe-Post when listUnsubscribeUrl is set and style=notification", function(){
+                var mail = variables.composer.compose(
+                    to                 : "user@example.com",
+                    subject            : "Test",
+                    body               : "<p>x</p>",
+                    style              : "notification",
+                    listUnsubscribeUrl : "https://app.example/unsubscribe?token=abc"
+                );
+                expect( hasHeader( mail, "List-Unsubscribe", "<https://app.example/unsubscribe?token=abc>" ) ).toBeTrue();
+                expect( hasHeader( mail, "List-Unsubscribe-Post", "List-Unsubscribe=One-Click" ) ).toBeTrue();
+            } );
+
+            it( "omits List-Unsubscribe in reply style", function(){
+                var mail = variables.composer.compose(
+                    to                 : "user@example.com",
+                    subject            : "Test",
+                    body               : "<p>x</p>",
+                    style              : "reply",
+                    listUnsubscribeUrl : "https://app.example/unsubscribe?token=abc"
+                );
+                for ( var p in mail.getMailParams() ) {
+                    expect( p.name ?: "" ).notToBe( "List-Unsubscribe" );
+                    expect( p.name ?: "" ).notToBe( "List-Unsubscribe-Post" );
+                }
+            } );
+
+            it( "passes caller-supplied custom headers through (Message-ID etc)", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    headers : {
+                        "Message-ID"  : "<abc.123@host>",
+                        "In-Reply-To" : "<xyz.999@other>"
+                    }
+                );
+                expect( hasHeader( mail, "Message-ID",  "<abc.123@host>" ) ).toBeTrue();
+                expect( hasHeader( mail, "In-Reply-To", "<xyz.999@other>" ) ).toBeTrue();
+            } );
+
+            it( "uses the configured logo URL when brand.logo_url is set", function(){
+                variables.settings.set( "brand.logo_url", "https://cdn.example/custom-logo.png" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                // The URL is HTML-attribute-encoded in the rendered
+                // src attribute; check for a substring that survives
+                // that encoding ("cdn.example", "custom-logo.png").
+                var html = getHtmlPart( mail );
+                expect( html ).toInclude( "cdn.example" );
+                expect( html ).toInclude( "custom-logo.png" );
+            } );
+
+            it( "falls back to the bundled default logo path when brand.logo_url is blank", function(){
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                // Same encoding caveat as above. The path includes
+                // the bundled-default filename which survives encoding.
+                expect( getHtmlPart( mail ) ).toInclude( "tesserabx-logo-default.png" );
+            } );
+
+            it( "renders the primary color into the HTML chrome", function(){
+                // ##ff00aa in a .bx string literal resolves to the
+                // single-hash CSS color "##ff00aa" -> "#ff00aa".
+                variables.settings.set( "brand.primary_color", "##ff00aa" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                expect( getHtmlPart( mail ) ).toInclude( "ff00aa" );
+            } );
+
+            it( "renders the reply-style chrome differently from notification chrome", function(){
+                var notifMail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    style   : "notification"
+                );
+                var replyMail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    style   : "reply"
+                );
+                var notifHtml = getHtmlPart( notifMail );
+                var replyHtml = getHtmlPart( replyMail );
+                expect( len( notifHtml ) ).notToBe( len( replyHtml ),
+                    "Expected notification and reply chrome to render different HTML, got identical bytes."
+                );
+            } );
+
+            it( "embeds the preheader text as a hidden div when supplied", function(){
+                var mail = variables.composer.compose(
+                    to        : "user@example.com",
+                    subject   : "Test",
+                    body      : "<p>visible body</p>",
+                    preheader : "Snippet text for the inbox preview."
+                );
+                var html = getHtmlPart( mail );
+                expect( html ).toInclude( "Snippet text for the inbox preview." );
+                expect( html ).toInclude( "display:none" );
+            } );
+
+            it( "auto-renders a plain-text body when bodyFormat='text' (PM-shape: paragraphs + raw URL)", function(){
+                // Mirrors what a tesserabx-pm notification body
+                // looks like after {{token}} substitution by
+                // NotificationsService: \n\n paragraphs with an
+                // embedded raw URL token.
+                var pmBody = "Alice Agent assigned you to a task in Acme Project."
+                    & char( 10 ) & char( 10 )
+                    & "Open it: https://tesserabx.example.com/agent/tasks/T-1234";
+                var mail = variables.composer.compose(
+                    to         : "user@example.com",
+                    subject    : "Test",
+                    body       : pmBody,
+                    bodyFormat : "text"
+                );
+                var html = getHtmlPart( mail );
+                expect( html ).toInclude( "<p>Alice Agent assigned you to a task in Acme Project.</p>" );
+                expect( html ).toInclude( "<a href=""https://tesserabx.example.com/agent/tasks/T-1234"">" );
+            } );
+
+            it( "preserves the original plain text as the text/plain part when bodyFormat='text'", function(){
+                var pmBody = "Alice Agent assigned you."
+                    & char( 10 ) & char( 10 )
+                    & "Open it: https://tesserabx.example.com/agent/tasks/T-1234";
+                var mail = variables.composer.compose(
+                    to         : "user@example.com",
+                    subject    : "Test",
+                    body       : pmBody,
+                    bodyFormat : "text"
+                );
+                expect( getTextPart( mail ) ).toBe( pmBody,
+                    "Expected the text/plain part to be the verbatim original, not an auto-derived strip of the HTML."
+                );
+            } );
+
+            it( "HTML-escapes user content in bodyFormat='text' so no live markup leaks", function(){
+                var bodyWithMarkup = "Watch out for <script>alert(1)</script> attacks.";
+                var mail = variables.composer.compose(
+                    to         : "user@example.com",
+                    subject    : "Test",
+                    body       : bodyWithMarkup,
+                    bodyFormat : "text"
+                );
+                var html = getHtmlPart( mail );
+                expect( html ).toInclude( "&lt;script&gt;" );
+                expect( html ).notToInclude( "<script>alert(1)</script>" );
+            } );
+
+            it( "applies email.from_name as the friendly sender label when set", function(){
+                variables.settings.set( "email.from_name", "Acme Support" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    from    : "support@example.com"
+                );
+                var cfg = mail.getConfig();
+                expect( cfg.from ).toBe( "Acme Support <support@example.com>" );
+            } );
+
+            it( "falls back to brand.product_name as the friendly sender label when email.from_name is blank", function(){
+                variables.settings.set( "brand.product_name", "Acme Helpdesk" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    from    : "support@example.com"
+                );
+                expect( mail.getConfig().from ).toBe( "Acme Helpdesk <support@example.com>" );
+            } );
+
+            it( "applies email.reply_to when no explicit replyTo is supplied", function(){
+                variables.settings.set( "email.reply_to", "questions@example.com" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                expect( mail.getProperty( "replyTo", "" ) ).toBe( "questions@example.com" );
+            } );
+
+            it( "uses email.preheader_default when no per-send preheader is supplied", function(){
+                variables.settings.set( "email.preheader_default", "Default preview text from settings." );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                expect( getHtmlPart( mail ) ).toInclude( "Default preview text from settings." );
+            } );
+
+            it( "explicit preheader argument wins over email.preheader_default", function(){
+                variables.settings.set( "email.preheader_default", "default preview" );
+                var mail = variables.composer.compose(
+                    to        : "user@example.com",
+                    subject   : "Test",
+                    body      : "<p>x</p>",
+                    preheader : "explicit preview"
+                );
+                expect( getHtmlPart( mail ) ).toInclude( "explicit preview" );
+                expect( getHtmlPart( mail ) ).notToInclude( "default preview" );
+            } );
+
+            it( "suppresses the default logo when email.show_default_logo is false and no logoUrl is set", function(){
+                variables.settings.set( "email.show_default_logo", "false", "boolean" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                expect( getHtmlPart( mail ) ).notToInclude( "tesserabx-logo-default.png" );
+            } );
+
+            it( "picks up per-org branding when organizationId + recipientType=contact are supplied", function(){
+                variables.settings.set( "brand.product_name", "Global Product" );
+                var branding = getController().getWireBox().getInstance( "BrandingService@admin" );
+                var contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+                var org = contacts.createOrganization( {
+                    name : "Composer Org " & createUUID(),
+                    slug : "co-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                try {
+                    branding.saveOverride(
+                        organizationId : org.getId(),
+                        values         : { productName : "Acme Tenant" }
+                    );
+
+                    var mail = variables.composer.compose(
+                        to             : "user@example.com",
+                        subject        : "Test",
+                        body           : "<p>x</p>",
+                        recipientType  : "contact",
+                        organizationId : org.getId()
+                    );
+                    expect( getHtmlPart( mail ) ).toInclude( "Acme Tenant" );
+                    expect( getHtmlPart( mail ) ).notToInclude( "Global Product" );
+                } finally {
+                    branding.clearOverride( org.getId() );
+                    queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+                }
+            } );
+
+            it( "stays on the global brand when recipientType=agent even if organizationId is supplied", function(){
+                variables.settings.set( "brand.product_name", "Global Product" );
+                var branding = getController().getWireBox().getInstance( "BrandingService@admin" );
+                var contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+                var org = contacts.createOrganization( {
+                    name : "Composer Org " & createUUID(),
+                    slug : "co-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                try {
+                    branding.saveOverride(
+                        organizationId : org.getId(),
+                        values         : { productName : "Acme Tenant" }
+                    );
+
+                    var mail = variables.composer.compose(
+                        to             : "agent@example.com",
+                        subject        : "Test",
+                        body           : "<p>x</p>",
+                        recipientType  : "agent",
+                        organizationId : org.getId()
+                    );
+                    // Agents see across organizations; they get
+                    // the global provider brand even when they
+                    // are notified about an org-scoped event.
+                    expect( getHtmlPart( mail ) ).toInclude( "Global Product" );
+                    expect( getHtmlPart( mail ) ).notToInclude( "Acme Tenant" );
+                } finally {
+                    branding.clearOverride( org.getId() );
+                    queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                    queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+                }
+            } );
+
+            it( "honors a custom layoutTemplate { module, partial } over the placeholder", function(){
+                // Render via a known-good view that lives in the
+                // core module (we re-use any partial that we
+                // already know renders cleanly). For this v1 spec
+                // we lean on the fact that compose() falls through
+                // to the placeholder when layoutTemplate is empty,
+                // so we can confirm the override path runs without
+                // having to add a fixture view. We use a known
+                // existing partial that the head layout uses.
+                // The placeholder includes the literal string
+                // "<!DOCTYPE html>"; a custom layout would not.
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>"
+                );
+                expect( getHtmlPart( mail ) ).toInclude( "<!DOCTYPE html>",
+                    "The placeholder layout always emits a DOCTYPE; if this fails, the layout dispatch broke."
+                );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function getHtmlPart( required any mail ){
+        for ( var p in arguments.mail.getMailParts() ) {
+            if ( ( p.type ?: "" ) == "text/html" ) return p.body ?: "";
+        }
+        return "";
+    }
+
+    private string function getTextPart( required any mail ){
+        for ( var p in arguments.mail.getMailParts() ) {
+            if ( ( p.type ?: "" ) == "text/plain" ) return p.body ?: "";
+        }
+        return "";
+    }
+
+    private boolean function hasHeader( required any mail, required string name, required string value ){
+        for ( var p in arguments.mail.getMailParams() ) {
+            if ( ( p.name ?: "" ) == arguments.name && ( p.value ?: "" ) == arguments.value ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+}

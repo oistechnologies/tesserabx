@@ -1,0 +1,139 @@
+/**
+ * TextToHtmlSpec: pins the plain-text-to-HTML auto-render
+ * pipeline used so existing notification body_template strings
+ * (PM-style: \n\n paragraphs with embedded raw URLs after
+ * substitution) light up in the branded HTML chrome without
+ * caller-side changes.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.t2h = getController().getWireBox().getInstance( "TextToHtml@core" );
+    }
+
+    function run(){
+        describe( "TextToHtml.render", function(){
+
+            it( "returns empty for empty input", function(){
+                expect( variables.t2h.render( "" ) ).toBe( "" );
+            } );
+
+            it( "wraps a single paragraph in <p>...</p>", function(){
+                expect( variables.t2h.render( "Hello there." ) ).toBe( "<p>Hello there.</p>" );
+            } );
+
+            it( "separates two paragraphs split by a blank line", function(){
+                var s = "First paragraph." & char( 10 ) & char( 10 ) & "Second paragraph.";
+                expect( variables.t2h.render( s ) ).toBe( "<p>First paragraph.</p><p>Second paragraph.</p>" );
+            } );
+
+            it( "auto-links a bare https URL", function(){
+                expect( variables.t2h.render( "Visit https://example.com/path for more." ) )
+                    .toBe( "<p>Visit <a href=""https://example.com/path"">https://example.com/path</a> for more.</p>" );
+            } );
+
+            it( "auto-links a bare http URL", function(){
+                expect( variables.t2h.render( "Old-school http://example.com/x link." ) )
+                    .toInclude( "<a href=""http://example.com/x"">http://example.com/x</a>" );
+            } );
+
+            it( "keeps sentence-ending punctuation outside the auto-linked URL", function(){
+                // Common in templates: a trailing period after the URL.
+                expect( variables.t2h.render( "Check https://example.com." ) )
+                    .toInclude( "<a href=""https://example.com"">https://example.com</a>" );
+                expect( variables.t2h.render( "Check https://example.com." ) )
+                    .toInclude( "</a>." );
+            } );
+
+            it( "renders PM-style task_assigned body shape", function(){
+                // Mirrors what one of the tesserabx-pm
+                // notification body_templates looks like after
+                // {{token}} substitution by NotificationsService.
+                var post = "Alice Agent assigned you to a task in Acme Project."
+                    & char( 10 ) & char( 10 )
+                    & "Open it: https://tesserabx.example.com/agent/tasks/T-1234";
+                var html = variables.t2h.render( post );
+                expect( html ).toInclude( "<p>Alice Agent assigned you to a task in Acme Project.</p>" );
+                expect( html ).toInclude( "<p>Open it: <a href=""https://tesserabx.example.com/agent/tasks/T-1234"">https://tesserabx.example.com/agent/tasks/T-1234</a></p>" );
+            } );
+
+            it( "converts single newlines inside a paragraph to <br> tags", function(){
+                var s = "Line one" & char( 10 ) & "Line two";
+                expect( variables.t2h.render( s ) ).toBe( "<p>Line one<br>Line two</p>" );
+            } );
+
+            it( "HTML-escapes embedded < and > characters", function(){
+                expect( variables.t2h.render( "the <script> tag is bad" ) )
+                    .toInclude( "the &lt;script&gt; tag is bad" );
+                expect( variables.t2h.render( "the <script> tag is bad" ) )
+                    .notToInclude( "<script>" );
+            } );
+
+            it( "HTML-escapes ampersands without double-encoding", function(){
+                // Tom & Jerry should become Tom &amp; Jerry, not
+                // Tom &amp;amp; Jerry. The escape order matters.
+                expect( variables.t2h.render( "Tom & Jerry" ) ).toBe( "<p>Tom &amp; Jerry</p>" );
+            } );
+
+            it( "HTML-escapes double quotes", function(){
+                expect( variables.t2h.render( "She said ""hi""." ) )
+                    .toBe( "<p>She said &quot;hi&quot;.</p>" );
+            } );
+
+            it( "collapses runs of blank lines down to one paragraph break", function(){
+                var s = "First."
+                    & char( 10 ) & char( 10 ) & char( 10 ) & char( 10 )
+                    & "Second.";
+                expect( variables.t2h.render( s ) ).toBe( "<p>First.</p><p>Second.</p>" );
+            } );
+
+            it( "converts literal backslash-n sequences into actual newlines (template-author convention)", function(){
+                // BoxLang processes `\n` in some string-literal
+                // contexts and not others (e.g. in the
+                // NotificationTemplateRegistry the escape did NOT
+                // get processed and the DB stored a literal
+                // backslash + n). Build the test input via chr()
+                // to guarantee a 4-char literal regardless of how
+                // BoxLang treats `"\n"` here.
+                var bs = char( 92 );
+                var literal = "First paragraph." & bs & "n" & bs & "n" & "Second paragraph.";
+                // Sanity: input should be exactly 37 chars (16 + 4 + 17).
+                // If BoxLang processed the escapes, the length would
+                // be smaller and we'd be testing a different thing.
+                expect( len( literal ) ).toBe( 37 );
+                expect( variables.t2h.render( literal ) )
+                    .toBe( "<p>First paragraph.</p><p>Second paragraph.</p>" );
+            } );
+
+            it( "converts literal backslash-r-backslash-n CRLF sequences too", function(){
+                var bs = char( 92 );
+                var literal = "Line one." & bs & "r" & bs & "n" & "Line two.";
+                expect( len( literal ) ).toBe( 22 );
+                expect( variables.t2h.render( literal ) )
+                    .toBe( "<p>Line one.<br>Line two.</p>" );
+            } );
+
+            it( "normalizes CRLF line endings to LF before processing", function(){
+                var s = "First." & char( 13 ) & char( 10 ) & char( 13 ) & char( 10 ) & "Second.";
+                expect( variables.t2h.render( s ) ).toBe( "<p>First.</p><p>Second.</p>" );
+            } );
+
+            it( "round-trips through HtmlToText to recover the original text content", function(){
+                // Sanity check: text -> html -> text gets you back
+                // to something recognizable (whitespace may differ).
+                var h2t = getController().getWireBox().getInstance( "HtmlToText@core" );
+                var original = "Hello there."
+                    & char( 10 ) & char( 10 )
+                    & "Visit https://example.com/x for more.";
+                var html = variables.t2h.render( original );
+                var back = h2t.convert( html );
+                expect( back ).toInclude( "Hello there." );
+                expect( back ).toInclude( "Visit https://example.com/x" );
+            } );
+
+        } );
+    }
+
+}

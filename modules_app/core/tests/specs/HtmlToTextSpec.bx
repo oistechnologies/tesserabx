@@ -1,0 +1,101 @@
+/**
+ * HtmlToTextSpec: pins the five conversion behaviors used by the
+ * multipart email path (paragraphs, link surfacing, table strip,
+ * entity decode, whitespace collapse) and a small set of edge
+ * cases.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.h2t = getController().getWireBox().getInstance( "HtmlToText@core" );
+    }
+
+    function run(){
+        describe( "HtmlToText.convert", function(){
+
+            it( "returns empty for empty input", function(){
+                expect( variables.h2t.convert( "" ) ).toBe( "" );
+            } );
+
+            it( "renders a simple paragraph as plain text", function(){
+                var html = "<p>Hello there, friend.</p>";
+                expect( variables.h2t.convert( html ) ).toBe( "Hello there, friend." );
+            } );
+
+            it( "separates two paragraphs with a single blank line", function(){
+                var html = "<p>First paragraph.</p><p>Second paragraph.</p>";
+                expect( variables.h2t.convert( html ) ).toBe( "First paragraph." & char( 10 ) & char( 10 ) & "Second paragraph." );
+            } );
+
+            it( "surfaces an <a> link as 'label (url)'", function(){
+                var html = "Visit <a href=""https://example.com/path"">our docs</a> for more.";
+                expect( variables.h2t.convert( html ) ).toBe( "Visit our docs (https://example.com/path) for more." );
+            } );
+
+            it( "surfaces a link even with extra attributes", function(){
+                var html = "<a class=""btn"" href='https://example.com/x' target=""_blank"">click me</a>";
+                expect( variables.h2t.convert( html ) ).toBe( "click me (https://example.com/x)" );
+            } );
+
+            it( "strips a simple table down to its cell text", function(){
+                var html = "<table><tr><td>one</td><td>two</td></tr><tr><td>three</td><td>four</td></tr></table>";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toInclude( "one" );
+                expect( out ).toInclude( "two" );
+                expect( out ).toInclude( "three" );
+                expect( out ).toInclude( "four" );
+                expect( out ).notToInclude( "<" );
+                expect( out ).notToInclude( ">" );
+            } );
+
+            it( "renders <li> items as dash-prefixed lines", function(){
+                var html = "<ul><li>alpha</li><li>beta</li><li>gamma</li></ul>";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toInclude( "- alpha" );
+                expect( out ).toInclude( "- beta" );
+                expect( out ).toInclude( "- gamma" );
+            } );
+
+            it( "decodes the common HTML entities", function(){
+                var html = "Mary &amp; Bob said &quot;hi&quot; (&lt;3&gt;) for &nbsp;~ten~ minutes";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toInclude( "Mary & Bob said ""hi"" (<3>) for  ~ten~ minutes" );
+            } );
+
+            it( "drops <script> and <style> blocks including their content", function(){
+                var html = "<style>.x { color: red; }</style>"
+                         & "<p>Body content.</p>"
+                         & "<script>alert('boom');</script>";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toBe( "Body content." );
+            } );
+
+            it( "collapses runs of blank lines down to a single blank line", function(){
+                var html = "<p>top</p><p></p><p></p><p></p><p>bottom</p>";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toBe( "top" & char( 10 ) & char( 10 ) & "bottom" );
+            } );
+
+            it( "converts <br> tags to single newlines (both self-closed and not)", function(){
+                var html = "line one<br>line two<br/>line three";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toBe( "line one" & char( 10 ) & "line two" & char( 10 ) & "line three" );
+            } );
+
+            it( "preserves token-substituted URLs in plain text after the chrome is stripped", function(){
+                // Mirrors what a notification template body looks
+                // like after token substitution. The link tag
+                // wraps a tokenized URL; we want the URL to land
+                // in the plain text alongside the visible label.
+                var html = "<p>Open the ticket:</p>"
+                         & "<p><a href=""https://tesserabx.example.com/agent/tickets/T-1234"">Ticket T-1234</a></p>";
+                var out  = variables.h2t.convert( html );
+                expect( out ).toInclude( "Ticket T-1234 (https://tesserabx.example.com/agent/tickets/T-1234)" );
+            } );
+
+        } );
+    }
+
+}

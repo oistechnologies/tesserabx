@@ -1,0 +1,86 @@
+/**
+ * HtmlToText: derive a readable plain-text rendering from an HTML
+ * body for the multipart email path.
+ *
+ * The output is the fallback that recipients on text-only clients
+ * (or rare web mail in plain-text mode) see, and the `text/plain`
+ * part of the multipart message that spam filters scrutinize. It
+ * does not need to be perfect; it needs to be readable, preserve
+ * paragraph breaks, surface link URLs, and have no HTML tag soup.
+ *
+ * Transform pipeline (order matters):
+ *   1. Strip <script> and <style> blocks (content + tags).
+ *   2. Lift <a href="URL">label</a> to "label (URL)" so links
+ *      are not silently lost when the tag is stripped.
+ *   3. Convert <li> items to "- item" prefixed lines.
+ *   4. Replace block-closing tags (</p>, </div>, </li>, </h1>,
+ *      ..., </tr>) and <br> with single newlines; double on </p>.
+ *   5. Strip any remaining tags.
+ *   6. Decode the common HTML entities used by the email layout.
+ *   7. Collapse runs of three or more newlines down to two, and
+ *      trim trailing whitespace per line.
+ *   8. Trim the result.
+ *
+ * Intentionally a stateless singleton with one public method; the
+ * spec at modules_app/core/tests/specs/HtmlToTextSpec.bx pins the
+ * five behaviors above.
+ */
+class singleton=true {
+
+    public string function convert( required string html ){
+        if ( !len( arguments.html ) ) return "";
+
+        var s = arguments.html;
+
+        // 1. Strip <script> / <style> blocks (content and tags).
+        s = reReplaceNoCase( s, "<script\b[^>]*>.*?</script>", "", "all" );
+        s = reReplaceNoCase( s, "<style\b[^>]*>.*?</style>",   "", "all" );
+
+        // 2. <a href="X">Y</a> -> "Y (X)" so the URL survives.
+        //    Both attribute orders and single/double quotes are
+        //    common; the regex handles both. A trailing space
+        //    keeps the URL from butting against the next word.
+        s = reReplaceNoCase(
+            s,
+            "<a\b[^>]*\bhref\s*=\s*[""']([^""']+)[""'][^>]*>(.*?)</a>",
+            "\2 (\1)",
+            "all"
+        );
+
+        // 3. <li>item</li> -> "- item" so list structure survives.
+        s = reReplaceNoCase( s, "<li\b[^>]*>", "- ", "all" );
+
+        // 4. Convert block-closing tags and <br> to newlines.
+        //    Paragraph closers get a double newline so paragraphs
+        //    stay separated.
+        s = reReplaceNoCase( s, "</p>",                 char( 10 ) & char( 10 ), "all" );
+        s = reReplaceNoCase( s, "<br\s*/?>",            char( 10 ),             "all" );
+        s = reReplaceNoCase( s, "</(div|li|tr|h[1-6])>", char( 10 ),            "all" );
+
+        // 5. Strip any remaining tags.
+        s = reReplaceNoCase( s, "<[^>]+>", "", "all" );
+
+        // 6. Decode the common HTML entities. Numeric entities are
+        //    rare in our layout; the small named set below covers
+        //    everything the chrome and tokens emit.
+        s = replace( s, "&nbsp;", " ",  "all" );
+        s = replace( s, "&amp;",  "&",  "all" );
+        s = replace( s, "&lt;",   "<",  "all" );
+        s = replace( s, "&gt;",   ">",  "all" );
+        s = replace( s, "&quot;", """", "all" );
+        s = replace( s, "&##39;", "'",  "all" );
+        s = replace( s, "&apos;", "'",  "all" );
+
+        // 7. Normalize line endings and collapse blank-line runs.
+        s = replace( s, char( 13 ) & char( 10 ), char( 10 ), "all" );
+        s = replace( s, char( 13 ),              char( 10 ), "all" );
+        // Trim trailing whitespace on each line (regex multiline).
+        s = reReplace( s, "[ \t]+(" & char( 10 ) & ")", "\1", "all" );
+        // Collapse 3+ newlines down to 2 so paragraphs are
+        // separated by exactly one blank line.
+        s = reReplace( s, char( 10 ) & "{3,}", char( 10 ) & char( 10 ), "all" );
+
+        return trim( s );
+    }
+
+}

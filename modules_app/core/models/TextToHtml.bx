@@ -1,0 +1,144 @@
+/**
+ * TextToHtml: convert a plain-text email body to safe HTML so the
+ * MailComposerService can wrap a notification's text-only
+ * body_template (PM-style: paragraphs separated by \n\n, embedded
+ * raw URL tokens after substitution) in the branded chrome
+ * without any caller-side change.
+ *
+ * Pipeline (order matters):
+ *   1. Normalize line endings to \n.
+ *   2. HTML-escape <, >, &, " so injected content cannot leak
+ *      into the surrounding chrome as live markup.
+ *   3. Auto-link bare http / https URLs to clickable <a> tags.
+ *   4. Split on blank lines (one or more empty lines) into
+ *      paragraphs.
+ *   5. Within a paragraph, convert single \n to <br>.
+ *   6. Wrap each paragraph in <p>...</p>.
+ *
+ * The output is intentionally minimal HTML (just <p>, <br>, <a>)
+ * so the branded layout that wraps it controls the typography. No
+ * inline styles are emitted; the layout sets fonts and colors.
+ */
+class singleton=true {
+
+    public string function render( required string text ){
+        if ( !len( arguments.text ) ) return "";
+
+        // 1. Normalize line endings.
+        var s = replace( arguments.text, char( 13 ) & char( 10 ), char( 10 ), "all" );
+        s = replace( s, char( 13 ), char( 10 ), "all" );
+        // Template authors instinctively type `\n` (the JS / Python /
+        // Java newline escape) but BoxLang string literals in .bx
+        // files do not interpret backslash escapes, so the body
+        // stored in the notification_templates table holds the
+        // literal four characters. Substitute them for real newlines
+        // here so the paragraph splitter below works as authored.
+        //
+        // Built via char(92) to guarantee a literal backslash in
+        // the search arg. Plain `replace()` honors the search
+        // string verbatim; `reReplaceNoCase` here would need the
+        // backslash escaped as `\\\\` which the BoxLang string
+        // literal parser handles inconsistently.
+        var backslash = char( 92 );
+        s = replace( s, backslash & "r" & backslash & "n", char( 10 ), "all" );
+        s = replace( s, backslash & "n",                   char( 10 ), "all" );
+
+        // 2. HTML-escape. Ordering matters: & must go first so
+        //    the escapes we emit for other chars don't get
+        //    double-escaped.
+        s = replace( s, "&",  "&amp;",  "all" );
+        s = replace( s, "<",  "&lt;",   "all" );
+        s = replace( s, ">",  "&gt;",   "all" );
+        s = replace( s, """", "&quot;", "all" );
+
+        // 3. Auto-link bare http / https URLs. Done procedurally
+        //    because BoxLang's regex engine does not reliably
+        //    backtrack a trailing exclude class against a greedy
+        //    inner class, and backreferences in patterns aren't
+        //    a portable assumption. We use reFind/loop to step
+        //    through every URL, trim trailing sentence
+        //    punctuation off it, and rebuild the string with the
+        //    anchor + the trimmed-off chars outside the anchor.
+        s = autoLinkUrls( s );
+
+        // 4. Split on blank lines. \n{2,} catches single blank
+        //    line, double, etc. — collapse them all into one
+        //    paragraph break.
+        var paragraphs = reSplit( s, "\n\s*\n+" );
+
+        // 5+6. Wrap each non-empty paragraph in <p>...</p> and
+        // turn intra-paragraph \n into <br>.
+        var out = [];
+        for ( var para in paragraphs ) {
+            var t = trim( para );
+            if ( !len( t ) ) continue;
+            t = replace( t, char( 10 ), "<br>", "all" );
+            out.append( "<p>" & t & "</p>" );
+        }
+        return arrayToList( out, "" );
+    }
+
+    // ---------------- private ----------------
+
+    /**
+     * Step through `source`, find each http/https URL, trim
+     * trailing sentence punctuation off the URL into the
+     * surrounding text, then wrap the trimmed URL in an anchor.
+     * Done procedurally so we don't depend on regex backtracking
+     * or backreferences in the pattern (BoxLang's regex engine
+     * behaves inconsistently with both on this stack).
+     */
+    private string function autoLinkUrls( required string source ){
+        var out = "";
+        var idx = 1;
+        var sourceLen = len( arguments.source );
+        while ( idx <= sourceLen ) {
+            var match = reFindNoCase(
+                "https?://[^\s<>""',;)]+",
+                arguments.source,
+                idx,
+                true
+            );
+            if ( !arrayLen( match.pos ) || match.pos[ 1 ] == 0 ) {
+                out &= mid( arguments.source, idx, sourceLen - idx + 1 );
+                break;
+            }
+            var pre = mid( arguments.source, idx, match.pos[ 1 ] - idx );
+            var matchedUrl = mid( arguments.source, match.pos[ 1 ], match.len[ 1 ] );
+            // Strip trailing sentence punctuation. The exact set
+            // matches the test fixtures: . , ; : ! ?
+            var trailing = "";
+            while ( len( matchedUrl ) && reFind( "[.,;:!?]$", matchedUrl ) ) {
+                trailing = right( matchedUrl, 1 ) & trailing;
+                matchedUrl = left( matchedUrl, len( matchedUrl ) - 1 );
+            }
+            out &= pre
+                & "<a href=""" & matchedUrl & """>" & matchedUrl & "</a>"
+                & trailing;
+            idx = match.pos[ 1 ] + match.len[ 1 ];
+        }
+        return out;
+    }
+
+    /**
+     * Split a string on a regex, return an array. BoxLang ships
+     * reMatch / reFind / reReplace but no direct reSplit BIF, so
+     * this helper does the loop manually.
+     */
+    private array function reSplit( required string source, required string pattern ){
+        var out = [];
+        var idx = 1;
+        var sourceLen = len( arguments.source );
+        while ( idx <= sourceLen ) {
+            var match = reFind( arguments.pattern, arguments.source, idx, true );
+            if ( !arrayLen( match.pos ) || match.pos[ 1 ] == 0 ) {
+                out.append( mid( arguments.source, idx, sourceLen - idx + 1 ) );
+                break;
+            }
+            out.append( mid( arguments.source, idx, match.pos[ 1 ] - idx ) );
+            idx = match.pos[ 1 ] + match.len[ 1 ];
+        }
+        return out;
+    }
+
+}

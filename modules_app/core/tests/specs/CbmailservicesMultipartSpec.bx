@@ -1,0 +1,215 @@
+/**
+ * CbmailservicesMultipartSpec: regression guard for the multipart
+ * email send path on BoxLang.
+ *
+ * Context (discovered during the upfront spike for the
+ * MailComposerService work):
+ *
+ *   bx-mail does not produce multipart/alternative when a Mail
+ *   object has both an HTML and a plain-text part. Its
+ *   MailUtil.appendMessagePart() wraps each cfmailpart in its own
+ *   MimeMultipart with no subtype, defaulting to mixed. There is
+ *   no knob (the cfmail `type` attribute and a hypothetical
+ *   `multipart` attribute are both ignored for the outer subtype).
+ *
+ *   v1 of the branded email work lives with multipart/mixed: both
+ *   bodies are present, modern clients (Gmail, Apple Mail) render
+ *   the HTML, and Outlook may show the plain-text as an
+ *   attachment. A future upstream fix or custom protocol can flip
+ *   the outer to multipart/alternative without touching anything
+ *   else.
+ *
+ * What this spec guarantees:
+ *   - Calling `newMail()` with NO `body` / NO `type` and then
+ *     `setHtml()` + `setText()` does not crash on BoxLang.
+ *   - The message arrives at Mailpit.
+ *   - Both the HTML body and the plain-text body are present in
+ *     the rendered raw source.
+ *   - The outer Content-Type is a `multipart/*` (so the message
+ *     is at least a multipart, not a single-part).
+ *
+ * The dev stack is required (docker compose up -f compose.yaml
+ * -f compose.dev.yaml). CI runs without Mailpit must skip this
+ * spec.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.mailService = getController().getWireBox().getInstance( "MailService@cbmailservices" );
+        variables.mailpitBase = getSystemSetting( "MAILPIT_API_BASE", "http://mailpit:8025" );
+    }
+
+    function run(){
+        describe( "cbmailservices multipart send path on BoxLang", function(){
+
+            it( "sends a Mail with setHtml + setText without crashing and Mailpit receives both parts", function(){
+                var uniqueId = lCase( replace( createUUID(), "-", "", "all" ) );
+                var subject  = "Multipart guard " & uniqueId;
+                var htmlBody = "<html><body><p>HTML side for <strong>" & uniqueId & "</strong>.</p></body></html>";
+                var textBody = "Plain text side for " & uniqueId & ".";
+
+                // The safe send shape: no `body`, no `type` on
+                // newMail; both bodies go in via the two mailParts
+                // helpers. Anything else trips known BoxLang
+                // type-coercion edges in the cfmail attribute
+                // collection path.
+                var mail = variables.mailService.newMail(
+                    from    : "spike-test@tesserabx.local",
+                    to      : "spike-recipient-" & uniqueId & "@example.com",
+                    subject : subject
+                );
+                mail.setHtml( htmlBody );
+                mail.setText( textBody );
+
+                variables.mailService.send( mail );
+
+                expect( mail.hasErrors() ).toBeFalse(
+                    "Expected send to succeed but got errors: "
+                        & arrayToList( mail.getResultMessages(), " | " )
+                );
+
+                var found = findMailpitMessageBySubject( subject, 6000 );
+                expect( isNull( found ) ).toBeFalse(
+                    "Expected Mailpit to receive a message with subject [" & subject & "] but none arrived."
+                );
+
+                var raw = fetchMailpitRaw( found.ID );
+                expect( raw ).toInclude(
+                    "HTML side for <strong>" & uniqueId,
+                    "Raw source should include the HTML body."
+                );
+                expect( raw ).toInclude(
+                    "Plain text side for " & uniqueId,
+                    "Raw source should include the plain-text body."
+                );
+                expect( extractOuterContentType( raw ) ).toMatch(
+                    "(?i)^multipart/",
+                    "Outer Content-Type should be multipart/* (mixed today, alternative once bx-mail is fixed)."
+                );
+
+                deleteMailpitMessage( found.ID );
+            } );
+
+        } );
+    }
+
+    // ---------------- private ----------------
+
+    private string function extractOuterContentType( required string raw ){
+        // Headers are everything before the first blank line.
+        var blank = find( char( 10 ) & char( 10 ), arguments.raw );
+        var headerBlock = blank > 0 ? left( arguments.raw, blank ) : arguments.raw;
+        var headerLines = listToArray( headerBlock, char( 10 ) );
+        // Unfold continuation lines (RFC 5322: leading whitespace).
+        var unfolded = [];
+        for ( var line in headerLines ) {
+            line = replace( line, char( 13 ), "", "all" );
+            if ( !len( line ) ) continue;
+            if ( arrayLen( unfolded ) && reFind( "^[ \t]", line ) ) {
+                unfolded[ arrayLen( unfolded ) ] = unfolded[ arrayLen( unfolded ) ] & " " & trim( line );
+            } else {
+                arrayAppend( unfolded, line );
+            }
+        }
+        for ( var folded in unfolded ) {
+            if ( reFindNoCase( "^Content-Type:", folded ) ) {
+                return trim( reReplaceNoCase( folded, "^Content-Type:", "", "one" ) );
+            }
+        }
+        return "(missing)";
+    }
+
+    // ---------------- Mailpit helpers ----------------
+    // The Mailpit JSON API at /api/v1/* is documented at
+    // https://mailpit.axllent.org/docs/api-v1/. The HTTP calls
+    // use the same java.net.URL pattern that SlackChannel uses;
+    // BoxLang does not ship cfhttp in this stack.
+
+    private any function findMailpitMessageBySubject(
+        required string subject,
+        numeric timeoutMs = 5000
+    ){
+        var deadline = getTickCount() + arguments.timeoutMs;
+        var qs = "?query=" & urlEncodedFormat( "subject:""" & arguments.subject & """" ) & "&limit=5";
+        while ( getTickCount() < deadline ) {
+            var resp = httpGet( variables.mailpitBase & "/api/v1/search" & qs );
+            if ( resp.status == 200 && len( resp.body ) ) {
+                var data = jsonDeserialize( resp.body );
+                if ( arrayLen( data.messages ?: [] ) ) {
+                    return data.messages[ 1 ];
+                }
+            }
+            sleep( 200 );
+        }
+        return javaCast( "null", "" );
+    }
+
+    private string function fetchMailpitRaw( required string messageId ){
+        var resp = httpGet( variables.mailpitBase & "/api/v1/message/" & arguments.messageId & "/raw" );
+        return resp.status == 200 ? resp.body : "";
+    }
+
+    private void function deleteMailpitMessage( required string messageId ){
+        httpRequest(
+            method  = "DELETE",
+            target  = variables.mailpitBase & "/api/v1/messages",
+            headers = { "Content-Type" : "application/json" },
+            body    = jsonSerialize( { "IDs" : [ arguments.messageId ] } )
+        );
+    }
+
+    private struct function httpGet( required string target ){
+        return httpRequest( method = "GET", target = arguments.target );
+    }
+
+    private struct function httpRequest(
+        required string method,
+        required string target,
+        struct          headers = {},
+        string          body    = ""
+    ){
+        var connectionHandle = createObject( "java", "java.net.URL" )
+            .init( arguments.target )
+            .openConnection();
+        connectionHandle.setRequestMethod( arguments.method );
+        connectionHandle.setConnectTimeout( javaCast( "int", 5000 ) );
+        connectionHandle.setReadTimeout( javaCast( "int", 5000 ) );
+        for ( var k in arguments.headers ) {
+            connectionHandle.setRequestProperty( k, arguments.headers[ k ] );
+        }
+        if ( len( arguments.body ) ) {
+            connectionHandle.setDoOutput( javaCast( "boolean", true ) );
+            var os = connectionHandle.getOutputStream();
+            try {
+                os.write( arguments.body.getBytes( "UTF-8" ) );
+                os.flush();
+            } finally {
+                os.close();
+            }
+        }
+        var status   = 0;
+        var bodyText = "";
+        try {
+            status = connectionHandle.getResponseCode();
+        } catch ( any e ) {
+            return { status : 0, body : "" };
+        }
+        var stream = ( status >= 200 && status < 400 )
+            ? connectionHandle.getInputStream()
+            : connectionHandle.getErrorStream();
+        if ( !isNull( stream ) ) {
+            try {
+                var scanner = createObject( "java", "java.util.Scanner" )
+                    .init( stream, "UTF-8" )
+                    .useDelimiter( "\A" );
+                bodyText = scanner.hasNext() ? scanner.next() : "";
+            } finally {
+                stream.close();
+            }
+        }
+        return { status : status, body : bodyText };
+    }
+
+}
