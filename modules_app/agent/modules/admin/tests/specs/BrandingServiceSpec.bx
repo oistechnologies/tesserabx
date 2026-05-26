@@ -122,6 +122,90 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 }
             } );
 
+            it( "decodes cbantisamy-encoded entities on read so layouts get plain text", function(){
+                // Admin form posts route through cbantisamy which
+                // encodes "&" -> "&amp;" and `"` -> "&quot;" on
+                // save. The read path decodes so the email layout's
+                // own encodeForHTML pass produces clean markup.
+                var orgId = makeOrg();
+                try {
+                    queryExecute(
+                        "INSERT INTO organization_branding ( organization_id, product_name, footer_text )
+                         VALUES ( :id, :name, :footer )",
+                        {
+                            id     : orgId,
+                            name   : "Acme Help Desk &amp; Support",
+                            footer : "Smith &amp; Sons"
+                        }
+                    );
+                    variables.branding.invalidate( orgId );
+                    var brand = variables.branding.resolveBranding( orgId );
+                    expect( brand.productName ).toBe( "Acme Help Desk & Support" );
+                    expect( brand.footerText  ).toBe( "Smith & Sons" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+        } );
+
+        describe( "BrandingService.resolveEmailChrome", function(){
+
+            beforeEach( function( currentSpec ){
+                cleanGlobal();
+            } );
+
+            it( "returns notification when organizationId is blank (accountless)", function(){
+                expect( variables.branding.resolveEmailChrome() ).toBe( "notification" );
+            } );
+
+            it( "returns notification when the org has no override row", function(){
+                var orgId = makeOrg();
+                try {
+                    expect( variables.branding.resolveEmailChrome( orgId ) ).toBe( "notification" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+            it( "returns notification when an override row exists but email_chrome is null", function(){
+                var orgId = makeOrg();
+                try {
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : { productName : "Acme" }
+                    );
+                    expect( variables.branding.resolveEmailChrome( orgId ) ).toBe( "notification" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+            it( "returns reply when the org opts in via email_chrome = reply", function(){
+                var orgId = makeOrg();
+                try {
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : { productName : "Acme", emailChrome : "reply" }
+                    );
+                    expect( variables.branding.resolveEmailChrome( orgId ) ).toBe( "reply" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+            it( "collapses anything other than reply back to the default", function(){
+                var orgId = makeOrg();
+                try {
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : { productName : "Acme", emailChrome : "gibberish" }
+                    );
+                    expect( variables.branding.resolveEmailChrome( orgId ) ).toBe( "notification" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
         } );
     }
 

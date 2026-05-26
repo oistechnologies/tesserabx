@@ -132,10 +132,15 @@ class singleton=true {
         addEntry( { eventKey : "ticket.status_changed", channel : "inapp", recipientType : "contact", titleTemplate : "Your ticket ##{{ticketNumber}} is now {{to}}",         bodyTemplate : "We moved your ticket from {{from}} to {{to}}.",                             linkTemplate : "/tickets/{{ticketId}}"       }, "core" );
 
         // --- email (Phase 5c-2 seed shape; unsubscribe footer added at render time) ---
+        // The (ticket.created, contact) and (ticket.message_added,
+        // contact) tuples are deliberately absent: the channel
+        // adapter (channels module's OutboundEmailService) ships
+        // those events to the requester on the conversation thread
+        // with a proper Message-ID and threading headers. Adding
+        // notification-fan-out email here would double-send. The
+        // inapp tuples above still exist so the portal bell ticks.
         addEntry( { eventKey : "ticket.created",        channel : "email", recipientType : "agent",   titleTemplate : "[Ticket ##{{ticketNumber}}] {{subject}}",               bodyTemplate : "A new ticket has landed in your queue.\n\nOpen it: {{appBaseUrl}}/agent/tickets/{{ticketId}}",         linkTemplate : "" }, "core" );
-        addEntry( { eventKey : "ticket.created",        channel : "email", recipientType : "contact", titleTemplate : "Ticket ##{{ticketNumber}} received",                    bodyTemplate : "Thanks for reaching out. Your support request ##{{ticketNumber}} is on its way to an agent.\n\nTrack it: {{appBaseUrl}}/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
         addEntry( { eventKey : "ticket.message_added",  channel : "email", recipientType : "agent",   titleTemplate : "[Ticket ##{{ticketNumber}}] new reply",                  bodyTemplate : "{{authorLabel}} added a message to ""{{subject}}"".\n\nReview it: {{appBaseUrl}}/agent/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
-        addEntry( { eventKey : "ticket.message_added",  channel : "email", recipientType : "contact", titleTemplate : "[Ticket ##{{ticketNumber}}] agent replied",              bodyTemplate : "An agent replied to your ticket ""{{subject}}"".\n\nRead the reply: {{appBaseUrl}}/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
         addEntry( { eventKey : "ticket.status_changed", channel : "email", recipientType : "agent",   titleTemplate : "[Ticket ##{{ticketNumber}}] {{from}} -> {{to}}",         bodyTemplate : "Ticket ##{{ticketNumber}} moved from {{from}} to {{to}}.\n\nView it: {{appBaseUrl}}/agent/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
         addEntry( { eventKey : "ticket.status_changed", channel : "email", recipientType : "contact", titleTemplate : "Your ticket ##{{ticketNumber}} is now {{to}}",          bodyTemplate : "We updated ticket ##{{ticketNumber}} ({{subject}}) from {{from}} to {{to}}.\n\nDetails: {{appBaseUrl}}/tickets/{{ticketId}}", linkTemplate : "" }, "core" );
 

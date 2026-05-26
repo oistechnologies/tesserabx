@@ -6,6 +6,12 @@
  * surfaces filter on this flag at the service layer; the UI never
  * receives internal-note records.
  *
+ * is_system_message flags a record the application itself authored
+ * (auto-acks today, future automation stubs tomorrow). These show in
+ * the agent-facing conversation thread for context but never trigger
+ * the notifications fan-out, because the channel adapter that
+ * created them already shipped the actual mail.
+ *
  * Not tenant-scoped directly: parent Ticket is tenant-scoped and
  * messages travel with the ticket. Service-layer lookups always go
  * through the ticket id.
@@ -24,6 +30,7 @@ class
     property name="messageId"         column="message_id";
     property name="body";
     property name="isInternal"        column="is_internal";
+    property name="isSystemMessage"   column="is_system_message";
     property name="createdAt"         column="created_at" sqltype="timestamp";
 
     function ticket(){

@@ -100,7 +100,18 @@
                                     <strong>Agent</strong> #encodeForHTML( local.m.getAuthorAgentId() ?: "" )#
                                 </bx:if>
                             <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
-                                <strong>Contact</strong> #encodeForHTML( local.m.getAuthorContactId() )#
+                                <bx:set local.msgContact = prc.contactDirectory[ local.m.getAuthorContactId() ?: "" ] ?: {} >
+                                <bx:if structKeyExists( local.msgContact, "id" )>
+                                    <bx:set local.contactDisplayName = trim( ( local.msgContact.firstName ?: "" ) & " " & ( local.msgContact.lastName ?: "" ) ) >
+                                    <bx:if !len( local.contactDisplayName )>
+                                        <bx:set local.contactDisplayName = local.msgContact.email >
+                                    </bx:if>
+                                    <strong>#encodeForHTML( local.contactDisplayName )#</strong><bx:if len( local.msgContact.email ?: "" ) and local.contactDisplayName neq local.msgContact.email>
+                                        <span class="text-body-secondary">&lt;#encodeForHTML( local.msgContact.email )#&gt;</span>
+                                    </bx:if>
+                                <bx:else>
+                                    <strong>Contact</strong> #encodeForHTML( local.m.getAuthorContactId() )#
+                                </bx:if>
                             <bx:else>
                                 <strong>Email</strong> #encodeForHTML( local.m.getAuthorEmail() ?: "" )#
                             </bx:if>

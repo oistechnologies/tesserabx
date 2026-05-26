@@ -72,10 +72,36 @@ class {
             // explicit about this for visibility; the same rule means
             // they should not generate a contact-side notification.
             if ( message.getIsInternal() ?: false ) return;
+            // System-authored messages (auto-acks, future automation
+            // stubs) live in the thread for context but the channel
+            // adapter that authored them already delivered the mail.
+            // Re-emitting them here would double-send to the
+            // requester and lock the assigned agent into a noisy
+            // "system replied" agent notification.
+            if ( message.getIsSystemMessage() ?: false ) return;
+            // The very first message on a ticket arrives in the
+            // same lifecycle moment as `onTicketCreated`; the
+            // ticket.created notification has already targeted the
+            // same audience. Skipping here avoids the back-to-back
+            // "[Ticket ##NNN] <subject>" + "[Ticket ##NNN] new
+            // reply" pair the agent used to receive on every
+            // inbound-email and portal-submitted ticket.
+            if ( isFirstMessageOnTicket( ticket.getId(), message.getId() ) ) return;
 
             var fromAgent = len( message.getAuthorAgentId() ?: "" ) > 0;
             var recipients = [];
             if ( fromAgent ) {
+                // Requester contact stays in the recipient list so the
+                // portal bell dropdown lights up. The dispatcher's
+                // per-channel template lookup is what stops the email
+                // duplicate: the (ticket.message_added, email, contact)
+                // template tuple has been removed from the registry
+                // and DB seeds because the channel adapter
+                // (OutboundEmailService.sendAgentReply, plus future
+                // IChannelAdapter implementations for SMS / Slack /
+                // etc.) is responsible for delivering the reply
+                // payload to the requester. The inapp template tuple
+                // remains, so the bell still works.
                 if ( len( ticket.getRequesterContactId() ?: "" ) ) {
                     recipients.append( { "type" : "contact", "id" : ticket.getRequesterContactId() } );
                 }
@@ -108,6 +134,40 @@ class {
                 type : "warning"
             );
         }
+    }
+
+    /**
+     * True when the given message id is the earliest NON-SYSTEM
+     * record on the ticket. The ticket lifecycle for an inbound-
+     * email ticket is:
+     *   createTicket -> onTicketCreated -> auto-ack addMessage
+     *                                       (system, is_system_message=true)
+     *                -> inbound body addMessage (NOT system)
+     * so by the time we evaluate "is this the first message" for
+     * the customer's body, the auto-ack row is already in
+     * ticket_messages and a naive `ORDER BY created_at LIMIT 1`
+     * sees the auto-ack as #1 and the customer body as #2. The
+     * filter on is_system_message excludes the auto-ack so the
+     * customer's originating body is correctly recognised as the
+     * first real message and the ticket.message_added dispatch is
+     * skipped (onTicketCreated has already notified the agents).
+     */
+    private boolean function isFirstMessageOnTicket(
+        required string ticketId,
+        required string messageId
+    ){
+        var rows = queryExecute(
+            "SELECT id
+               FROM ticket_messages
+              WHERE ticket_id = :tid
+                AND is_system_message = FALSE
+              ORDER BY created_at ASC, id ASC
+              LIMIT 1",
+            { tid : arguments.ticketId },
+            { returntype : "array" }
+        );
+        if ( !arrayLen( rows ) ) return false;
+        return rows[ 1 ].id == arguments.messageId;
     }
 
     function onTicketStatusChanged( event, interceptData, rc, prc ){

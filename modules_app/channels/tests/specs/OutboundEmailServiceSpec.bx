@@ -9,10 +9,13 @@
  * TicketMessage rows the service writes for traceability.
  *
  * The actual SMTP send goes through cbmailservices to the configured
- * mailServer (mailpit in dev, nothing in CI). cbmailservices swallows
- * send errors into the Mail object's results; from the spec's
- * perspective the outbound is judged by whether the auto-ack /
- * reply TicketMessage rows materialise, not by Mailpit content.
+ * mailServer (mailpit in dev). The auto-ack and agent-reply
+ * follow-ups (the ack TicketMessage write, the Message-ID stamp)
+ * now only run when cbmailservices reports a successful send, so a
+ * CI environment without Mailpit skips these assertions to avoid
+ * conflating "Mailpit unreachable" with "outbound logic broken".
+ * Probe is done at the top of run() per the project memo "TestBox
+ * run() runs before beforeAll()".
  */
 class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
@@ -24,9 +27,11 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
 
     function run(){
+        var mailpitPresent = probeMailpit( getSystemSetting( "MAILPIT_API_BASE", "http://mailpit:8025" ) );
+
         describe( "OutboundEmailService", function(){
 
-            it( "writes an auto-ack TicketMessage for an email-sourced ticket", function(){
+            it( title = "writes an auto-ack TicketMessage for an email-sourced ticket", skip = !mailpitPresent, body = function(){
                 var ticket = variables.tickets.createAccountlessTicket( {
                     originatingEmail : "ack-" & createUUID() & "@example.com",
                     subject          : "Auto-ack me",
@@ -55,7 +60,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupTicket( ticket.getId() );
             } );
 
-            it( "stamps a Message-ID on an agent reply", function(){
+            it( title = "stamps a Message-ID on an agent reply", skip = !mailpitPresent, body = function(){
                 var org = variables.contacts.createOrganization( {
                     name : "Spec Org " & createUUID(),
                     slug : "obs-" & lCase( replace( createUUID(), "-", "", "all" ) )
@@ -158,6 +163,30 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             }
         }
         return out;
+    }
+
+    /**
+     * Probe Mailpit by opening a tiny HTTP connection to the info
+     * endpoint. Mirrors the helper in CbmailservicesMultipartSpec
+     * (Java URLConnection rather than cfhttp, because the probe
+     * runs at the top of run() before BoxLang's request scope is
+     * fully wired and cfhttp has been flaky in that window). A CI
+     * run without the dev mail trap silently skips the specs that
+     * depend on a successful cbmailservices send.
+     */
+    private boolean function probeMailpit( required string base ){
+        try {
+            var connectionHandle = createObject( "java", "java.net.URL" )
+                .init( arguments.base & "/api/v1/info" )
+                .openConnection();
+            connectionHandle.setRequestMethod( "GET" );
+            connectionHandle.setConnectTimeout( javaCast( "int", 1500 ) );
+            connectionHandle.setReadTimeout( javaCast( "int", 1500 ) );
+            var status = connectionHandle.getResponseCode();
+            return status >= 200 && status < 500;
+        } catch ( any e ) {
+            return false;
+        }
     }
 
     private void function cleanupTicket( required string id ){

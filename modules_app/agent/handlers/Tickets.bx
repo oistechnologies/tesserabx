@@ -764,6 +764,26 @@ class {
         }
         arguments.prc.agentDirectory = agentService.directoryFor( agentIds );
 
+        // Mirror the agent directory for contact-authored messages
+        // and contact-actor ticket events so the conversation card
+        // can show "First Last <email>" instead of the raw UUID.
+        // Includes the requester so any system / accountless rows
+        // that hang off the same contact also render cleanly.
+        var contactIds = [];
+        var requesterContactId = arguments.ticket.getRequesterContactId() ?: "";
+        if ( len( requesterContactId ) ) contactIds.append( requesterContactId );
+        for ( var m in arguments.prc.messages ) {
+            var cid = m.getAuthorContactId() ?: "";
+            if ( len( cid ) ) contactIds.append( cid );
+        }
+        for ( var ev in arguments.prc.events ) {
+            if ( ( ev.getActorType() ?: "" ) == "contact" ) {
+                var actorId = ev.getActorId() ?: "";
+                if ( len( actorId ) ) contactIds.append( actorId );
+            }
+        }
+        arguments.prc.contactDirectory = contactsService.directoryFor( contactIds );
+
         // Assignment-card dropdown options.
         arguments.prc.assignableAgents = rbacService.listAgentsWithRoles();
         // Attachments + per-message bucket so the view can render

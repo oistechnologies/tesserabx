@@ -128,6 +128,46 @@ class singleton=true {
         return isNull( contact ) ? javaCast( "null", "" ) : contact;
     }
 
+    /**
+     * Bulk lookup of contact display data keyed by id. Mirrors
+     * AgentService.directoryFor so a view rendering many messages
+     * authored by different contacts can resolve names + emails in
+     * O(1) per row without a per-row DB hit. Unknown ids are
+     * silently absent from the returned struct; callers treat that
+     * as "render a placeholder".
+     */
+    public struct function directoryFor( required array contactIds ){
+        var out = {};
+        if ( !arrayLen( arguments.contactIds ) ) return out;
+        var clean = {};
+        for ( var id in arguments.contactIds ) {
+            if ( len( id ?: "" ) ) clean[ id ] = true;
+        }
+        if ( structIsEmpty( clean ) ) return out;
+        var ids = structKeyArray( clean );
+        var placeholders = [];
+        var binds        = {};
+        for ( var i = 1; i <= arrayLen( ids ); i++ ) {
+            placeholders.append( ":c" & i );
+            binds[ "c" & i ] = ids[ i ];
+        }
+        var rows = queryExecute(
+            "SELECT id, email, first_name, last_name
+             FROM   contacts
+             WHERE  id IN ( " & placeholders.toList() & " )",
+            binds
+        );
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out[ rows.id[ i ] ] = {
+                id        : rows.id[ i ],
+                email     : rows.email[ i ]      ?: "",
+                firstName : rows.first_name[ i ] ?: "",
+                lastName  : rows.last_name[ i ]  ?: ""
+            };
+        }
+        return out;
+    }
+
     public any function getContactByEmail( required string email ){
         // Email lookup is case-insensitive (RFC 5321 treats the domain
         // as case-insensitive and the local part as case-sensitive in

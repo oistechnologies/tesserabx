@@ -135,6 +135,45 @@ class singleton=true {
         return isNull( e ) ? javaCast( "null", "" ) : e;
     }
 
+    /**
+     * Update an existing inbound_emails row in place, used by the
+     * retry path so a transient processing failure does not leave
+     * a series of duplicate rows behind. Bumps retry_count and
+     * stamps last_attempted_at. The original received_at is
+     * preserved so the operator can see the age of the message.
+     *
+     * Returns the updated entity. Quick's full-row UPDATE shape
+     * trips on JSONB/array columns on this codebase so we keep
+     * the targeted SET list explicit through queryExecute.
+     */
+    public any function updateInboundEmailOutcome(
+        required string id,
+        required string outcome,
+        required numeric retryCount,
+        string ticketId = "",
+        string notes    = ""
+    ){
+        queryExecute(
+            "UPDATE inbound_emails
+                SET outcome           = :outcome,
+                    retry_count       = cast( :retryCount as integer ),
+                    last_attempted_at = NOW(),
+                    ticket_id         = COALESCE( NULLIF( :ticketId, '' ), ticket_id ),
+                    notes             = :notes
+              WHERE id = :id",
+            {
+                id         : arguments.id,
+                outcome    : arguments.outcome,
+                retryCount : arguments.retryCount,
+                ticketId   : arguments.ticketId,
+                notes      : arguments.notes
+            }
+        );
+        return wirebox.getInstance( "InboundEmail@channels" )
+            .where( "id", arguments.id )
+            .first();
+    }
+
     public array function listInboundEmails(
         string outcome,
         string senderEmail,

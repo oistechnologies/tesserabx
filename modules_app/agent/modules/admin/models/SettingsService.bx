@@ -103,21 +103,34 @@ class singleton=true {
      * Branding values resolved against defaults. Returned struct is
      * safe for direct use in a layout. The HTML-side caller is
      * responsible for the html-encode pass.
+     *
+     * Text fields are passed through decodeBrandText so the cbantisamy
+     * form interceptor (which encodes "&" -> "&amp;" and `"` ->
+     * "&quot;" on save) does not leak into the rendered email body.
+     * URL and color fields are left untouched: cbantisamy does not
+     * disturb them and they have their own validation paths.
      */
     public struct function getBranding(){
-        var out  = {};
-        var keys = brandingKeys();
-        for ( var k in keys ) {
-            out[ keys[ k ].label ] = getString( k, keys[ k ].default );
-        }
-        // Re-key into camelCase the layout can use directly.
         return {
-            productName  : getString( "brand.product_name",  keys[ "brand.product_name"  ].default ),
-            tagline      : getString( "brand.tagline",       keys[ "brand.tagline"       ].default ),
-            logoUrl      : getString( "brand.logo_url",      keys[ "brand.logo_url"      ].default ),
-            primaryColor : getString( "brand.primary_color", keys[ "brand.primary_color" ].default ),
-            footerText   : getString( "brand.footer_text",   keys[ "brand.footer_text"   ].default )
+            productName  : decodeBrandText( getString( "brand.product_name",  brandingKeys()[ "brand.product_name"  ].default ) ),
+            tagline      : decodeBrandText( getString( "brand.tagline",       brandingKeys()[ "brand.tagline"       ].default ) ),
+            logoUrl      :                  getString( "brand.logo_url",      brandingKeys()[ "brand.logo_url"      ].default ),
+            primaryColor :                  getString( "brand.primary_color", brandingKeys()[ "brand.primary_color" ].default ),
+            footerText   : decodeBrandText( getString( "brand.footer_text",   brandingKeys()[ "brand.footer_text"   ].default ) )
         };
+    }
+
+    /**
+     * Reverse cbantisamy's HTML-entity encoding on text fields that
+     * round-trip through an admin form. Kept identical to the helper
+     * in BrandingService so global and per-org reads behave the same.
+     */
+    private string function decodeBrandText( required string value ){
+        return replaceList(
+            arguments.value,
+            "&amp;,&quot;,&##39;,&apos;,&lt;,&gt;,&nbsp;",
+            "&,"",',',<,>, "
+        );
     }
 
     /**

@@ -34,7 +34,8 @@ class {
             tagline      : "",
             logoUrl      : "",
             primaryColor : "",
-            footerText   : ""
+            footerText   : "",
+            emailChrome  : ""
         };
         prc.hasOverride = false;
         if ( len( rc.organizationId ) ) {
@@ -46,7 +47,8 @@ class {
                     tagline      : row.tagline       ?: "",
                     logoUrl      : row.logo_url      ?: "",
                     primaryColor : row.primary_color ?: "",
-                    footerText   : row.footer_text   ?: ""
+                    footerText   : row.footer_text   ?: "",
+                    emailChrome  : row.email_chrome  ?: ""
                 };
             }
         }
@@ -64,6 +66,10 @@ class {
         param rc.logoUrl        = "";
         param rc.primaryColor   = "";
         param rc.footerText     = "";
+        // Checkbox: present in the post when checked, absent
+        // otherwise. The service treats anything other than
+        // "reply" as NULL so the org tracks the default.
+        param rc.emailChrome    = "";
 
         if ( !len( rc.organizationId ) ) {
             messagebox.error( "Pick an organization first." );
@@ -78,7 +84,8 @@ class {
                 tagline      : rc.tagline,
                 logoUrl      : rc.logoUrl,
                 primaryColor : rc.primaryColor,
-                footerText   : rc.footerText
+                footerText   : rc.footerText,
+                emailChrome  : rc.emailChrome
             },
             actorAgentId   : currentAgentId()
         );

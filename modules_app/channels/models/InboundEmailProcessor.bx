@@ -64,117 +64,232 @@ class singleton=true {
         var refs      = arguments.message.references ?: "";
         var headers   = arguments.message.headers ?: {};
 
-        // 1. Duplicate
+        // priorRowId tracks an existing inbound_emails row when we're
+        // retrying a previously-errored attempt. When non-empty,
+        // logInbound() UPDATEs in place and bumps retry_count rather
+        // than INSERTing a duplicate audit row. The retry pathway
+        // exists because the bx-mail jar has been observed handing
+        // back empty content on the first multipart-with-attachments
+        // fetch; allowing a bounded retry recovers the message
+        // content on the next IMAP poll instead of parking it
+        // permanently as "error".
+        var priorRowId   = "";
+        var retryAttempt = 0;
+        var maxRetries   = int( getSystemSetting( "INBOUND_EMAIL_MAX_RETRIES", "3" ) );
+
+        // 1. Duplicate / retry decision
         if ( len( messageId ) ) {
             var prior = channelsService.findInboundEmailByMessageId( messageId );
             if ( !isNull( prior ) ) {
-                return logInbound(
-                    sender, subject, messageId, inReplyTo, refs,
-                    "duplicate",
-                    prior.getTicketId() ?: "",
-                    "Already processed in inbound_emails row [#prior.getId()#]."
-                );
+                var priorOutcome = prior.getOutcome() ?: "";
+                var priorRetries = val( prior.getRetryCount() ?: 0 );
+                // Only "error" is retryable. Every other outcome
+                // (ticket_created, message_appended, duplicate,
+                // blocked_*) is terminal: the system already decided
+                // what to do and we honor that.
+                if ( priorOutcome == "error" && priorRetries < maxRetries ) {
+                    // Carry the prior row id so logInbound() updates
+                    // in place. retryAttempt starts at priorRetries
+                    // and the outcome path below increments it.
+                    priorRowId   = prior.getId();
+                    retryAttempt = priorRetries + 1;
+                } else {
+                    return logInbound(
+                        sender       : sender,
+                        subject      : subject,
+                        messageId    : messageId,
+                        inReplyTo    : inReplyTo,
+                        references   : refs,
+                        outcome      : "duplicate",
+                        ticketId     : prior.getTicketId() ?: "",
+                        notes        : "Already processed in inbound_emails row [#prior.getId()#] (outcome=#priorOutcome#, retries=#priorRetries#).",
+                        priorRowId   : "",
+                        retryAttempt : 0
+                    );
+                }
             }
         }
 
         // 2. Loop guard
         if ( looksAutomated( headers, subject ) ) {
             return logInbound(
-                sender, subject, messageId, inReplyTo, refs,
-                "blocked_loop_guard",
-                "",
-                "Headers or subject indicate an automated message."
+                sender       : sender,
+                subject      : subject,
+                messageId    : messageId,
+                inReplyTo    : inReplyTo,
+                references   : refs,
+                outcome      : "blocked_loop_guard",
+                ticketId     : "",
+                notes        : "Headers or subject indicate an automated message.",
+                priorRowId   : priorRowId,
+                retryAttempt : retryAttempt
             );
         }
 
         // 3. Blacklist
         if ( !len( sender ) ) {
             return logInbound(
-                sender, subject, messageId, inReplyTo, refs,
-                "error",
-                "",
-                "Could not extract sender address from From header."
+                sender       : sender,
+                subject      : subject,
+                messageId    : messageId,
+                inReplyTo    : inReplyTo,
+                references   : refs,
+                outcome      : "error",
+                ticketId     : "",
+                notes        : "Could not extract sender address from From header.",
+                priorRowId   : priorRowId,
+                retryAttempt : retryAttempt
             );
         }
         if ( channelsService.isBlocked( sender ) ) {
             return logInbound(
-                sender, subject, messageId, inReplyTo, refs,
-                "blocked_blacklist",
-                "",
-                "Sender [#sender#] matched an active blacklist entry."
+                sender       : sender,
+                subject      : subject,
+                messageId    : messageId,
+                inReplyTo    : inReplyTo,
+                references   : refs,
+                outcome      : "blocked_blacklist",
+                ticketId     : "",
+                notes        : "Sender [#sender#] matched an active blacklist entry.",
+                priorRowId   : priorRowId,
+                retryAttempt : retryAttempt
             );
         }
 
-        // 4. Reply matching
+        // 4. Reply matching. Wrapped in try/catch so a mid-flight
+        //    failure (DB constraint, downstream listener throw,
+        //    whatever) still records an inbound_emails row keyed
+        //    by the message id. Without that row the IMAP poller
+        //    would retry the same message on the next 60-second
+        //    tick and process it from scratch, double-appending
+        //    or duplicating the parent ticket.
         var replyTicketId = findReplyTicketId( inReplyTo, refs, subject );
         if ( len( replyTicketId ) ) {
             var t = ticketsService.getTicket( replyTicketId );
             if ( !isNull( t ) ) {
-                var contact = contactsService.getContactByEmail( sender );
-                var msg = ticketsService.addMessage( {
-                    ticketId        : t.getId(),
-                    body            : arguments.message.body ?: "",
-                    authorContactId : isNull( contact ) ? "" : contact.getId(),
-                    authorEmail     : sender,
-                    isInternal      : false,
-                    messageId       : messageId
-                } );
-                attachInboundFiles(
-                    t,
-                    msg,
-                    arguments.message.attachments ?: [],
-                    isNull( contact ) ? "" : contact.getId(),
-                    sender
-                );
-                return logInbound(
-                    sender, subject, messageId, inReplyTo, refs,
-                    "message_appended",
-                    t.getId(),
-                    "Appended to ticket via In-Reply-To match."
-                );
+                try {
+                    var contact = contactsService.getContactByEmail( sender );
+                    var msg = ticketsService.addMessage( {
+                        ticketId        : t.getId(),
+                        body            : arguments.message.body ?: "",
+                        authorContactId : isNull( contact ) ? "" : contact.getId(),
+                        authorEmail     : sender,
+                        isInternal      : false,
+                        messageId       : messageId
+                    } );
+                    attachInboundFiles(
+                        t,
+                        msg,
+                        arguments.message.attachments ?: [],
+                        isNull( contact ) ? "" : contact.getId(),
+                        sender
+                    );
+                    return logInbound(
+                        sender       : sender,
+                        subject      : subject,
+                        messageId    : messageId,
+                        inReplyTo    : inReplyTo,
+                        references   : refs,
+                        outcome      : "message_appended",
+                        ticketId     : t.getId(),
+                        notes        : "Appended to ticket via In-Reply-To match.",
+                        priorRowId   : priorRowId,
+                        retryAttempt : retryAttempt
+                    );
+                } catch ( any e ) {
+                    writeLog(
+                        text : "InboundEmailProcessor reply-append failed for [#messageId#] on ticket [#t.getId()#] (attempt #( retryAttempt + 1 )#): " & e.message,
+                        log  : "tesserabx",
+                        type : "error"
+                    );
+                    return logInbound(
+                        sender       : sender,
+                        subject      : subject,
+                        messageId    : messageId,
+                        inReplyTo    : inReplyTo,
+                        references   : refs,
+                        outcome      : "error",
+                        ticketId     : t.getId(),
+                        notes        : "Reply-append failed: " & e.message,
+                        priorRowId   : priorRowId,
+                        retryAttempt : retryAttempt
+                    );
+                }
             }
         }
 
-        // 5. New ticket
-        var contact = contactsService.getContactByEmail( sender );
-        var ticket  = "";
-        if ( !isNull( contact ) ) {
-            ticket = ticketsService.createTicket( {
-                requesterContactId : contact.getId(),
-                subject            : subject,
-                originatingEmail   : sender,
-                source             : "email",
-                actorType          : "system"
+        // 5. New ticket. Same safety net as #4. On failure we
+        //    still log an inbound_emails row keyed by messageId
+        //    so the next poll dedupes and we don't get a second
+        //    orphan ticket. The half-created ticket (if any) is
+        //    left in place for an operator to inspect rather
+        //    than silently rolled back, because we want the
+        //    audit trail.
+        try {
+            var contact = contactsService.getContactByEmail( sender );
+            var ticket  = "";
+            if ( !isNull( contact ) ) {
+                ticket = ticketsService.createTicket( {
+                    requesterContactId : contact.getId(),
+                    subject            : subject,
+                    originatingEmail   : sender,
+                    source             : "email",
+                    actorType          : "system"
+                } );
+            } else {
+                ticket = ticketsService.createAccountlessTicket( {
+                    originatingEmail : sender,
+                    subject          : subject,
+                    source           : "email",
+                    actorType        : "system"
+                } );
+            }
+            var msg = ticketsService.addMessage( {
+                ticketId        : ticket.getId(),
+                body            : arguments.message.body ?: "",
+                authorContactId : isNull( contact ) ? "" : contact.getId(),
+                authorEmail     : sender,
+                isInternal      : false,
+                messageId       : messageId
             } );
-        } else {
-            ticket = ticketsService.createAccountlessTicket( {
-                originatingEmail : sender,
-                subject          : subject,
-                source           : "email",
-                actorType        : "system"
-            } );
+            attachInboundFiles(
+                ticket,
+                msg,
+                arguments.message.attachments ?: [],
+                isNull( contact ) ? "" : contact.getId(),
+                sender
+            );
+            return logInbound(
+                sender       : sender,
+                subject      : subject,
+                messageId    : messageId,
+                inReplyTo    : inReplyTo,
+                references   : refs,
+                outcome      : "ticket_created",
+                ticketId     : ticket.getId(),
+                notes        : "",
+                priorRowId   : priorRowId,
+                retryAttempt : retryAttempt
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "InboundEmailProcessor new-ticket failed for [#messageId#] from [#sender#] (attempt #( retryAttempt + 1 )#): " & e.message,
+                log  : "tesserabx",
+                type : "error"
+            );
+            return logInbound(
+                sender       : sender,
+                subject      : subject,
+                messageId    : messageId,
+                inReplyTo    : inReplyTo,
+                references   : refs,
+                outcome      : "error",
+                ticketId     : isObject( ticket ?: "" ) ? ticket.getId() : "",
+                notes        : "New-ticket flow failed: " & e.message,
+                priorRowId   : priorRowId,
+                retryAttempt : retryAttempt
+            );
         }
-        var msg = ticketsService.addMessage( {
-            ticketId        : ticket.getId(),
-            body            : arguments.message.body ?: "",
-            authorContactId : isNull( contact ) ? "" : contact.getId(),
-            authorEmail     : sender,
-            isInternal      : false,
-            messageId       : messageId
-        } );
-        attachInboundFiles(
-            ticket,
-            msg,
-            arguments.message.attachments ?: [],
-            isNull( contact ) ? "" : contact.getId(),
-            sender
-        );
-        return logInbound(
-            sender, subject, messageId, inReplyTo, refs,
-            "ticket_created",
-            ticket.getId(),
-            ""
-        );
     }
 
     /**
@@ -385,15 +500,29 @@ class singleton=true {
     }
 
     private any function logInbound(
-        required string sender,
-        required string subject,
-        required string messageId,
-        required string inReplyTo,
-        required string references,
-        required string outcome,
-        required string ticketId,
-        required string notes
+        required string  sender,
+        required string  subject,
+        required string  messageId,
+        required string  inReplyTo,
+        required string  references,
+        required string  outcome,
+        required string  ticketId,
+        required string  notes,
+        string           priorRowId   = "",
+        numeric          retryAttempt = 0
     ){
+        if ( len( arguments.priorRowId ) ) {
+            // Retry of a previously-errored row: UPDATE in place so
+            // the audit trail keeps a single row per inbound message
+            // and retry_count is monotonic.
+            return channelsService.updateInboundEmailOutcome(
+                id         : arguments.priorRowId,
+                outcome    : arguments.outcome,
+                retryCount : arguments.retryAttempt,
+                ticketId   : arguments.ticketId,
+                notes      : arguments.notes
+            );
+        }
         return channelsService.recordInboundEmail( {
             senderEmail     : arguments.sender,
             subject         : arguments.subject,

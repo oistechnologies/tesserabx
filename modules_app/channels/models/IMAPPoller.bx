@@ -106,18 +106,60 @@ class singleton=true {
             var messages = searchUnread( folder );
             var capped   = sliceUpToMax( messages, maxPerRun );
 
+            // Force jakarta.mail to fetch the full message payload up
+            // front. Without this prefetch the IMAP body parts load
+            // lazily on the first getContent() call inside
+            // normaliseMessage, and on multipart messages with
+            // attachments that first lazy fetch has consistently come
+            // back partial: the multipart skeleton is present but the
+            // text parts read as empty / null. The downstream
+            // ticket_messages.body INSERT then violated its NOT NULL
+            // constraint, the whole new-ticket transaction aborted,
+            // and the IMAP message either stayed unread (duplicate
+            // ticket on the next poll, pre-fix) or got parked with an
+            // "error" inbound_emails row (lost body, post-fix). The
+            // FetchProfile below tells jakarta.mail to issue a single
+            // BODY[] FETCH per message before we touch getContent(),
+            // which closes the race.
+            prefetchFullMessages( folder, capped );
+
             for ( var i = 1; i <= arrayLen( capped ); i++ ) {
                 var mimeMsg = capped[ i ];
                 try {
-                    var msg = normaliseMessage( mimeMsg, attachDir );
-                    processor.process( msg );
+                    var msg           = normaliseMessage( mimeMsg, attachDir );
+                    var inboundResult = processor.process( msg );
                     result.processed++;
-                    if ( markRead ) {
+                    // Skip markRead when the processor recorded a
+                    // retryable failure (outcome=error with retry
+                    // budget remaining). Leaving the IMAP message
+                    // unread is how we make the next poll pick it
+                    // up again and re-attempt processing; the
+                    // dedup check in process() finds the prior
+                    // inbound_emails row, sees retry_count is
+                    // under the cap, and UPDATEs in place instead
+                    // of duplicating. Terminal outcomes (success
+                    // or error after max retries) all mark the
+                    // message as read so a stuck message cannot
+                    // loop forever.
+                    if ( markRead && !isRetryableFailure( inboundResult ) ) {
                         markMessageRead( mimeMsg );
                     }
                 } catch ( any e ) {
+                    var exceptionType = e.type ?: "unknown";
+                    var causeText = "";
+                    try {
+                        if ( !isNull( e.cause ) ) causeText = e.cause.toString();
+                    } catch ( any ignored ) {}
+                    var stackHead = "";
+                    try {
+                        var st = e.tagContext ?: [];
+                        if ( isArray( st ) && arrayLen( st ) ) {
+                            stackHead = ( st[ 1 ].template ?: "" ) & ":" & ( st[ 1 ].line ?: "" );
+                        }
+                    } catch ( any ignored ) {}
                     writeLog(
-                        text : "InboundEmailProcessor failed: " & e.message,
+                        text : "InboundEmailProcessor failed: type=[" & exceptionType & "] msg=[" & ( e.message ?: "" )
+                             & "] cause=[" & causeText & "] at [" & stackHead & "]",
                         log  : "tesserabx-scheduler",
                         type : "error"
                     );
@@ -195,6 +237,72 @@ class singleton=true {
         return out;
     }
 
+    /**
+     * Force jakarta.mail to issue an IMAP FETCH for the full message
+     * body of every message we're about to process. Without this the
+     * IMAP store loads body parts on demand the first time the
+     * caller asks for content, and that lazy fetch has been
+     * observed to come back partial on multipart messages with
+     * attachments. With the prefetch in place, normaliseMessage
+     * reads from in-memory state and getContent() never re-issues
+     * a FETCH.
+     *
+     * Failure is non-fatal: if the FETCH errors we fall through to
+     * the per-message getContent() path that was working before
+     * this fix, and the per-message try/catch in IMAPPoller.poll
+     * still catches whatever blows up.
+     */
+    private void function prefetchFullMessages( required any folder, required array messages ){
+        if ( !arrayLen( arguments.messages ) ) return;
+        try {
+            var fp = createObject( "java", "jakarta.mail.FetchProfile" ).init();
+            var item = createObject( "java", "jakarta.mail.FetchProfile$Item" );
+            fp.add( item.ENVELOPE );
+            fp.add( item.CONTENT_INFO );
+            fp.add( item.FLAGS );
+            var bodyPrefetched = false;
+            // IMAPFolder.FetchProfileItem.MESSAGE is the
+            // BODY[] / full-payload pre-fetch hint. Pulling it via
+            // its concrete inner-class name because the public
+            // FetchProfile$Item enum does not expose it.
+            try {
+                var imapItem = createObject( "java", "com.sun.mail.imap.IMAPFolder$FetchProfileItem" );
+                fp.add( imapItem.MESSAGE );
+                bodyPrefetched = true;
+            } catch ( any inner ) {
+                try {
+                    var imapItem2 = createObject( "java", "org.eclipse.angus.mail.imap.IMAPFolder$FetchProfileItem" );
+                    fp.add( imapItem2.MESSAGE );
+                    bodyPrefetched = true;
+                } catch ( any inner2 ) {
+                    // Neither class is on the classpath in this
+                    // BoxLang build. ENVELOPE + CONTENT_INFO still
+                    // help; we just lose the body-pre-fetch.
+                }
+            }
+            traceImap( "prefetch: bodyPrefetched=" & bodyPrefetched & ", messages=" & arrayLen( arguments.messages ) );
+
+            // jakarta.mail.Folder.fetch wants a typed Message[];
+            // BoxLang's `.toArray()` hands back Object[] which the
+            // dynamic method resolver cannot bind. Construct a
+            // properly-typed array through java.lang.reflect.Array.
+            var msgClass    = createObject( "java", "jakarta.mail.Message" ).getClass();
+            var arrayHelper = createObject( "java", "java.lang.reflect.Array" );
+            var javaArr     = arrayHelper.newInstance( msgClass, javaCast( "int", arrayLen( arguments.messages ) ) );
+            for ( var i = 1; i <= arrayLen( arguments.messages ); i++ ) {
+                arrayHelper.set( javaArr, javaCast( "int", i - 1 ), arguments.messages[ i ] );
+            }
+            arguments.folder.fetch( javaArr, fp );
+            traceImap( "prefetch: fetch() call returned without exception" );
+        } catch ( any e ) {
+            writeLog(
+                text : "IMAP prefetch failed (continuing with lazy fetch): " & e.message,
+                log  : "tesserabx-scheduler",
+                type : "warning"
+            );
+        }
+    }
+
     private array function sliceUpToMax( required array messages, required numeric maxCount ){
         if ( arrayLen( arguments.messages ) <= arguments.maxCount ) return arguments.messages;
         var out = [];
@@ -202,6 +310,25 @@ class singleton=true {
             out.append( arguments.messages[ i ] );
         }
         return out;
+    }
+
+    /**
+     * True when the InboundEmail row the processor returned signals
+     * a transient failure that's still under the retry cap. Used by
+     * the poll loop to leave the IMAP message unread so the next
+     * poll re-attempts.
+     */
+    private boolean function isRetryableFailure( required any inboundResult ){
+        if ( isNull( arguments.inboundResult ) ) return false;
+        try {
+            var outcome = arguments.inboundResult.getOutcome() ?: "";
+            if ( outcome != "error" ) return false;
+            var retries = val( arguments.inboundResult.getRetryCount() ?: 0 );
+            var max     = int( getSystemSetting( "INBOUND_EMAIL_MAX_RETRIES", "3" ) );
+            return retries < max;
+        } catch ( any e ) {
+            return false;
+        }
     }
 
     private void function markMessageRead( required any mimeMsg ){
@@ -280,35 +407,222 @@ class singleton=true {
      */
     private string function extractBody( required any mimeMsg ){
         try {
-            var content = arguments.mimeMsg.getContent();
-            if ( isSimpleValue( content ) ) return toString( content );
-            return walkForBody( content );
+            var content = resolveMessageContent( arguments.mimeMsg );
+            traceImap( "extractBody: contentClass=" & ( isNull( content ) ? "null" : content.getClass().getName() )
+                & ", isSimpleValue=" & isSimpleValue( content ?: "" ) );
+            if ( isSimpleValue( content ) ) {
+                var simpleBody = toString( content );
+                traceImap( "extractBody: simple, len=" & len( simpleBody ) );
+                return simpleBody;
+            }
+            var walked = walkForBody( content );
+            traceImap( "extractBody: walked, len=" & len( walked ) );
+            return walked;
+        } catch ( any e ) {
+            traceImap( "extractBody EXCEPTION: " & e.message );
+            return "";
+        }
+    }
+
+    /**
+     * Resolve a MimeMessage's payload to a usable object: a String
+     * for single-part text messages, or a MimeMultipart for the
+     * multipart/* family. The bx-mail / jakarta.mail combination on
+     * BoxLang has been observed returning a raw
+     * jakarta.mail.util.SharedByteArrayInputStream from
+     * MimeMessage.getContent() on multipart messages instead of a
+     * parsed MimeMultipart, because the DataContentHandler for
+     * `multipart/*` is not registered through the bundled
+     * mailcap. The fallback below reads the stream into a
+     * ByteArrayDataSource and constructs a MimeMultipart directly,
+     * which bypasses the handler lookup and gives every downstream
+     * walker the same shape it would have had if the handler had
+     * worked the first time.
+     */
+    private any function resolveMessageContent( required any mimeMsg ){
+        var content = arguments.mimeMsg.getContent();
+        if ( isNull( content ) ) return "";
+        // Type detection is done by Java instanceof rather than
+        // BoxLang's isSimpleValue() because the latter has been
+        // observed returning TRUE for jakarta.mail.util.SharedByte
+        // ArrayInputStream inside this function and FALSE for the
+        // same object in the caller, short-circuiting the
+        // synthesis path. instanceof is unambiguous: Multipart ->
+        // pass through, InputStream -> synthesize, anything else
+        // (typically a String for single-part text) -> pass
+        // through.
+        if ( isInstanceOf( content, "jakarta.mail.Multipart" ) ) return content;
+        if ( !isInstanceOf( content, "java.io.InputStream" ) ) return content;
+
+        // It is an InputStream. The multipart/* DataContentHandler
+        // is not registered in this BoxLang/bx-mail build, so
+        // synthesize a MimeMultipart from the raw stream + the
+        // message's Content-Type header.
+        try {
+            var ctype = arguments.mimeMsg.getContentType() ?: "";
+            if ( !len( ctype ) || !findNoCase( "multipart", ctype ) ) {
+                return drainStreamAsText( content, "UTF-8" );
+            }
+            var bytes = drainStreamToBytes( content );
+            var dataSource = createObject(
+                "java",
+                "jakarta.mail.util.ByteArrayDataSource"
+            ).init( bytes, ctype );
+            var multipart = createObject(
+                "java",
+                "jakarta.mail.internet.MimeMultipart"
+            ).init( dataSource );
+            traceImap( "resolveMessageContent: synthesized MimeMultipart from " & arrayLen( bytes ) & " bytes (ct=" & ctype & ")" );
+            return multipart;
+        } catch ( any e ) {
+            traceImap( "resolveMessageContent: fallback failed " & e.message );
+            return "";
+        }
+    }
+
+    /**
+     * Same multipart-handler workaround as resolveMessageContent
+     * but for an individual BodyPart in a nested multipart tree
+     * (e.g. the multipart/alternative inside a multipart/mixed
+     * envelope). Returns a Multipart when the part is multipart,
+     * a String when it's text, or whatever getContent() handed
+     * back when neither workaround applies.
+     */
+    private any function resolvePartContent( required any part ){
+        var content = arguments.part.getContent();
+        if ( isNull( content ) ) return "";
+        if ( isInstanceOf( content, "jakarta.mail.Multipart" ) ) return content;
+        if ( !isInstanceOf( content, "java.io.InputStream" ) ) return content;
+        try {
+            var ctype = arguments.part.getContentType() ?: "";
+            if ( !len( ctype ) || !findNoCase( "multipart", ctype ) ) {
+                return drainStreamAsText( content, "UTF-8" );
+            }
+            var bytes = drainStreamToBytes( content );
+            var dataSource = createObject(
+                "java",
+                "jakarta.mail.util.ByteArrayDataSource"
+            ).init( bytes, ctype );
+            var multipart = createObject(
+                "java",
+                "jakarta.mail.internet.MimeMultipart"
+            ).init( dataSource );
+            traceImap( "resolvePartContent: synthesized MimeMultipart for nested part (ct=" & ctype & ")" );
+            return multipart;
+        } catch ( any e ) {
+            traceImap( "resolvePartContent: fallback failed " & e.message );
+            return "";
+        }
+    }
+
+    private string function drainStreamAsText( required any inputStream, required string charsetName ){
+        try {
+            var buf = createObject( "java", "java.io.ByteArrayOutputStream" ).init();
+            arguments.inputStream.transferTo( buf );
+            try { arguments.inputStream.close(); } catch ( any ignored ) {}
+            var bytes = buf.toByteArray();
+            return toString( createObject( "java", "java.lang.String" ).init( bytes, arguments.charsetName ) );
         } catch ( any e ) {
             return "";
         }
     }
 
+    private any function drainStreamToBytes( required any inputStream ){
+        var buf = createObject( "java", "java.io.ByteArrayOutputStream" ).init();
+        arguments.inputStream.transferTo( buf );
+        try { arguments.inputStream.close(); } catch ( any ignored ) {}
+        return buf.toByteArray();
+    }
+
+    /**
+     * Diagnostic-only writeLog gated by IMAP_TRACE=true. Helps
+     * pin down which leg of the multipart walk is going silent on
+     * a problem message without spamming the production log with
+     * per-part chatter.
+     */
+    private void function traceImap( required string text ){
+        if ( lCase( getSystemSetting( "IMAP_TRACE", "false" ) ) != "true" ) return;
+        writeLog( text : "IMAP-TRACE: " & arguments.text, log : "tesserabx-scheduler" );
+    }
+
     private string function walkForBody( required any content ){
         if ( isSimpleValue( arguments.content ) ) return toString( arguments.content );
-        if ( !isInstanceOf( arguments.content, "jakarta.mail.Multipart" ) ) return "";
+        if ( !isInstanceOf( arguments.content, "jakarta.mail.Multipart" ) ) {
+            traceImap( "walkForBody: not Multipart, returning empty. class=" & arguments.content.getClass().getName() );
+            return "";
+        }
 
         var plain = "";
         var html  = "";
         var count = arguments.content.getCount();
+        traceImap( "walkForBody: Multipart count=" & count );
         for ( var i = 0; i < count; i++ ) {
             var part = arguments.content.getBodyPart( javaCast( "int", i ) );
             try {
+                var partCT = part.getContentType() ?: "";
+                var partSize = -1;
+                try { partSize = part.getSize(); } catch ( any ignored2 ) {}
+                traceImap( "walkForBody[" & i & "]: contentType=" & partCT & ", size=" & partSize );
                 if ( part.isMimeType( "text/plain" ) && !len( plain ) ) {
-                    plain = toString( part.getContent() );
+                    plain = readPartText( part );
+                    traceImap( "walkForBody[" & i & "]: text/plain captured, len=" & len( plain ) );
                 } else if ( part.isMimeType( "text/html" ) && !len( html ) ) {
-                    html = toString( part.getContent() );
+                    html = readPartText( part );
+                    traceImap( "walkForBody[" & i & "]: text/html captured, len=" & len( html ) );
                 } else if ( part.isMimeType( "multipart/*" ) ) {
-                    var nested = walkForBody( part.getContent() );
+                    var nested = walkForBody( resolvePartContent( part ) );
                     if ( !len( plain ) ) plain = nested;
                 }
-            } catch ( any ignored ) {}
+            } catch ( any e ) {
+                traceImap( "walkForBody[" & i & "] EXCEPTION: " & e.message );
+            }
         }
         return len( plain ) ? plain : html;
+    }
+
+    /**
+     * Robust text-part read. Prefers part.getContent() (jakarta.mail
+     * handles the Content-Transfer-Encoding decode); falls back to
+     * draining the part's InputStream when getContent comes back
+     * with a non-string type (Stream, byte[]) or an empty string.
+     * The IMAP path has been observed returning empty getContent()
+     * for parts that DO have non-zero size, and the manual stream
+     * read recovers the body in that case.
+     */
+    private string function readPartText( required any part ){
+        try {
+            var content = arguments.part.getContent();
+            if ( isSimpleValue( content ) ) {
+                var s = toString( content );
+                if ( len( s ) ) return s;
+                traceImap( "readPartText: getContent returned empty string; falling back to stream" );
+            } else {
+                traceImap( "readPartText: getContent returned non-string class=" & content.getClass().getName() & "; falling back to stream" );
+            }
+        } catch ( any e ) {
+            traceImap( "readPartText: getContent threw " & e.message & "; falling back to stream" );
+        }
+        try {
+            var inputStream = arguments.part.getInputStream();
+            var charsetName = "UTF-8";
+            try {
+                var ctype = arguments.part.getContentType() ?: "";
+                var match = reMatchNoCase( "charset=([^;\s]+)", ctype );
+                if ( arrayLen( match ) ) {
+                    charsetName = reReplace( reReplace( match[ 1 ], "^charset=", "" ), "[""']", "", "all" );
+                }
+            } catch ( any ignored ) {}
+            var streamUtil = createObject( "java", "java.io.ByteArrayOutputStream" ).init();
+            inputStream.transferTo( streamUtil );
+            try { inputStream.close(); } catch ( any ignored ) {}
+            var bytes = streamUtil.toByteArray();
+            var decoded = createObject( "java", "java.lang.String" ).init( bytes, charsetName );
+            traceImap( "readPartText: stream read len=" & len( decoded ) & " charset=" & charsetName );
+            return toString( decoded );
+        } catch ( any e ) {
+            traceImap( "readPartText: stream fallback failed " & e.message );
+            return "";
+        }
     }
 
     /**
@@ -319,10 +633,20 @@ class singleton=true {
     private array function extractAttachments( required any mimeMsg, required string attachDir ){
         var out = [];
         try {
-            var content = arguments.mimeMsg.getContent();
-            if ( !isInstanceOf( content, "jakarta.mail.Multipart" ) ) return out;
+            // Use the same synthesize-from-stream fallback as
+            // extractBody so attachment walking sees a real
+            // MimeMultipart regardless of whether the multipart/*
+            // content handler is registered.
+            var content = resolveMessageContent( arguments.mimeMsg );
+            if ( !isInstanceOf( content, "jakarta.mail.Multipart" ) ) {
+                traceImap( "extractAttachments: content not Multipart, class=" & ( isNull( content ) ? "null" : content.getClass().getName() ) );
+                return out;
+            }
             walkForAttachments( content, arguments.attachDir, out );
-        } catch ( any ignored ) {}
+            traceImap( "extractAttachments: collected " & arrayLen( out ) & " attachment(s)" );
+        } catch ( any e ) {
+            traceImap( "extractAttachments EXCEPTION: " & e.message );
+        }
         return out;
     }
 
@@ -333,10 +657,17 @@ class singleton=true {
             var part = arguments.content.getBodyPart( javaCast( "int", i ) );
             try {
                 var disposition = part.getDisposition() ?: "";
-                var filename    = part.getFileName() ?: "";
+                // RFC 2047-encoded filenames ("=?UTF-8?B?...?=") come
+                // back from getFileName() in their wire form on some
+                // mailers (Gmail being the loud example). Decoding
+                // before any downstream extension / size validation
+                // means the .png at the end of "Screenshot ...PNG"
+                // is actually visible to the type-allowlist guard
+                // rather than buried inside a base64 blob.
+                var filename    = decodeMimeFilename( part.getFileName() ?: "" );
 
                 if ( part.isMimeType( "multipart/*" ) ) {
-                    walkForAttachments( part.getContent(), arguments.attachDir, arguments.out );
+                    walkForAttachments( resolvePartContent( part ), arguments.attachDir, arguments.out );
                     continue;
                 }
 
@@ -385,6 +716,27 @@ class singleton=true {
     private string function sanitiseFilename( required string filename ){
         if ( !len( arguments.filename ) ) return "attachment.bin";
         return reReplace( arguments.filename, "[^A-Za-z0-9._-]", "_", "all" );
+    }
+
+    /**
+     * Decode an RFC 2047-encoded mail header value back to its raw
+     * unicode form. jakarta.mail.internet.MimeUtility.decodeText
+     * handles both quoted-printable ("=?UTF-8?Q?...?=") and base64
+     * ("=?UTF-8?B?...?=") word forms, plus the contiguous-word
+     * concatenation rules. Plain ASCII filenames pass through
+     * unchanged. Returns the original string on any decode error
+     * because the downstream sanitise / validation pass tolerates
+     * gibberish better than a thrown exception.
+     */
+    private string function decodeMimeFilename( required string raw ){
+        if ( !len( arguments.raw ) ) return "";
+        if ( !find( "=?", arguments.raw ) ) return arguments.raw;
+        try {
+            return createObject( "java", "jakarta.mail.internet.MimeUtility" )
+                .decodeText( arguments.raw );
+        } catch ( any e ) {
+            return arguments.raw;
+        }
     }
 
     /**

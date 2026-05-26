@@ -50,6 +50,21 @@ class singleton=true {
     }
 
     /**
+     * Effective email-chrome style for an organization. Accountless
+     * tickets (no orgId) and orgs that have not opted out get the
+     * full "notification" chrome. An org row whose email_chrome
+     * column is set to "reply" gets the thin person-to-person
+     * chrome instead.
+     */
+    public string function resolveEmailChrome( string organizationId = "" ){
+        if ( !len( arguments.organizationId ) ) return "notification";
+        var override = lookupOverride( arguments.organizationId );
+        if ( isNull( override ) ) return "notification";
+        var stored = trim( override.email_chrome ?: "" );
+        return stored == "reply" ? "reply" : "notification";
+    }
+
+    /**
      * Read the per-org override row (raw, unmerged). Returns null
      * when no row exists. Public for the admin CRUD page.
      */
@@ -68,13 +83,19 @@ class singleton=true {
         string actorAgentId = ""
     ){
         var existing = lookupOverride( arguments.organizationId );
+        // email_chrome stores the per-org opt-out from the default
+        // full ("notification") chrome. Only "reply" is meaningful;
+        // any other value collapses to NULL so the org tracks the
+        // default automatically if it changes.
+        var chromeIn = trim( arguments.values.emailChrome ?: "" );
         var record = {
             organization_id     : arguments.organizationId,
-            product_name        : nullableString( arguments.values.productName    ?: "" ),
-            tagline             : nullableString( arguments.values.tagline        ?: "" ),
-            logo_url            : nullableString( arguments.values.logoUrl        ?: "" ),
-            primary_color       : nullableString( arguments.values.primaryColor   ?: "" ),
-            footer_text         : nullableString( arguments.values.footerText     ?: "" ),
+            product_name        : nullableString( decodeBrandText( arguments.values.productName ?: "" ) ),
+            tagline             : nullableString( decodeBrandText( arguments.values.tagline     ?: "" ) ),
+            logo_url            : nullableString( arguments.values.logoUrl                       ?: "" ),
+            primary_color       : nullableString( arguments.values.primaryColor                  ?: "" ),
+            footer_text         : nullableString( decodeBrandText( arguments.values.footerText  ?: "" ) ),
+            email_chrome        : chromeIn == "reply" ? "reply" : javaCast( "null", "" ),
             updated_by_agent_id : len( arguments.actorAgentId )
                                   ? arguments.actorAgentId
                                   : javaCast( "null", "" )
@@ -83,9 +104,9 @@ class singleton=true {
         if ( isNull( existing ) ) {
             queryExecute(
                 "INSERT INTO organization_branding
-                    ( organization_id, product_name, tagline, logo_url, primary_color, footer_text, updated_by_agent_id )
+                    ( organization_id, product_name, tagline, logo_url, primary_color, footer_text, email_chrome, updated_by_agent_id )
                  VALUES
-                    ( :organization_id, :product_name, :tagline, :logo_url, :primary_color, :footer_text, :updated_by_agent_id )",
+                    ( :organization_id, :product_name, :tagline, :logo_url, :primary_color, :footer_text, :email_chrome, :updated_by_agent_id )",
                 record
             );
         } else {
@@ -96,6 +117,7 @@ class singleton=true {
                         logo_url            = :logo_url,
                         primary_color       = :primary_color,
                         footer_text         = :footer_text,
+                        email_chrome        = :email_chrome,
                         updated_at          = CURRENT_TIMESTAMP,
                         updated_by_agent_id = :updated_by_agent_id
                   WHERE organization_id = :organization_id",
@@ -158,7 +180,7 @@ class singleton=true {
 
     private any function readRow( required string organizationId ){
         var rows = queryExecute(
-            "SELECT organization_id, product_name, tagline, logo_url, primary_color, footer_text
+            "SELECT organization_id, product_name, tagline, logo_url, primary_color, footer_text, email_chrome
                FROM organization_branding
               WHERE organization_id = :id",
             { id : arguments.organizationId },
@@ -171,12 +193,32 @@ class singleton=true {
     private struct function mergeOverrides( required struct global, required struct override ){
         var merged = duplicate( arguments.global );
         // Column-by-column merge: per-org non-blank value wins.
-        if ( len( arguments.override.product_name  ?: "" ) ) merged.productName  = arguments.override.product_name;
-        if ( len( arguments.override.tagline       ?: "" ) ) merged.tagline      = arguments.override.tagline;
+        // Text fields are decoded so cbantisamy-encoded entities
+        // ("&amp;", "&quot;", ...) reach the layout as the raw
+        // characters they represent; the layout's encodeForHTML
+        // pass then produces the right markup. Without the decode,
+        // a stored "Acme &amp; Co" would render as the literal
+        // "Acme &amp; Co" in the email body.
+        if ( len( arguments.override.product_name  ?: "" ) ) merged.productName  = decodeBrandText( arguments.override.product_name );
+        if ( len( arguments.override.tagline       ?: "" ) ) merged.tagline      = decodeBrandText( arguments.override.tagline );
         if ( len( arguments.override.logo_url      ?: "" ) ) merged.logoUrl      = arguments.override.logo_url;
         if ( len( arguments.override.primary_color ?: "" ) ) merged.primaryColor = arguments.override.primary_color;
-        if ( len( arguments.override.footer_text   ?: "" ) ) merged.footerText   = arguments.override.footer_text;
+        if ( len( arguments.override.footer_text   ?: "" ) ) merged.footerText   = decodeBrandText( arguments.override.footer_text );
         return merged;
+    }
+
+    /**
+     * Reverse the common cbantisamy form-interceptor encodings so
+     * the value returned to callers is the plain text the admin
+     * typed. Restricted to the entity set cbantisamy emits;
+     * arbitrary numeric entities are left alone.
+     */
+    private string function decodeBrandText( required string value ){
+        return replaceList(
+            arguments.value,
+            "&amp;,&quot;,&##39;,&apos;,&lt;,&gt;,&nbsp;",
+            "&,"",',',<,>, "
+        );
     }
 
     /**

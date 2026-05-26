@@ -29,10 +29,19 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 var byChannel = { inapp : 0, email : 0, slack : 0 };
                 for ( var entry in variables.tmplReg.listAll() ) {
                     if ( entry.source != "core" ) continue;
-                    if ( structKeyExists( byChannel, entry.channel ) ) byChannel[ entry.channel ] &= 1;
+                    if ( structKeyExists( byChannel, entry.channel ) ) byChannel[ entry.channel ] += 1;
                 }
+                // inapp: every (event, recipientType) tuple ships
+                //        so the bell dropdown lights up everywhere.
+                // email: agent gets all three events; contact only
+                //        ticket.status_changed. ticket.created and
+                //        ticket.message_added for contact are
+                //        intentionally absent because the channel
+                //        adapter (OutboundEmailService) ships those
+                //        on the conversation thread.
+                // slack: agent-only across the three events.
                 expect( byChannel.inapp ).toBeGTE( 6 );  // 3 events x 2 recipient types
-                expect( byChannel.email ).toBeGTE( 6 );
+                expect( byChannel.email ).toBeGTE( 4 );  // 3 agent + 1 contact (status_changed)
                 expect( byChannel.slack ).toBeGTE( 3 );  // 3 events, agents only
             } );
 
@@ -47,13 +56,17 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
             it( "listForEvent returns every (channel, recipientType) for one event", function(){
                 var entries = variables.tmplReg.listForEvent( "ticket.created" );
-                expect( entries.len() ).toBeGTE( 5 );  // inapp x2 + email x2 + slack x1
+                // 4 seeded tuples: inapp x 2, email|agent, slack|agent.
+                // email|contact is intentionally absent because the
+                // channel adapter delivers ticket.created mail to the
+                // requester on the conversation thread.
+                expect( entries.len() ).toBeGTE( 4 );
                 var pairs = {};
                 for ( var e in entries ) pairs[ e.channel & "|" & e.recipientType ] = true;
                 expect( pairs ).toHaveKey( "inapp|agent" );
                 expect( pairs ).toHaveKey( "inapp|contact" );
                 expect( pairs ).toHaveKey( "email|agent" );
-                expect( pairs ).toHaveKey( "email|contact" );
+                expect( pairs ).notToHaveKey( "email|contact" );
                 expect( pairs ).toHaveKey( "slack|agent" );
             } );
 

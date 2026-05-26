@@ -509,8 +509,19 @@ class singleton=true {
         var m = wirebox.getInstance( "TicketMessage@tickets" );
         m.setId( newId() );
         m.setTicketId( t.getId() );
-        m.setBody( arguments.data.body ?: "" );
+        // Belt-and-braces null guard. The DB has a NOT NULL
+        // constraint on body and a transient mail-jar getContent()
+        // result (BoxLang can hand back a Java-null on a lazy
+        // multipart fetch hiccup) used to slip past the ?: coalesce
+        // and fail the INSERT, which then orphaned the parent
+        // ticket and tripped the IMAP poll into a 60-second
+        // duplicate-create loop. Coercing here ensures the INSERT
+        // always has at least the empty string.
+        var rawBody = arguments.data.body ?: "";
+        if ( isNull( rawBody ) || !isSimpleValue( rawBody ) ) rawBody = "";
+        m.setBody( toString( rawBody ) );
         m.setIsInternal( arguments.data.isInternal ?: false );
+        m.setIsSystemMessage( arguments.data.isSystemMessage ?: false );
         if ( len( arguments.data.authorAgentId ?: "" ) ) m.setAuthorAgentId( arguments.data.authorAgentId );
         if ( len( arguments.data.authorContactId ?: "" ) ) m.setAuthorContactId( arguments.data.authorContactId );
         if ( len( arguments.data.authorEmail ?: "" ) ) m.setAuthorEmail( arguments.data.authorEmail );

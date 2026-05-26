@@ -49,7 +49,7 @@ class singleton=true {
         var subject = "[##" & arguments.ticket.getTicketNumber() & "] " & arguments.ticket.getSubject();
         var body    = autoAckBody( arguments.ticket );
 
-        sendThreaded(
+        var sendResult = sendThreaded(
             recipient      : recipient,
             subject        : subject,
             body           : body,
@@ -57,6 +57,20 @@ class singleton=true {
             organizationId : arguments.ticket.getOrganizationId() ?: "",
             eventKey       : "tickets.auto_ack"
         );
+        // If the underlying cbmailservices send recorded an error,
+        // do NOT persist a phantom ack TicketMessage. Pre-fix this
+        // path silently added a "Thanks for getting in touch" row
+        // even when jakarta.mail rejected the From header; the
+        // thread then claimed a message was sent that never left
+        // the box. Log loud enough that the operator notices.
+        if ( sendFailed( sendResult ) ) {
+            writeLog(
+                text : "OutboundEmail auto-ack [ticket #arguments.ticket.getId()#] send failed: " & sendErrorMessage( sendResult ),
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return javaCast( "null", "" );
+        }
 
         // Save the ack as a TicketMessage so the conversation thread
         // reflects what the client received, and so a later inbound
@@ -64,12 +78,20 @@ class singleton=true {
         // ticket via In-Reply-To. The unwrapped plain-text body is
         // stored here on purpose; the HTML chrome belongs only to
         // the wire (composer wraps it inside sendThreaded).
+        //
+        // isSystemMessage flags the row so the notifications
+        // interceptor skips its onTicketMessageAdded dispatch for
+        // this record. The channel adapter (this very call) is the
+        // only sender; re-emitting through the notifications
+        // fan-out would create a second email and a spurious
+        // agent "customer replied" bell.
         wirebox.getInstance( "TicketsService@tickets" ).addMessage( {
-            ticketId    : arguments.ticket.getId(),
-            body        : body,
-            authorEmail : fromAddress(),
-            isInternal  : false,
-            messageId   : stripBrackets( msgId )
+            ticketId        : arguments.ticket.getId(),
+            body            : body,
+            authorEmail     : fromAddress(),
+            isInternal      : false,
+            isSystemMessage : true,
+            messageId       : stripBrackets( msgId )
         } );
 
         return msgId;
@@ -96,7 +118,7 @@ class singleton=true {
 
         var thread = threadForTicket( arguments.ticket.getId(), arguments.message.getId() );
 
-        sendThreaded(
+        var sendResult = sendThreaded(
             recipient      : recipient,
             subject         : subject,
             body            : arguments.message.getBody(),
@@ -106,6 +128,21 @@ class singleton=true {
             organizationId  : arguments.ticket.getOrganizationId() ?: "",
             eventKey        : "tickets.agent_reply"
         );
+        // Don't stamp the Message-ID on the agent's TicketMessage
+        // unless the send actually shipped. The message itself
+        // exists either way (the agent typed and saved it), but
+        // a Message-ID that points at a header that never reached
+        // the requester would pollute the References chain on
+        // future replies and make threading look broken in the
+        // recipient's mail client when a later send succeeds.
+        if ( sendFailed( sendResult ) ) {
+            writeLog(
+                text : "OutboundEmail agent reply [ticket #arguments.ticket.getId()# message #arguments.message.getId()#] send failed: " & sendErrorMessage( sendResult ),
+                log  : "tesserabx",
+                type : "warning"
+            );
+            return javaCast( "null", "" );
+        }
 
         // Persist our Message-ID on the just-saved TicketMessage so a
         // later inbound's In-Reply-To header can match against it.
@@ -181,7 +218,7 @@ class singleton=true {
         };
     }
 
-    private void function sendThreaded(
+    private any function sendThreaded(
         required string recipient,
         required string subject,
         required string body,
@@ -203,11 +240,10 @@ class singleton=true {
             threadHeaders[ "References" ] = arguments.references;
         }
 
-        // Style is derived from the composer: orgs with a branding
-        // override get the thin person-to-person "reply" chrome so
-        // the message threads naturally in Gmail / Apple Mail /
-        // Outlook; accountless tickets and orgs with no branding
-        // setup get the full "notification" chrome.
+        // Style is derived from the composer: orgs that have opted
+        // into the compact reply chrome via their branding row get
+        // the thin person-to-person variant; everyone else
+        // (including accountless tickets) gets the full chrome.
         var mail = mailComposer.compose(
             to             = arguments.recipient,
             from           = fromAddress(),
@@ -220,7 +256,48 @@ class singleton=true {
             eventKey       = arguments.eventKey,
             headers        = threadHeaders
         );
-        mailComposer.send( mail );
+        // Return the post-send Mail so callers can inspect
+        // mail.getResults() before they persist any follow-up
+        // state (auto-ack TicketMessage, agent reply Message-ID).
+        // cbmailservices catches SMTP / address-parse exceptions
+        // internally and stamps mail.results.error=true instead of
+        // re-throwing, so the only way to detect a failed send is
+        // to read the results struct off the returned Mail.
+        return mailComposer.send( mail );
+    }
+
+    /**
+     * True when the Mail object returned by sendThreaded carries an
+     * error in its results struct. cbmailservices populates this
+     * on jakarta.mail address-parse failures, SMTP errors, and any
+     * unhandled exception inside the transport.
+     */
+    private boolean function sendFailed( required any sendResult ){
+        if ( isNull( arguments.sendResult ) ) return false;
+        try {
+            var r = arguments.sendResult.getResults();
+            return isStruct( r ) && ( r.error ?: false );
+        } catch ( any e ) {
+            return false;
+        }
+    }
+
+    /**
+     * Extract a one-line error message from the Mail results for
+     * the operator log. Returns an empty string when nothing
+     * useful is on the object.
+     */
+    private string function sendErrorMessage( required any sendResult ){
+        if ( isNull( arguments.sendResult ) ) return "";
+        try {
+            var r = arguments.sendResult.getResults();
+            if ( !isStruct( r ) ) return "";
+            var msgs = r.messages ?: [];
+            if ( isArray( msgs ) && arrayLen( msgs ) ) return toString( msgs[ 1 ] );
+            return "";
+        } catch ( any e ) {
+            return "";
+        }
     }
 
     private string function bracketed( required string value ){

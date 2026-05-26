@@ -310,7 +310,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     from    : "support@example.com"
                 );
                 var cfg = mail.getConfig();
-                expect( cfg.from ).toBe( "Acme Support <support@example.com>" );
+                expect( cfg.from ).toBe( """Acme Support"" <support@example.com>" );
             } );
 
             it( "falls back to brand.product_name as the friendly sender label when email.from_name is blank", function(){
@@ -321,7 +321,45 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                     body    : "<p>x</p>",
                     from    : "support@example.com"
                 );
-                expect( mail.getConfig().from ).toBe( "Acme Helpdesk <support@example.com>" );
+                expect( mail.getConfig().from ).toBe( """Acme Helpdesk"" <support@example.com>" );
+            } );
+
+            it( "decodes cbantisamy-encoded entities in the From display name so jakarta.mail accepts the address", function(){
+                // Regression: the admin branding form posts every text
+                // field through cbantisamy, which encodes & -> &amp;
+                // and " -> &quot;. A product name stored as
+                // "Acme Help Desk &amp; Support" used to land in the
+                // From header verbatim, and jakarta.mail rejected it
+                // with "Illegal semicolon, not in group" at the `;`
+                // that closes &amp;, silently swallowing the entire
+                // send. The composer now decodes the entities and
+                // quotes the result so the recipient sees the
+                // intended text and the address parses.
+                variables.settings.set( "email.from_name", "Acme Help Desk &amp; Support" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    from    : "support@example.com"
+                );
+                expect( mail.getConfig().from )
+                    .toBe( """Acme Help Desk & Support"" <support@example.com>" );
+            } );
+
+            it( "quotes display names that contain RFC 5322 special characters", function(){
+                // Comma, semicolon, parentheses, and angle brackets
+                // are all "specials" per RFC 5322 and must live
+                // inside a quoted-string. The blanket quoting in
+                // resolveFromAddress covers them all in one move.
+                variables.settings.set( "email.from_name", "Smith, Jones (Support)" );
+                var mail = variables.composer.compose(
+                    to      : "user@example.com",
+                    subject : "Test",
+                    body    : "<p>x</p>",
+                    from    : "support@example.com"
+                );
+                expect( mail.getConfig().from )
+                    .toBe( """Smith, Jones (Support)"" <support@example.com>" );
             } );
 
             it( "applies email.reply_to when no explicit replyTo is supplied", function(){

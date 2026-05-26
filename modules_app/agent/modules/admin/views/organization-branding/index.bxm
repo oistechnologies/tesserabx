@@ -66,6 +66,19 @@
                     <div class="form-text">Global value: <code>#encodeForHTML( prc.globalBrand.footerText )#</code></div>
                 </div>
 
+                <div class="mb-3">
+                    <label class="form-label d-block">Email chrome</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="ob_email_chrome" name="emailChrome" value="reply"<bx:if ( prc.values.emailChrome ?: "" ) eq "reply"> checked</bx:if>>
+                        <label class="form-check-label" for="ob_email_chrome">
+                            Use the compact reply chrome for this organization
+                        </label>
+                    </div>
+                    <div class="form-text">
+                        Unchecked (default): outbound mail uses the full chrome (logo, colored header band, footer). Check this to switch this organization to the thin person-to-person reply chrome instead. Accountless tickets always use the full chrome.
+                    </div>
+                </div>
+
                 <div class="d-flex gap-2">
                     <button type="submit" class="btn btn-primary">Save override</button>
                     <bx:if prc.hasOverride>

@@ -232,24 +232,16 @@ class singleton=true {
     /**
      * Pick the right outbound chrome for a ticket-style send.
      *
-     * - No organizationId (accountless ticket) -> "notification"
-     *   (full chrome). The recipient has no relationship with a
-     *   specific tenant, so the provider-brand notification chrome
-     *   reads less like person-to-person mail and more like a
-     *   system message, which is what it is.
-     * - Organization with no email branding override on file ->
-     *   "notification" (full chrome). Without per-org branding, the
-     *   "reply" chrome is just the provider's product name on a
-     *   thin band; the full chrome is a clearer recipient experience
-     *   until the org sets up their own branding.
-     * - Organization with a branding override -> "reply" (thin
-     *   person-to-person chrome). The org has invested in their
-     *   look; the conversational chrome carries it without shouting.
+     * The full "notification" chrome (colored header band, logo,
+     * footer) is the default for every outbound. An organization
+     * that prefers the thin person-to-person "reply" chrome opts
+     * in by setting its `email_chrome` column to "reply" on the
+     * admin organization-branding page. Everyone else, including
+     * accountless tickets and orgs that simply have not opted out,
+     * gets the full chrome.
      */
     public string function resolveDefaultStyle( string organizationId = "" ){
-        if ( !len( arguments.organizationId ) ) return "notification";
-        if ( isNull( variables.branding.getOverride( arguments.organizationId ) ) ) return "notification";
-        return "reply";
+        return variables.branding.resolveEmailChrome( arguments.organizationId );
     }
 
     // --------------- private ---------------
@@ -298,6 +290,19 @@ class singleton=true {
      * so recipients see a friendly sender label instead of just
      * the no-reply address. Falls through to the bare address
      * when no friendly name resolves.
+     *
+     * The display name is HTML-decoded and wrapped in double quotes
+     * so any character is legal as an RFC 5322 quoted-string. The
+     * admin branding form routes every text field through
+     * cbantisamy, which HTML-encodes "&" to "&amp;" and `"` to
+     * "&quot;" before persistence; a stored name like
+     * "Acme Help Desk &amp; Support" would otherwise produce
+     *   Acme Help Desk &amp; Support <no-reply@...>
+     * and jakarta.mail rejects that with "Illegal semicolon, not in
+     * group" because the `;` ending `&amp;` is a special token in
+     * an unquoted phrase. Decoding restores "& " for the recipient
+     * and quoting protects every other special char (comma,
+     * semicolon, parenthesis, etc.) in one move.
      */
     private string function resolveFromAddress(
         required string explicit,
@@ -309,7 +314,32 @@ class singleton=true {
         var fromName = variables.settings.getString( "email.from_name", "" );
         if ( !len( fromName ) ) fromName = arguments.brand.productName ?: "";
         if ( !len( fromName ) ) return bare;
-        return fromName & " <" & bare & ">";
+        return quoteAddressPhrase( decodeHtmlEntities( fromName ) ) & " <" & bare & ">";
+    }
+
+    /**
+     * Reverse the common cbantisamy encodings so a stored value
+     * like "Acme Help Desk &amp; Support" reaches the recipient as
+     * "Acme Help Desk & Support". Restricted to the entity set
+     * cbantisamy emits; arbitrary numeric entities are left alone.
+     */
+    private string function decodeHtmlEntities( required string value ){
+        return replaceList(
+            arguments.value,
+            "&amp;,&quot;,&##39;,&apos;,&lt;,&gt;,&nbsp;",
+            "&,"",',',<,>, "
+        );
+    }
+
+    /**
+     * Wrap a display-name as an RFC 5322 quoted-string. Backslashes
+     * and double quotes inside the phrase are escaped per the spec
+     * so the result is safe to slot directly into a header.
+     */
+    private string function quoteAddressPhrase( required string phrase ){
+        var escaped = replace( arguments.phrase, "\", "\\", "all" );
+        escaped     = replace( escaped, """", "\""", "all" );
+        return """" & escaped & """";
     }
 
     /**

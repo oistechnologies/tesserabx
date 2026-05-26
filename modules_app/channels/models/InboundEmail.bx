@@ -29,6 +29,8 @@ class
     property name="outcome";
     property name="ticketId"          column="ticket_id";
     property name="notes";
+    property name="retryCount"        column="retry_count";
+    property name="lastAttemptedAt"   column="last_attempted_at" sqltype="timestamp";
     property name="receivedAt"        column="received_at" sqltype="timestamp";
 
     function ticket(){
