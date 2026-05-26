@@ -119,6 +119,12 @@ class {
         route( "settings/test-email" ).withVerbs( "POST" ).to( "Settings.testEmail" );
         route( "settings" ).to( "Settings.index" );
 
+        // Default status filter for the /agent/tickets list.
+        route( "ticket-defaults" ).withHandler( "TicketDefaults" ).toAction( {
+            "GET"  : "index",
+            "POST" : "save"
+        } );
+
         // Phase 4 add-on administration. The kebab-case URLs do not
         // map cleanly to the PascalCase handler names through the
         // default `:handler/:action?` route, so we declare explicit

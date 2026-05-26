@@ -1,0 +1,65 @@
+/**
+ * /agent/admin/ticket-defaults handler.
+ *
+ * Admin-configurable defaults that shape the agent-side ticket list.
+ * Currently exposes one curated key: the default status filter
+ * applied to /agent/tickets on a fresh visit when the requesting
+ * agent has no personal saved preference. Stored through the same
+ * SettingsService / app_settings backbone the branding and mail
+ * settings ride on so the admin write path stays audited.
+ */
+class {
+
+    property name="settings"        inject="SettingsService@admin";
+    property name="workflowService" inject="WorkflowService@tickets";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Ticket defaults";
+        prc.statuses  = workflowService.listStatusKeys();
+        var raw       = settings.getString( "tickets.default_filter_statuses", "" );
+        prc.selected  = listToArray( raw, "," );
+        event.setView( "ticket-defaults/index" );
+    }
+
+    function save( event, rc, prc ){
+        param rc.status = "";
+        var sel = isArray( rc.status )
+            ? rc.status
+            : listToArray( rc.status ?: "", "," );
+        // Deduplicate and drop blanks so the stored value matches
+        // what the agent UI will actually emit.
+        var seen  = {};
+        var clean = [];
+        for ( var raw in sel ) {
+            var s = trim( toString( raw ) );
+            if ( !len( s ) ) continue;
+            if ( structKeyExists( seen, s ) ) continue;
+            seen[ s ] = true;
+            clean.append( s );
+        }
+        settings.set(
+            key          : "tickets.default_filter_statuses",
+            value        : arrayToList( clean, "," ),
+            valueType    : "string",
+            actorAgentId : currentAgentId()
+        );
+        messagebox.info( "Global default status filter updated." );
+        relocate( uri = "/agent/admin/ticket-defaults" );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}

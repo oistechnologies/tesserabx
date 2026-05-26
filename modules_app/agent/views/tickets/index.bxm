@@ -1,5 +1,13 @@
 <bx:output>
-<form method="get" action="/agent/tickets" class="card mb-3">
+<bx:set local.exportQs = "" >
+<bx:loop array="#prc.statusArray#" item="s">
+    <bx:set local.exportQs &= "status=" & encodeForURL( s ) & "&" >
+</bx:loop>
+<bx:set local.exportQs &= "priority=" & encodeForURL( prc.filters.priority ?: "" )
+                       & "&organizationId=" & encodeForURL( prc.filters.organizationId ?: "" ) >
+
+<form method="get" action="/agent/tickets" class="card mb-3" id="ticketFilterForm">
+    <input type="hidden" name="statusFilterApplied" value="1">
     <div class="card-body">
         <div class="row g-3">
             <div class="col-12">
@@ -9,27 +17,36 @@
                     <input type="search" class="form-control" id="q" name="q" placeholder="Subject or originating email..." value="#encodeForHTMLAttribute( prc.filters.q ?: "" )#">
                 </div>
             </div>
-            <div class="col-12 col-md-3">
-                <label class="form-label" for="status">Status</label>
-                <select class="form-select" id="status" name="status">
-                    <option value="">All</option>
+            <div class="col-12 col-md-4">
+                <label class="form-label d-block">Status</label>
+                <div class="row row-cols-2 g-1" id="statusCheckboxes">
                     <bx:loop array="#prc.statuses#" item="s">
-                        <option value="#encodeForHTMLAttribute( s )#"<bx:if ( prc.filters.status ?: "" ) eq s> selected</bx:if>>#encodeForHTML( s )#</option>
+                        <div class="col">
+                            <div class="form-check">
+                                <input class="form-check-input status-filter-cb" type="checkbox"
+                                        name="status"
+                                        id="status_#encodeForHTMLAttribute( s )#"
+                                        value="#encodeForHTMLAttribute( s )#"
+                                        onchange="document.getElementById('ticketFilterForm').submit()"
+                                        <bx:if arrayContains( prc.statusArray, s )>checked</bx:if>>
+                                <label class="form-check-label" for="status_#encodeForHTMLAttribute( s )#">#encodeForHTML( s )#</label>
+                            </div>
+                        </div>
                     </bx:loop>
-                </select>
+                </div>
             </div>
             <div class="col-12 col-md-3">
                 <label class="form-label" for="priority">Priority</label>
-                <select class="form-select" id="priority" name="priority">
+                <select class="form-select" id="priority" name="priority" onchange="document.getElementById('ticketFilterForm').submit()">
                     <option value="">All</option>
                     <bx:loop array="#prc.priorities#" item="p">
                         <option value="#encodeForHTMLAttribute( p )#"<bx:if ( prc.filters.priority ?: "" ) eq p> selected</bx:if>>#encodeForHTML( p )#</option>
                     </bx:loop>
                 </select>
             </div>
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-3">
                 <label class="form-label" for="organizationId">Organization</label>
-                <select class="form-select" id="organizationId" name="organizationId">
+                <select class="form-select" id="organizationId" name="organizationId" onchange="document.getElementById('ticketFilterForm').submit()">
                     <option value="">All organizations</option>
                     <bx:loop array="#prc.organizations#" item="org">
                         <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.filters.organizationId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
@@ -38,24 +55,52 @@
             </div>
             <div class="col-12 col-md-2 d-flex align-items-end">
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="accountlessOnly" id="accountlessOnly" value="true"<bx:if ( prc.filters.accountlessOnly ?: "" ) eq "true" or ( prc.filters.accountlessOnly ?: false ) eq true> checked</bx:if>>
+                    <input class="form-check-input" type="checkbox" name="accountlessOnly" id="accountlessOnly" value="true"
+                            onchange="document.getElementById('ticketFilterForm').submit()"
+                            <bx:if ( prc.filters.accountlessOnly ?: "" ) eq "true" or ( prc.filters.accountlessOnly ?: false ) eq true> checked</bx:if>>
                     <label class="form-check-label" for="accountlessOnly">Accountless only</label>
                 </div>
             </div>
         </div>
-        <div class="d-flex justify-content-end gap-2 mt-3 flex-wrap">
-            <bx:set local.exportQs = "status=" & encodeForURL( prc.filters.status ?: "" )
-                                   & "&priority=" & encodeForURL( prc.filters.priority ?: "" )
-                                   & "&organizationId=" & encodeForURL( prc.filters.organizationId ?: "" ) >
-            <a class="btn btn-outline-secondary" href="/agent/reports/export/tickets.csv?#local.exportQs#">
-                <i class="bi bi-download"></i> Export CSV
-            </a>
-            <a class="btn btn-outline-secondary" href="/agent/tickets">Reset</a>
-            <button class="btn btn-primary" type="submit">Filter</button>
-            <a class="btn btn-success" href="/agent/tickets/new"><i class="bi bi-plus-lg"></i> New ticket</a>
+        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+            <div class="d-flex gap-2 small">
+                <form method="post" action="/agent/tickets/saveStatusDefault" class="d-inline" id="saveStatusDefaultForm">
+                    <input type="hidden" name="status" id="saveStatusDefaultValue" value="">
+                    <button type="submit" class="btn btn-sm btn-link p-0 align-baseline">Save current as my default</button>
+                </form>
+                <span class="text-body-secondary">|</span>
+                <form method="post" action="/agent/tickets/resetStatusDefault" class="d-inline">
+                    <button type="submit" class="btn btn-sm btn-link p-0 align-baseline text-secondary">Reset to global default</button>
+                </form>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                <a class="btn btn-outline-secondary" href="/agent/reports/export/tickets.csv?#local.exportQs#">
+                    <i class="bi bi-download"></i> Export CSV
+                </a>
+                <a class="btn btn-outline-secondary" href="/agent/tickets">Reset</a>
+                <a class="btn btn-success" href="/agent/tickets/new"><i class="bi bi-plus-lg"></i> New ticket</a>
+            </div>
         </div>
     </div>
 </form>
+
+<script>
+    (function(){
+        // The save-default form lives outside the main filter form (nested
+        // forms are illegal HTML). On submit, copy the currently-checked
+        // status checkboxes into a comma-delimited hidden field so the
+        // handler receives the same shape it would from the filter form.
+        var saveForm = document.getElementById('saveStatusDefaultForm');
+        if ( saveForm ) {
+            saveForm.addEventListener('submit', function(){
+                var picked = Array.prototype.slice.call(
+                    document.querySelectorAll('.status-filter-cb:checked')
+                ).map(function(cb){ return cb.value; });
+                document.getElementById('saveStatusDefaultValue').value = picked.join(',');
+            });
+        }
+    })();
+</script>
 
 <div id="bulkBar" class="card mb-2 d-none">
     <div class="card-body py-2">

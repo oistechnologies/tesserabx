@@ -165,6 +165,9 @@ class {
         binder.map( "AgentDashboardPreferencesService@agent" )
               .to( "#moduleMapping#.models.AgentDashboardPreferencesService" )
               .asSingleton();
+        binder.map( "AgentFilterPreferencesService@agent" )
+              .to( "#moduleMapping#.models.AgentFilterPreferencesService" )
+              .asSingleton();
     }
 
     function onUnload(){}

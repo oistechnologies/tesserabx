@@ -205,9 +205,27 @@ class singleton=true {
         ";
         var where  = [];
         var params = {};
-        if ( len( arguments.filters.status ?: "" ) ) {
-            where.append( "t.status = :status" );
-            params.status = arguments.filters.status;
+        // Status accepts a single key, a comma-list, or an array.
+        // Multi-status export switches from `=` to `IN (...)` with one
+        // bind per element so /agent/tickets's checkbox group flows
+        // through to the CSV without truncation.
+        if ( structKeyExists( arguments.filters, "status" ) ) {
+            var statusArr = isArray( arguments.filters.status )
+                ? arguments.filters.status
+                : listToArray( toString( arguments.filters.status ?: "" ), "," );
+            statusArr = statusArr.filter( s => len( trim( toString( s ) ) ) );
+            if ( statusArr.len() == 1 ) {
+                where.append( "t.status = :status" );
+                params.status = statusArr[ 1 ];
+            } else if ( statusArr.len() > 1 ) {
+                var ph = [];
+                for ( var i = 1; i <= statusArr.len(); i++ ) {
+                    var bindName = "status" & i;
+                    ph.append( ":" & bindName );
+                    params[ bindName ] = statusArr[ i ];
+                }
+                where.append( "t.status IN ( " & ph.toList( "," ) & " )" );
+            }
         }
         if ( len( arguments.filters.priority ?: "" ) ) {
             where.append( "t.priority = :priority" );

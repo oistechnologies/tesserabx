@@ -1,0 +1,185 @@
+/**
+ * AgentFilterPreferencesService: per-agent saved defaults for the
+ * filter controls on agent screens.
+ *
+ * Reads and writes live in `agent_filter_preferences` (see migration
+ * 2026_05_27_000010_create_agent_filter_preferences.cfc). The current
+ * caller is /agent/tickets, which stores the agent's preferred set
+ * of TicketStatus keys under filter_key="statuses". The schema is
+ * shaped to extend (priorities, organization_ids, ...) without
+ * migration.
+ *
+ * Storage shape per row:
+ *   ( agent_id, filter_key, value=comma-delimited, updated_at )
+ *
+ * Resolution chain in resolveDefaultStatuses:
+ *   1. Agent row for ( agent_id, "statuses" ), when present.
+ *   2. SettingsService "tickets.default_filter_statuses" admin global.
+ *   3. WorkflowService.keysByCategory( [ "open", "paused" ] ).
+ *
+ * Writes are audited via AuditService so an admin can see who
+ * changed a personal default; reads are not audited.
+ */
+class singleton=true {
+
+    property name="wirebox"         inject="wirebox";
+    property name="auditService"    inject="AuditService@audit";
+    property name="settings"        inject="SettingsService@admin";
+    property name="workflowService" inject="WorkflowService@tickets";
+
+    variables.STATUS_KEY = "statuses";
+
+    /**
+     * The status keys the agent has saved as their personal default.
+     * Returns an empty array when no row exists; callers wanting to
+     * distinguish "saved empty" from "no row" should use
+     * hasStatusFilter() first.
+     */
+    public array function getStatusFilter( required string agentId ){
+        if ( !len( arguments.agentId ) ) return [];
+        var rows = queryExecute(
+            "SELECT value
+             FROM   agent_filter_preferences
+             WHERE  agent_id   = :aid
+             AND    filter_key = :fk",
+            { aid : arguments.agentId, fk : variables.STATUS_KEY }
+        );
+        if ( !rows.recordCount ) return [];
+        return parseList( rows.value[ 1 ] ?: "" );
+    }
+
+    /**
+     * True when the agent has saved any status filter row, including
+     * the explicit empty case (saved with zero statuses to mean
+     * "show all"). False means "no row, fall through to global".
+     */
+    public boolean function hasStatusFilter( required string agentId ){
+        if ( !len( arguments.agentId ) ) return false;
+        var rows = queryExecute(
+            "SELECT 1 AS one
+             FROM   agent_filter_preferences
+             WHERE  agent_id   = :aid
+             AND    filter_key = :fk",
+            { aid : arguments.agentId, fk : variables.STATUS_KEY }
+        );
+        return rows.recordCount > 0;
+    }
+
+    /**
+     * Upsert the agent's preferred status set. Pass an empty array to
+     * save "show all" as the default (creates the row with an empty
+     * value column rather than deleting it; use clearStatusFilter to
+     * revert to the global default).
+     */
+    public void function saveStatusFilter(
+        required string agentId,
+        required array statuses
+    ){
+        if ( !len( arguments.agentId ) ) return;
+        var clean = sanitize( arguments.statuses );
+        var encoded = arrayToList( clean, "," );
+
+        var existing = queryExecute(
+            "SELECT id
+             FROM   agent_filter_preferences
+             WHERE  agent_id   = :aid
+             AND    filter_key = :fk",
+            { aid : arguments.agentId, fk : variables.STATUS_KEY }
+        );
+        if ( existing.recordCount ) {
+            queryExecute(
+                "UPDATE agent_filter_preferences
+                 SET    value      = :v,
+                        updated_at = NOW()
+                 WHERE  agent_id   = :aid
+                 AND    filter_key = :fk",
+                { v : encoded, aid : arguments.agentId, fk : variables.STATUS_KEY }
+            );
+        } else {
+            queryExecute(
+                "INSERT INTO agent_filter_preferences
+                       ( id, agent_id, filter_key, value, updated_at )
+                 VALUES ( :id, :aid, :fk, :v, NOW() )",
+                {
+                    id  : createUUID(),
+                    aid : arguments.agentId,
+                    fk  : variables.STATUS_KEY,
+                    v   : encoded
+                }
+            );
+        }
+
+        auditService.record(
+            eventType  : "agent.filter_preferences.saved",
+            entityType : "agent",
+            entityId   : arguments.agentId,
+            actorType  : "agent",
+            actorId    : arguments.agentId,
+            metadata   : { filterKey : variables.STATUS_KEY, value : clean }
+        );
+    }
+
+    /**
+     * Drop the agent's saved status preference. Subsequent resolves
+     * fall back to the global setting or the hardcoded category-based
+     * default. No-op when no row exists.
+     */
+    public void function clearStatusFilter( required string agentId ){
+        if ( !len( arguments.agentId ) ) return;
+        queryExecute(
+            "DELETE FROM agent_filter_preferences
+             WHERE  agent_id   = :aid
+             AND    filter_key = :fk",
+            { aid : arguments.agentId, fk : variables.STATUS_KEY }
+        );
+        auditService.record(
+            eventType  : "agent.filter_preferences.cleared",
+            entityType : "agent",
+            entityId   : arguments.agentId,
+            actorType  : "agent",
+            actorId    : arguments.agentId,
+            metadata   : { filterKey : variables.STATUS_KEY }
+        );
+    }
+
+    /**
+     * Resolve the default status filter for an agent that has just
+     * landed on /agent/tickets with no explicit URL params:
+     *   1. Agent's saved row (when present, even when explicitly empty).
+     *   2. Admin-configured global setting tickets.default_filter_statuses.
+     *   3. WorkflowService.keysByCategory( [ "open", "paused" ] ).
+     *
+     * Note: keysByCategory returns active+inactive keys (the seeded
+     * workflow has no inactive statuses on day one, but admin-deactivated
+     * keys still show up). That is intentional so historical tickets
+     * sitting on a now-inactive status remain visible by default.
+     */
+    public array function resolveDefaultStatuses( required string agentId ){
+        if ( len( arguments.agentId ) && hasStatusFilter( arguments.agentId ) ) {
+            return getStatusFilter( arguments.agentId );
+        }
+        var global = settings.getString( "tickets.default_filter_statuses", "" );
+        if ( len( global ) ) return parseList( global );
+        return workflowService.keysByCategory( [ "open", "paused" ] );
+    }
+
+    // ---------- internals ----------
+
+    private array function sanitize( required array statuses ){
+        var seen = {};
+        var out  = [];
+        for ( var raw in arguments.statuses ) {
+            var s = trim( toString( raw ) );
+            if ( !len( s ) ) continue;
+            if ( structKeyExists( seen, s ) ) continue;
+            seen[ s ] = true;
+            out.append( s );
+        }
+        return out;
+    }
+
+    private array function parseList( required string raw ){
+        return sanitize( listToArray( arguments.raw, "," ) );
+    }
+
+}

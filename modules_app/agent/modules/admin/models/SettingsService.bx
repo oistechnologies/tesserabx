@@ -64,6 +64,18 @@ class singleton=true {
         };
     }
 
+    /**
+     * Defaults that shape the agent-side ticket list. Stored as a
+     * comma-delimited list of TicketStatus keys; read and consumed by
+     * AgentFilterPreferencesService.resolveDefaultStatuses as the
+     * tier-2 fallback (agent row -> this key -> open+paused categories).
+     */
+    public struct function ticketDefaultsKeys(){
+        return {
+            "tickets.default_filter_statuses" : { "label" : "Default status filter (comma-delimited keys)", "default" : "", "type" : "string" }
+        };
+    }
+
     // ---------------- Reads ----------------
 
     public string function getString( required string key, string default = "" ){

@@ -109,6 +109,10 @@ class {
         // Bulk actions: enqueues a cbq job so a multi-hundred ticket
         // run does not block the redirect-back-to-list response.
         route( "tickets/bulk" ).withVerbs( "POST" ).to( "Tickets.bulk" );
+        // Per-agent filter defaults. Declared above /tickets/:id so the
+        // literal segments win against the show pattern.
+        route( "tickets/saveStatusDefault"  ).withVerbs( "POST" ).to( "Tickets.saveStatusDefault" );
+        route( "tickets/resetStatusDefault" ).withVerbs( "POST" ).to( "Tickets.resetStatusDefault" );
         route( "tickets/:id" ).to( "Tickets.show" );
         route( "tickets" ).withHandler( "Tickets" ).toAction( {
             "GET"  : "index",

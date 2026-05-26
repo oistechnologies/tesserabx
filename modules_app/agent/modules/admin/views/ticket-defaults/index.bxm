@@ -1,0 +1,33 @@
+<bx:output>
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-header"><strong>Default status filter</strong></div>
+            <div class="card-body">
+                <p class="text-body-secondary small mb-3">
+                    When an agent opens <code>/agent/tickets</code> without a saved personal default, this list is what they see ticked by default. Agents can override their own default at any time from the ticket list. Leaving every box unchecked falls back to the hardcoded set (statuses in the <code>open</code> and <code>paused</code> categories).
+                </p>
+                <form method="post" action="/agent/admin/ticket-defaults">
+                    <div class="mb-3">
+                        <label class="form-label d-block">Statuses ticked by default</label>
+                        <div class="d-flex flex-column gap-1">
+                            <bx:loop array="#prc.statuses#" item="s">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox"
+                                            name="status"
+                                            id="status_#encodeForHTMLAttribute( s )#"
+                                            value="#encodeForHTMLAttribute( s )#"
+                                            <bx:if arrayContains( prc.selected, s )>checked</bx:if>>
+                                    <label class="form-check-label" for="status_#encodeForHTMLAttribute( s )#">#encodeForHTML( s )#</label>
+                                </div>
+                            </bx:loop>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Save default</button>
+                    <a class="btn btn-outline-secondary" href="/agent/admin">Back to admin</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

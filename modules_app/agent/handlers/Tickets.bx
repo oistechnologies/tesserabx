@@ -17,6 +17,7 @@ class {
     property name="agentService"          inject="AgentService@agent";
     property name="customFieldsService"   inject="CustomFieldsService@tickets";
     property name="bulkActionsService"    inject="BulkActionsService@tickets";
+    property name="agentFilterPrefs"      inject="AgentFilterPreferencesService@agent";
     property name="rbacService"           inject="RbacService@agent";
     property name="contactsService"       inject="ContactsService@contacts";
     property name="channelsService"       inject="ChannelsService@channels";
@@ -37,6 +38,16 @@ class {
     // ---------- list / show ----------
 
     function index( event, rc, prc ){
+        // Detect "URL had a status param at all" BEFORE the param
+        // statement defaults it to "". Combined with the hidden
+        // statusFilterApplied sentinel on the filter form, this lets
+        // the handler tell apart:
+        //   - first visit / external link  -> apply resolved default
+        //   - explicit clear via checkboxes -> respect empty (show all)
+        //   - direct ?status=open deep-link -> respect explicit selection
+        var statusInUrl  = event.valueExists( "status" );
+        var sentinelSeen = event.valueExists( "statusFilterApplied" );
+
         param rc.status            = "";
         param rc.priority          = "";
         param rc.organizationId    = "";
@@ -50,8 +61,20 @@ class {
         prc.organizations = contactsService.listOrganizations();
         prc.assignableAgents = rbacService.listAgentsWithRoles();
         prc.bulkActions   = bulkActionsService.listActions();
+
+        // Apply the resolved default only on a clean entry to the
+        // page (no status param, no sentinel). Once the user has
+        // submitted the form even once, the sentinel is present and
+        // an empty checkbox group means "show all".
+        if ( !statusInUrl && !sentinelSeen && len( currentAgentId() ) ) {
+            rc.status = arrayToList( agentFilterPrefs.resolveDefaultStatuses( currentAgentId() ), "," );
+        }
+        prc.statusArray = isArray( rc.status )
+            ? rc.status
+            : listToArray( rc.status ?: "", "," );
+
         prc.tickets       = ticketsService.listTickets(
-            status            : rc.status,
+            status            : prc.statusArray,
             priority          : rc.priority,
             organizationId    : rc.organizationId,
             assignedToAgentId : rc.assignedToAgentId,
@@ -87,6 +110,46 @@ class {
         }
         loadShowContext( prc, t );
         event.setView( "tickets/show" );
+    }
+
+    /**
+     * POST /agent/tickets/saveStatusDefault
+     * Persist the currently submitted status filter as this agent's
+     * personal default. An empty submission saves "show everything" as
+     * the default (the row exists with an empty value); to fall back
+     * to the global default instead, the agent uses resetStatusDefault.
+     */
+    function saveStatusDefault( event, rc, prc ){
+        param rc.status = "";
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            messagebox.error( "Sign in to save a filter default." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        var sel = isArray( rc.status )
+            ? rc.status
+            : listToArray( rc.status ?: "", "," );
+        agentFilterPrefs.saveStatusFilter( agentId, sel );
+        messagebox.info( "Default status filter saved." );
+        relocate( uri = "/agent/tickets" );
+    }
+
+    /**
+     * POST /agent/tickets/resetStatusDefault
+     * Drop the agent's saved status filter row so the resolver falls
+     * back to the admin global, then to the open+paused category set.
+     */
+    function resetStatusDefault( event, rc, prc ){
+        var agentId = currentAgentId();
+        if ( !len( agentId ) ) {
+            messagebox.error( "Sign in to reset a filter default." );
+            relocate( uri = "/agent/tickets" );
+            return;
+        }
+        agentFilterPrefs.clearStatusFilter( agentId );
+        messagebox.info( "Reverted to the global default status filter." );
+        relocate( uri = "/agent/tickets" );
     }
 
     function new( event, rc, prc ){
@@ -420,9 +483,14 @@ class {
             return;
         }
 
+        // The bulk form's status dropdown is single-select; coerce
+        // defensively in case multi-status checkbox values from the
+        // filter form ever leak in here (they shouldn't — separate
+        // <form> — but an array bind would break the params struct).
+        var bulkStatus = isArray( rc.status ?: "" ) ? "" : ( rc.status ?: "" );
         var params = {
             assignedToAgentId : rc.assignedToAgentId ?: "",
-            status            : rc.status ?: "",
+            status            : bulkStatus,
             tag               : rc.tag ?: ""
         };
         try {

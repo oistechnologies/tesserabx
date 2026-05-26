@@ -1,0 +1,141 @@
+/**
+ * TicketsServiceMultiStatusFilterSpec: prove listTickets() honors the
+ * extended `status` argument shape (single string, comma-delimited
+ * string, or array). The agent ticket list relies on the array form
+ * to support multi-status checkbox filtering.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.tickets  = wb.getInstance( "TicketsService@tickets" );
+        variables.contacts = wb.getInstance( "ContactsService@contacts" );
+        variables.fixture  = makeFixture();
+    }
+
+    function afterAll(){
+        cleanupFixture( variables.fixture );
+    }
+
+    function run(){
+
+        describe( "TicketsService.listTickets status argument shapes", function(){
+
+            beforeEach( function( currentSpec ){
+                variables.createdIds = [];
+                variables.t_new      = createTicket( "new",      "spec-status-new" );
+                variables.t_open     = createTicket( "open",     "spec-status-open" );
+                variables.t_pending  = createTicket( "pending",  "spec-status-pending" );
+            } );
+
+            afterEach( function( currentSpec ){
+                for ( var id in variables.createdIds ) cleanupTicket( id );
+            } );
+
+            it( "accepts a single status key (string) and filters to one", function(){
+                var got = variables.tickets.listTickets( status : "open" );
+                expect( containsId( got, variables.t_open ) ).toBeTrue();
+                expect( containsId( got, variables.t_new ) ).toBeFalse();
+                expect( containsId( got, variables.t_pending ) ).toBeFalse();
+            } );
+
+            it( "accepts a comma-delimited string and filters to that set", function(){
+                var got = variables.tickets.listTickets( status : "new,pending" );
+                expect( containsId( got, variables.t_new ) ).toBeTrue();
+                expect( containsId( got, variables.t_pending ) ).toBeTrue();
+                expect( containsId( got, variables.t_open ) ).toBeFalse();
+            } );
+
+            it( "accepts an array of status keys and filters to that set", function(){
+                var got = variables.tickets.listTickets( status : [ "new", "open" ] );
+                expect( containsId( got, variables.t_new ) ).toBeTrue();
+                expect( containsId( got, variables.t_open ) ).toBeTrue();
+                expect( containsId( got, variables.t_pending ) ).toBeFalse();
+            } );
+
+            it( "applies no status filter when status is an empty string", function(){
+                var got = variables.tickets.listTickets( status : "" );
+                expect( containsId( got, variables.t_new ) ).toBeTrue();
+                expect( containsId( got, variables.t_open ) ).toBeTrue();
+                expect( containsId( got, variables.t_pending ) ).toBeTrue();
+            } );
+
+            it( "applies no status filter when status is an empty array", function(){
+                var got = variables.tickets.listTickets( status : [] );
+                expect( containsId( got, variables.t_new ) ).toBeTrue();
+                expect( containsId( got, variables.t_open ) ).toBeTrue();
+                expect( containsId( got, variables.t_pending ) ).toBeTrue();
+            } );
+
+            it( "drops blank entries from an array and still applies the rest", function(){
+                var got = variables.tickets.listTickets( status : [ "open", "", "  ", "pending" ] );
+                expect( containsId( got, variables.t_open ) ).toBeTrue();
+                expect( containsId( got, variables.t_pending ) ).toBeTrue();
+                expect( containsId( got, variables.t_new ) ).toBeFalse();
+            } );
+
+        } );
+
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function createTicket( required string targetStatus, required string subjectTag ){
+        var t = variables.tickets.createTicket( {
+            requesterContactId : variables.fixture.contact.getId(),
+            subject            : arguments.subjectTag & "-" & createUUID(),
+            priority           : "normal"
+        } );
+        // createTicket lands on status="new". We bypass the workflow
+        // transition validator here because the spec only cares about
+        // listTickets() filtering, not the legality of new->pending.
+        if ( arguments.targetStatus != "new" ) {
+            queryExecute(
+                "UPDATE tickets SET status = :s, updated_at = NOW() WHERE id = :id",
+                { s : arguments.targetStatus, id : t.getId() }
+            );
+        }
+        variables.createdIds.append( t.getId() );
+        return t.getId();
+    }
+
+    private boolean function containsId( required array list, required string id ){
+        for ( var t in arguments.list ) {
+            if ( t.getId() == arguments.id ) return true;
+        }
+        return false;
+    }
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "MultiStatus Spec Org " & createUUID(),
+            slug : "ms-" & lcase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "ms-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        return { org : org, contact : contact };
+    }
+
+    private void function cleanupTicket( required string id ){
+        queryExecute( "DELETE FROM notifications    WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_approvals WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_events   WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM ticket_messages WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM attachments     WHERE ticket_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM audit_events    WHERE entity_id  = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM tickets         WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupFixture( required struct fixture ){
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+    }
+
+}

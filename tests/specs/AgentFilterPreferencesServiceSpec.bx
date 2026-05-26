@@ -1,0 +1,144 @@
+/**
+ * AgentFilterPreferencesServiceSpec: per-agent saved defaults for the
+ * /agent/tickets status filter, plus the three-tier resolver
+ * (agent row -> admin global -> open+paused category fallback).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        var wb = getController().getWireBox();
+        variables.prefs           = wb.getInstance( "AgentFilterPreferencesService@agent" );
+        variables.settings        = wb.getInstance( "SettingsService@admin" );
+        variables.workflowService = wb.getInstance( "WorkflowService@tickets" );
+        variables.agentId         = createTestAgent();
+    }
+
+    function afterAll(){
+        try {
+            queryExecute(
+                "DELETE FROM agent_filter_preferences WHERE agent_id = :a",
+                { a : variables.agentId }
+            );
+            queryExecute( "DELETE FROM agents WHERE id = :a", { a : variables.agentId } );
+        } catch ( any e ) {}
+    }
+
+    function run(){
+
+        describe( "AgentFilterPreferencesService CRUD", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute(
+                    "DELETE FROM agent_filter_preferences WHERE agent_id = :a",
+                    { a : variables.agentId }
+                );
+                variables.settings.invalidateCache();
+                queryExecute(
+                    "DELETE FROM app_settings WHERE key = 'tickets.default_filter_statuses'"
+                );
+            } );
+
+            it( "returns an empty array and hasStatusFilter=false when no row exists", function(){
+                expect( variables.prefs.getStatusFilter( variables.agentId ) ).toBeArray();
+                expect( arrayLen( variables.prefs.getStatusFilter( variables.agentId ) ) ).toBe( 0 );
+                expect( variables.prefs.hasStatusFilter( variables.agentId ) ).toBeFalse();
+            } );
+
+            it( "saveStatusFilter inserts a row that getStatusFilter round-trips", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [ "new", "open", "pending" ] );
+                expect( variables.prefs.hasStatusFilter( variables.agentId ) ).toBeTrue();
+                var got = variables.prefs.getStatusFilter( variables.agentId );
+                expect( got ).toBe( [ "new", "open", "pending" ] );
+            } );
+
+            it( "saveStatusFilter twice updates the same row in place (no duplicates)", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [ "new", "open" ] );
+                variables.prefs.saveStatusFilter( variables.agentId, [ "pending" ] );
+                var rows = queryExecute(
+                    "SELECT value FROM agent_filter_preferences
+                     WHERE agent_id = :a",
+                    { a : variables.agentId }
+                );
+                expect( rows.recordCount ).toBe( 1 );
+                expect( rows.value[ 1 ] ).toBe( "pending" );
+            } );
+
+            it( "saveStatusFilter sanitizes empty and duplicate entries", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [ "new", "", "open", "new", "  " ] );
+                expect( variables.prefs.getStatusFilter( variables.agentId ) ).toBe( [ "new", "open" ] );
+            } );
+
+            it( "clearStatusFilter deletes the row", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [ "open" ] );
+                expect( variables.prefs.hasStatusFilter( variables.agentId ) ).toBeTrue();
+                variables.prefs.clearStatusFilter( variables.agentId );
+                expect( variables.prefs.hasStatusFilter( variables.agentId ) ).toBeFalse();
+            } );
+
+            it( "explicit empty save is preserved (hasStatusFilter stays true)", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [] );
+                expect( variables.prefs.hasStatusFilter( variables.agentId ) ).toBeTrue();
+                expect( variables.prefs.getStatusFilter( variables.agentId ) ).toBe( [] );
+            } );
+
+        } );
+
+        describe( "resolveDefaultStatuses chain", function(){
+
+            afterEach( function( currentSpec ){
+                queryExecute(
+                    "DELETE FROM agent_filter_preferences WHERE agent_id = :a",
+                    { a : variables.agentId }
+                );
+                queryExecute(
+                    "DELETE FROM app_settings WHERE key = 'tickets.default_filter_statuses'"
+                );
+                variables.settings.invalidateCache();
+            } );
+
+            it( "tier 1: returns the agent row when present", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [ "open", "pending" ] );
+                expect( variables.prefs.resolveDefaultStatuses( variables.agentId ) ).toBe( [ "open", "pending" ] );
+            } );
+
+            it( "tier 1 wins over tier 2 (agent row beats global)", function(){
+                variables.prefs.saveStatusFilter( variables.agentId, [ "open" ] );
+                variables.settings.set( key : "tickets.default_filter_statuses", value : "new,closed", valueType : "string", actorAgentId : "" );
+                expect( variables.prefs.resolveDefaultStatuses( variables.agentId ) ).toBe( [ "open" ] );
+            } );
+
+            it( "tier 2: falls back to the global setting when no agent row", function(){
+                variables.settings.set( key : "tickets.default_filter_statuses", value : "new,open", valueType : "string", actorAgentId : "" );
+                expect( variables.prefs.resolveDefaultStatuses( variables.agentId ) ).toBe( [ "new", "open" ] );
+            } );
+
+            it( "tier 3: falls back to open+paused category keys when neither is set", function(){
+                var fallback = variables.prefs.resolveDefaultStatuses( variables.agentId );
+                var expected = variables.workflowService.keysByCategory( [ "open", "paused" ] );
+                expect( fallback ).toBe( expected );
+            } );
+
+        } );
+
+    }
+
+    // ---------- helpers ----------
+
+    private string function createTestAgent(){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_active, is_admin, created_at, updated_at )
+             VALUES ( :id, :em, 'x', cast( :act as boolean ), cast( :adm as boolean ), NOW(), NOW() )",
+            {
+                id  : id,
+                em  : "filterprefs-spec-" & lcase( replace( id, "-", "", "all" ) ) & "@example.test",
+                act : true,
+                adm : false
+            }
+        );
+        return id;
+    }
+
+}

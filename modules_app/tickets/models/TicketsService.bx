@@ -61,9 +61,14 @@ class singleton=true {
     /**
      * List tickets for the agent surface. Bypasses tenant scope so
      * agents see across organizations. Filters are all optional.
+     *
+     * `status` accepts either a single key, a comma-delimited list of
+     * keys, or an array of keys. Multi-status filtering switches the
+     * generated SQL from `WHERE status = ?` to `WHERE status IN (...)`.
+     * An empty array (or empty string) applies no status filter.
      */
     public array function listTickets(
-        string status,
+        any status,
         string priority,
         string organizationId,
         string assignedToAgentId,
@@ -73,7 +78,13 @@ class singleton=true {
         numeric offset = 0
     ){
         var q = wirebox.getInstance( "Ticket@tickets" ).withoutGlobalScope();
-        if ( structKeyExists( arguments, "status" ) && len( arguments.status ?: "" ) ) q = q.where( "status", arguments.status );
+        if ( structKeyExists( arguments, "status" ) ) {
+            var statusArr = isArray( arguments.status )
+                ? arguments.status
+                : listToArray( toString( arguments.status ?: "" ), "," );
+            statusArr = statusArr.filter( s => len( trim( toString( s ) ) ) );
+            if ( statusArr.len() ) q = q.whereIn( "status", statusArr );
+        }
         if ( structKeyExists( arguments, "priority" ) && len( arguments.priority ?: "" ) ) q = q.where( "priority", arguments.priority );
         if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) q = q.where( "organization_id", arguments.organizationId );
         if ( structKeyExists( arguments, "assignedToAgentId" ) && len( arguments.assignedToAgentId ?: "" ) ) q = q.where( "assigned_to_agent_id", arguments.assignedToAgentId );
