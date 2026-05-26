@@ -293,7 +293,7 @@ class singleton=true {
         register( { id : "agent.main.contacts",           surface : "agent",  menu : "main",    label : "Contacts",         route : "/agent/contacts",   icon : "bi bi-people",      sortWeight : 30,  requiresAuth : true } );
         register( { id : "agent.main.notifications",      surface : "agent",  menu : "main",    label : "Notifications",    route : "/agent/notifications", icon : "bi bi-bell",     sortWeight : 40,  requiresAuth : true } );
         register( { id : "agent.main.reports",            surface : "agent",  menu : "main",    label : "Reports",          route : "/agent/reports",    icon : "bi bi-graph-up",    sortWeight : 50,  requiresAuth : true } );
-        register( { id : "agent.main.admin",              surface : "agent",  menu : "main",    label : "Admin",            route : "/agent/admin",      icon : "bi bi-gear",        sortWeight : 90,  requiresAuth : true, requiredPermission : "admin.access" } );
+        register( { id : "agent.main.admin",              surface : "agent",  menu : "main",    label : "Admin",            route : "/agent/admin",      icon : "bi bi-gear",        sortWeight : 500,  requiresAuth : true, requiredPermission : "admin.access" } );
 
         // Agent account dropdown.
         register( { id : "agent.account.profile",         surface : "agent",  menu : "account", label : "My Account",       route : "/agent/account",    icon : "bi bi-person-gear", sortWeight : 10, requiresAuth : true } );
