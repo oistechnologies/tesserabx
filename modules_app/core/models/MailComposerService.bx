@@ -229,6 +229,29 @@ class singleton=true {
         return variables.mailService.send( arguments.mail );
     }
 
+    /**
+     * Pick the right outbound chrome for a ticket-style send.
+     *
+     * - No organizationId (accountless ticket) -> "notification"
+     *   (full chrome). The recipient has no relationship with a
+     *   specific tenant, so the provider-brand notification chrome
+     *   reads less like person-to-person mail and more like a
+     *   system message, which is what it is.
+     * - Organization with no email branding override on file ->
+     *   "notification" (full chrome). Without per-org branding, the
+     *   "reply" chrome is just the provider's product name on a
+     *   thin band; the full chrome is a clearer recipient experience
+     *   until the org sets up their own branding.
+     * - Organization with a branding override -> "reply" (thin
+     *   person-to-person chrome). The org has invested in their
+     *   look; the conversational chrome carries it without shouting.
+     */
+    public string function resolveDefaultStyle( string organizationId = "" ){
+        if ( !len( arguments.organizationId ) ) return "notification";
+        if ( isNull( variables.branding.getOverride( arguments.organizationId ) ) ) return "notification";
+        return "reply";
+    }
+
     // --------------- private ---------------
 
     /**

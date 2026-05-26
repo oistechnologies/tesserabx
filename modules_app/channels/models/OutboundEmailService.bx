@@ -203,17 +203,18 @@ class singleton=true {
             threadHeaders[ "References" ] = arguments.references;
         }
 
-        // style="reply" picks the thinner person-to-person
-        // chrome so the message threads naturally in Gmail /
-        // Apple Mail / Outlook instead of looking like a
-        // marketing blast.
+        // Style is derived from the composer: orgs with a branding
+        // override get the thin person-to-person "reply" chrome so
+        // the message threads naturally in Gmail / Apple Mail /
+        // Outlook; accountless tickets and orgs with no branding
+        // setup get the full "notification" chrome.
         var mail = mailComposer.compose(
             to             = arguments.recipient,
             from           = fromAddress(),
             subject        = arguments.subject,
             body           = arguments.body,
             bodyFormat     = "text",
-            style          = "reply",
+            style          = mailComposer.resolveDefaultStyle( arguments.organizationId ),
             recipientType  = "contact",
             organizationId = arguments.organizationId,
             eventKey       = arguments.eventKey,
