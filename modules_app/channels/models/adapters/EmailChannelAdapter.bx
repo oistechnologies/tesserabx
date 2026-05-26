@@ -39,19 +39,13 @@ class singleton=true {
     }
 
     /**
-     * Verify the email channel configuration by asking the IMAP
-     * poller whether it has the connection-level env vars it needs.
-     * The poller's isEnabled() returns false when IMAP_ENABLED is
-     * off OR any required credential is missing.
+     * Verify the email channel configuration by actually opening an
+     * IMAP connection with the configured credentials. The poller's
+     * testConnection() proves the env vars are present AND that the
+     * server accepts the login and the target folder exists.
      */
     public struct function verifyConfig( required struct config ){
-        if ( imapPoller.isEnabled() ) {
-            return { ok : true, error : "" };
-        }
-        return {
-            ok    : false,
-            error : "IMAP is not enabled or missing required environment variables (IMAP_ENABLED, IMAP_HOST, IMAP_USERNAME, IMAP_PASSWORD)."
-        };
+        return imapPoller.testConnection();
     }
 
     /**

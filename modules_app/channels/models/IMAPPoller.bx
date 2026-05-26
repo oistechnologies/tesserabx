@@ -2,6 +2,13 @@
  * IMAPPoller: reads unread messages from the configured mailbox and
  * feeds them through InboundEmailProcessor.
  *
+ * Implemented directly against jakarta.mail (which ships inside the
+ * bx-mail module's bundled jar). BoxLang does not provide a cfimap
+ * tag, so the JavaMail Store/Folder API is used directly. The
+ * jakarta.mail.* classes are loaded on demand via createObject so the
+ * file remains importable when bx-mail is not yet on the classpath
+ * (the runtime error then surfaces from poll(), not from class load).
+ *
  * Configuration is environment-driven; the poller stays inert when
  * IMAP_ENABLED is anything but "true". The development docker-compose
  * leaves it off by default so a fresh dev stack does not try to talk
@@ -29,7 +36,37 @@ class singleton=true {
     property name="processor" inject="InboundEmailProcessor@channels";
 
     public boolean function isEnabled(){
-        return lCase( getSystemSetting( "IMAP_ENABLED", "false" ) ) == "true";
+        return lCase( getSystemSetting( "IMAP_ENABLED", "false" ) ) == "true"
+            && len( getSystemSetting( "IMAP_HOST", "" ) )
+            && len( getSystemSetting( "IMAP_USERNAME", "" ) )
+            && len( getSystemSetting( "IMAP_PASSWORD", "" ) );
+    }
+
+    /**
+     * Open an IMAP connection using the configured env vars and
+     * immediately close it. Used by EmailChannelAdapter.verifyConfig
+     * so the Verify button in /agent/admin/channels actually proves
+     * the credentials reach the server.
+     *
+     * Returns { ok : boolean, error : string }. Never throws.
+     */
+    public struct function testConnection(){
+        if ( !isEnabled() ) {
+            return { ok : false, error : "IMAP is not enabled or one of IMAP_HOST / IMAP_USERNAME / IMAP_PASSWORD is empty." };
+        }
+        var store = "";
+        try {
+            store = openStore();
+            var folder = store.getFolder( getSystemSetting( "IMAP_FOLDER", "INBOX" ) );
+            if ( !folder.exists() ) {
+                return { ok : false, error : "IMAP folder [" & getSystemSetting( "IMAP_FOLDER", "INBOX" ) & "] does not exist on the server." };
+            }
+            return { ok : true, error : "" };
+        } catch ( any e ) {
+            return { ok : false, error : e.message };
+        } finally {
+            try { if ( isObject( store ) && store.isConnected() ) store.close(); } catch ( any ignored ) {}
+        }
     }
 
     /**
@@ -40,48 +77,54 @@ class singleton=true {
 
         if ( !isEnabled() ) {
             result.skipped = true;
-            result.reason  = "IMAP_ENABLED is not set to true.";
+            result.reason  = "IMAP is not enabled or required env vars are missing.";
             return result;
         }
 
-        var host      = getSystemSetting( "IMAP_HOST", "" );
-        var username  = getSystemSetting( "IMAP_USERNAME", "" );
-        var password  = getSystemSetting( "IMAP_PASSWORD", "" );
-        if ( !len( host ) || !len( username ) ) {
-            result.skipped = true;
-            result.reason  = "IMAP_HOST or IMAP_USERNAME not configured.";
-            return result;
-        }
+        var folderName = getSystemSetting( "IMAP_FOLDER", "INBOX" );
+        var maxPerRun  = int( getSystemSetting( "IMAP_MAX_PER_POLL", "50" ) );
+        var markRead   = lCase( getSystemSetting( "IMAP_MARK_READ", "true" ) ) == "true";
 
-        var port      = int( getSystemSetting( "IMAP_PORT", "993" ) );
-        var folder    = getSystemSetting( "IMAP_FOLDER", "INBOX" );
-        var useSSL    = lCase( getSystemSetting( "IMAP_USE_SSL", "true" ) ) == "true";
-        var maxPerRun = int( getSystemSetting( "IMAP_MAX_PER_POLL", "50" ) );
-        var markRead  = lCase( getSystemSetting( "IMAP_MARK_READ", "true" ) ) == "true";
-
-        // Per-poll temp dir for any attachments cfimap pulls out of
-        // multi-part messages. Cleaned at the end of the run so a
-        // hung poll cannot leak megabytes into /tmp.
+        // Per-poll temp dir for any attachments pulled out of multi-part
+        // messages. Cleaned at the end of the run so a hung poll cannot
+        // leak megabytes into /tmp.
         var attachDir = getTempDirectory() & "/imap-poll-" & createUUID() & "/";
         directoryCreate( attachDir );
 
-        var fetched = "";
+        var store  = "";
+        var folder = "";
         try {
-            cfimap(
-                action     = "getAll",
-                server     = host,
-                port       = port,
-                username   = username,
-                password   = password,
-                folder     = folder,
-                secure     = useSSL,
-                attachmentPath = attachDir,
-                name       = "fetched",
-                maxRows    = maxPerRun,
-                generateUniqueFilenames = true
-            );
+            store  = openStore();
+            folder = store.getFolder( folderName );
+            if ( !folder.exists() ) {
+                throw( type = "IMAPPoller.FolderNotFound", message = "Folder [" & folderName & "] not found on IMAP server." );
+            }
+
+            var folderClass = createObject( "java", "jakarta.mail.Folder" );
+            folder.open( markRead ? folderClass.READ_WRITE : folderClass.READ_ONLY );
+
+            var messages = searchUnread( folder );
+            var capped   = sliceUpToMax( messages, maxPerRun );
+
+            for ( var i = 1; i <= arrayLen( capped ); i++ ) {
+                var mimeMsg = capped[ i ];
+                try {
+                    var msg = normaliseMessage( mimeMsg, attachDir );
+                    processor.process( msg );
+                    result.processed++;
+                    if ( markRead ) {
+                        markMessageRead( mimeMsg );
+                    }
+                } catch ( any e ) {
+                    writeLog(
+                        text : "InboundEmailProcessor failed: " & e.message,
+                        log  : "tesserabx-scheduler",
+                        type : "error"
+                    );
+                    result.errors++;
+                }
+            }
         } catch ( any e ) {
-            try { directoryDelete( attachDir, true ); } catch ( any ignored ) {}
             writeLog(
                 text : "IMAP fetch failed: " & e.message,
                 log  : "tesserabx-scheduler",
@@ -89,49 +132,10 @@ class singleton=true {
             );
             result.errors = 1;
             result.reason = e.message;
-            return result;
-        }
-
-        var messageIdsToMark = [];
-        for ( var row in fetched ) {
-            try {
-                var msg = normaliseRow( row );
-                processor.process( msg );
-                result.processed++;
-                if ( markRead && len( msg.imapUID ) ) {
-                    messageIdsToMark.append( msg.imapUID );
-                }
-            } catch ( any e ) {
-                writeLog(
-                    text : "InboundEmailProcessor failed on UID [#( row.uid ?: '?' )#]: " & e.message,
-                    log  : "tesserabx-scheduler",
-                    type : "error"
-                );
-                result.errors++;
-            }
-        }
-
-        try { directoryDelete( attachDir, true ); } catch ( any ignored ) {}
-
-        if ( markRead && arrayLen( messageIdsToMark ) ) {
-            try {
-                cfimap(
-                    action   = "markRead",
-                    server   = host,
-                    port     = port,
-                    username = username,
-                    password = password,
-                    folder   = folder,
-                    secure   = useSSL,
-                    uid      = arrayToList( messageIdsToMark )
-                );
-            } catch ( any e ) {
-                writeLog(
-                    text : "IMAP markRead failed: " & e.message,
-                    log  : "tesserabx-scheduler",
-                    type : "warn"
-                );
-            }
+        } finally {
+            try { if ( isObject( folder ) && folder.isOpen() ) folder.close( javaCast( "boolean", false ) ); } catch ( any ignored ) {}
+            try { if ( isObject( store ) && store.isConnected() ) store.close(); } catch ( any ignored ) {}
+            try { directoryDelete( attachDir, true ); } catch ( any ignored ) {}
         }
 
         writeLog(
@@ -141,70 +145,246 @@ class singleton=true {
         return result;
     }
 
-    // ---------------- helpers ----------------
+    // ---------------- JavaMail helpers ----------------
 
     /**
-     * Translate a cfimap result row into the struct the processor
-     * expects. Best-effort header parsing; cfimap returns headers as
-     * either a list or a struct depending on the engine version.
+     * Build a jakarta.mail.Session, open a Store, connect, return it.
+     * Caller owns close().
      */
-    private struct function normaliseRow( required any row ){
-        var headers = {};
-        var rawHeaders = arguments.row.header ?: "";
-        if ( isStruct( rawHeaders ) ) {
-            headers = rawHeaders;
-        } else if ( isSimpleValue( rawHeaders ) ) {
-            for ( var line in listToArray( rawHeaders, char( 10 ) ) ) {
-                var parts = listToArray( line, ":", false, true );
-                if ( arrayLen( parts ) >= 2 ) {
-                    var name = trim( parts[ 1 ] );
-                    var val  = trim( arrayToList( arraySlice( parts, 2 ), ":" ) );
-                    headers[ name ] = val;
-                }
-            }
+    private any function openStore(){
+        var host     = getSystemSetting( "IMAP_HOST", "" );
+        var username = getSystemSetting( "IMAP_USERNAME", "" );
+        var password = getSystemSetting( "IMAP_PASSWORD", "" );
+        var port     = int( getSystemSetting( "IMAP_PORT", "993" ) );
+        var useSSL   = lCase( getSystemSetting( "IMAP_USE_SSL", "true" ) ) == "true";
+        var protocol = useSSL ? "imaps" : "imap";
+
+        var props = createObject( "java", "java.util.Properties" ).init();
+        props.setProperty( "mail.store.protocol", protocol );
+        props.setProperty( "mail." & protocol & ".host", host );
+        props.setProperty( "mail." & protocol & ".port", javaCast( "string", port ) );
+        props.setProperty( "mail." & protocol & ".connectiontimeout", "15000" );
+        props.setProperty( "mail." & protocol & ".timeout", "30000" );
+        if ( useSSL ) {
+            props.setProperty( "mail.imaps.ssl.enable", "true" );
         }
 
-        return {
-            messageId   : stripBrackets( arguments.row.messageid ?: arguments.row.messageId ?: "" ),
-            from        : arguments.row.from ?: "",
-            subject     : arguments.row.subject ?: "(no subject)",
-            body        : arguments.row.body ?: arguments.row.textBody ?: "",
-            inReplyTo   : stripBrackets( arguments.row.inReplyTo ?: arguments.row[ "in-reply-to" ] ?: "" ),
-            references  : arguments.row.references ?: arguments.row[ "references" ] ?: "",
-            headers     : headers,
-            imapUID     : arguments.row.uid ?: "",
-            attachments : extractAttachments( arguments.row )
-        };
+        // Local var "session" would silently alias to BoxLang's SessionScope; use mailSession.
+        var mailSession = createObject( "java", "jakarta.mail.Session" ).getInstance( props );
+        var store       = mailSession.getStore( protocol );
+        store.connect( host, javaCast( "int", port ), username, password );
+        return store;
     }
 
     /**
-     * Walk a cfimap row's attachmentFiles list (delimiter is the
-     * server-local path separator; cfimap returns absolute paths) and
-     * build the small struct the processor expects. Missing or
-     * unreadable files are silently dropped because cfimap occasionally
-     * lists inline-image cids that never actually land on disk.
+     * Search the folder for messages whose SEEN flag is not set.
+     * Returns an array of jakarta.mail.Message instances.
      */
-    private array function extractAttachments( required any row ){
-        var out = [];
-        var raw = arguments.row.attachmentFiles ?: arguments.row.attachmentfiles ?: "";
-        if ( !len( raw ) ) return out;
+    private array function searchUnread( required any folder ){
+        var flagsClass = createObject( "java", "jakarta.mail.Flags" );
+        var seenFlag   = createObject( "java", "jakarta.mail.Flags$Flag" ).SEEN;
+        var seenFlags  = flagsClass.init( seenFlag );
+        var flagTerm   = createObject( "java", "jakarta.mail.search.FlagTerm" ).init( seenFlags, javaCast( "boolean", false ) );
 
-        // cfimap separates paths with the OS path-separator. Splitting
-        // on both `;` (legacy CF behaviour) and the platform separator
-        // keeps the same code working on Linux dev + CI.
-        var paths = listToArray( raw, ";" & ( createObject( "java", "java.io.File" ).pathSeparator ) );
-        for ( var p in paths ) {
-            p = trim( p );
-            if ( !len( p ) || !fileExists( p ) ) continue;
-            var info = getFileInfo( p );
-            out.append( {
-                path             : p,
-                originalFilename : info.name,
-                contentType      : guessContentType( info.name ),
-                sizeBytes        : info.size
-            } );
+        var javaArr = arguments.folder.search( flagTerm );
+        var out     = [];
+        if ( isNull( javaArr ) ) return out;
+        for ( var i = 0; i < arrayLen( javaArr ); i++ ) {
+            out.append( javaArr[ i + 1 ] );
         }
         return out;
+    }
+
+    private array function sliceUpToMax( required array messages, required numeric maxCount ){
+        if ( arrayLen( arguments.messages ) <= arguments.maxCount ) return arguments.messages;
+        var out = [];
+        for ( var i = 1; i <= arguments.maxCount; i++ ) {
+            out.append( arguments.messages[ i ] );
+        }
+        return out;
+    }
+
+    private void function markMessageRead( required any mimeMsg ){
+        try {
+            var seenFlag = createObject( "java", "jakarta.mail.Flags$Flag" ).SEEN;
+            arguments.mimeMsg.setFlag( seenFlag, javaCast( "boolean", true ) );
+        } catch ( any e ) {
+            writeLog(
+                text : "IMAP markRead failed: " & e.message,
+                log  : "tesserabx-scheduler",
+                type : "warn"
+            );
+        }
+    }
+
+    // ---------------- normalisation ----------------
+
+    /**
+     * Translate a jakarta.mail.internet.MimeMessage into the struct
+     * InboundEmailProcessor.process() consumes.
+     */
+    private struct function normaliseMessage( required any mimeMsg, required string attachDir ){
+        var headers  = extractHeaders( arguments.mimeMsg );
+        var fromAddr = "";
+        try {
+            var fromArr = arguments.mimeMsg.getFrom();
+            if ( !isNull( fromArr ) && arrayLen( fromArr ) > 0 ) fromAddr = fromArr[ 1 ].toString();
+        } catch ( any ignored ) {}
+
+        var subject = "";
+        try { subject = arguments.mimeMsg.getSubject() ?: ""; } catch ( any ignored ) {}
+        if ( !len( subject ) ) subject = "(no subject)";
+
+        var msgId = "";
+        try { msgId = arguments.mimeMsg.getMessageID() ?: ""; } catch ( any ignored ) {}
+
+        return {
+            messageId   : stripBrackets( msgId ),
+            from        : fromAddr,
+            subject     : subject,
+            body        : extractBody( arguments.mimeMsg ),
+            inReplyTo   : stripBrackets( firstHeader( arguments.mimeMsg, "In-Reply-To" ) ),
+            references  : firstHeader( arguments.mimeMsg, "References" ),
+            headers     : headers,
+            imapUID     : "",
+            attachments : extractAttachments( arguments.mimeMsg, arguments.attachDir )
+        };
+    }
+
+    private struct function extractHeaders( required any mimeMsg ){
+        var out = {};
+        try {
+            var enumeration = arguments.mimeMsg.getAllHeaders();
+            while ( enumeration.hasMoreElements() ) {
+                var h = enumeration.nextElement();
+                out[ h.getName() ] = h.getValue();
+            }
+        } catch ( any ignored ) {}
+        return out;
+    }
+
+    private string function firstHeader( required any mimeMsg, required string name ){
+        try {
+            var arr = arguments.mimeMsg.getHeader( arguments.name );
+            if ( isNull( arr ) || arrayLen( arr ) == 0 ) return "";
+            return arr[ 1 ];
+        } catch ( any ignored ) {
+            return "";
+        }
+    }
+
+    /**
+     * Pull a text body out of a MimeMessage. Prefers text/plain;
+     * falls back to text/html. Walks nested multiparts one level deep,
+     * which covers the vast majority of real-world mail.
+     */
+    private string function extractBody( required any mimeMsg ){
+        try {
+            var content = arguments.mimeMsg.getContent();
+            if ( isSimpleValue( content ) ) return toString( content );
+            return walkForBody( content );
+        } catch ( any e ) {
+            return "";
+        }
+    }
+
+    private string function walkForBody( required any content ){
+        if ( isSimpleValue( arguments.content ) ) return toString( arguments.content );
+        if ( !isInstanceOf( arguments.content, "jakarta.mail.Multipart" ) ) return "";
+
+        var plain = "";
+        var html  = "";
+        var count = arguments.content.getCount();
+        for ( var i = 0; i < count; i++ ) {
+            var part = arguments.content.getBodyPart( javaCast( "int", i ) );
+            try {
+                if ( part.isMimeType( "text/plain" ) && !len( plain ) ) {
+                    plain = toString( part.getContent() );
+                } else if ( part.isMimeType( "text/html" ) && !len( html ) ) {
+                    html = toString( part.getContent() );
+                } else if ( part.isMimeType( "multipart/*" ) ) {
+                    var nested = walkForBody( part.getContent() );
+                    if ( !len( plain ) ) plain = nested;
+                }
+            } catch ( any ignored ) {}
+        }
+        return len( plain ) ? plain : html;
+    }
+
+    /**
+     * Walk the parts of a MimeMessage, stream every attachment-disposition
+     * (or filename-bearing) part to attachDir, and return the small
+     * structs InboundEmailProcessor expects.
+     */
+    private array function extractAttachments( required any mimeMsg, required string attachDir ){
+        var out = [];
+        try {
+            var content = arguments.mimeMsg.getContent();
+            if ( !isInstanceOf( content, "jakarta.mail.Multipart" ) ) return out;
+            walkForAttachments( content, arguments.attachDir, out );
+        } catch ( any ignored ) {}
+        return out;
+    }
+
+    private void function walkForAttachments( required any content, required string attachDir, required array out ){
+        if ( !isInstanceOf( arguments.content, "jakarta.mail.Multipart" ) ) return;
+        var count = arguments.content.getCount();
+        for ( var i = 0; i < count; i++ ) {
+            var part = arguments.content.getBodyPart( javaCast( "int", i ) );
+            try {
+                var disposition = part.getDisposition() ?: "";
+                var filename    = part.getFileName() ?: "";
+
+                if ( part.isMimeType( "multipart/*" ) ) {
+                    walkForAttachments( part.getContent(), arguments.attachDir, arguments.out );
+                    continue;
+                }
+
+                var isAttachment = lCase( disposition ) == "attachment"
+                    || ( len( filename ) && lCase( disposition ) != "inline" );
+                if ( !isAttachment ) continue;
+
+                var safeName = createUUID() & "_" & sanitiseFilename( filename );
+                var diskPath = arguments.attachDir & safeName;
+                streamPartToFile( part, diskPath );
+
+                if ( fileExists( diskPath ) ) {
+                    var info = getFileInfo( diskPath );
+                    arguments.out.append( {
+                        path             : diskPath,
+                        originalFilename : len( filename ) ? filename : safeName,
+                        contentType      : extractContentType( part, filename ),
+                        sizeBytes        : info.size
+                    } );
+                }
+            } catch ( any ignored ) {}
+        }
+    }
+
+    private void function streamPartToFile( required any part, required string diskPath ){
+        var input  = arguments.part.getInputStream();
+        var output = createObject( "java", "java.io.FileOutputStream" ).init( arguments.diskPath );
+        try {
+            input.transferTo( output );
+        } finally {
+            try { input.close(); }  catch ( any ignored ) {}
+            try { output.close(); } catch ( any ignored ) {}
+        }
+    }
+
+    private string function extractContentType( required any part, required string filename ){
+        try {
+            var ct = arguments.part.getContentType() ?: "";
+            // Content-Type often looks like "image/png; name=foo.png"; trim params.
+            if ( find( ";", ct ) ) ct = trim( listFirst( ct, ";" ) );
+            if ( len( ct ) ) return ct;
+        } catch ( any ignored ) {}
+        return guessContentType( arguments.filename );
+    }
+
+    private string function sanitiseFilename( required string filename ){
+        if ( !len( arguments.filename ) ) return "attachment.bin";
+        return reReplace( arguments.filename, "[^A-Za-z0-9._-]", "_", "all" );
     }
 
     /**
