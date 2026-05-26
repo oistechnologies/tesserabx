@@ -1,0 +1,54 @@
+<bx:output>
+<!---
+    Issue-linked digest body partial.
+
+    Rendered by MailComposerService when an add-on call site sets
+    bodyTemplate : { module : "example-sync", partial : "emails/issue_linked_digest" }.
+    The wrapping brand chrome (header band, footer) is supplied by
+    the composer; this partial controls only the inside of the body
+    cell.
+
+    Args in scope (provided by the composer):
+      args.tokens       - struct of caller-supplied substitution data
+                          (linkedCount + any other keys the caller passed)
+      args.brand        - resolved branding (productName, primaryColor, ...)
+      args.appBaseUrl   - absolute URL prefix
+      args.primaryColor - normalized hex color, safe to inline
+      args.style        - "notification" or "reply"
+
+    Reminder: inline CSS only (email clients strip <style>), table
+    layouts for any multi-column structure, no em dashes.
+--->
+<bx:set local.tokens       = args.tokens       ?: {}>
+<bx:set local.linkedCount  = local.tokens.linkedCount ?: 0>
+<bx:set local.links        = local.tokens.links       ?: []>
+<bx:set local.appBaseUrl   = args.appBaseUrl   ?: "">
+<bx:set local.primaryColor = args.primaryColor ?: "##0d6efd">
+
+<p style="margin:0 0 16px 0;font-size:16px;line-height:1.5;">
+    You linked
+    <strong>#encodeForHTML( local.linkedCount )#</strong>
+    ticket(s) to external issues today.
+</p>
+
+<bx:if arrayLen( local.links )>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin:8px 0 16px 0;">
+        <bx:loop array="#local.links#" item="row">
+            <tr>
+                <td style="padding:8px 0;border-bottom:1px solid ##eaeaea;font-size:14px;color:##212529;">
+                    <strong>#encodeForHTML( row.issueKey ?: "" )#</strong>
+                    &rarr;
+                    #encodeForHTML( row.ticketSubject ?: "" )#
+                </td>
+            </tr>
+        </bx:loop>
+    </table>
+</bx:if>
+
+<p style="margin:16px 0 0 0;">
+    <a href="#encodeForHTMLAttribute( local.appBaseUrl & '/agent/reports/issue-links' )#"
+       style="background:#local.primaryColor#;color:##ffffff;text-decoration:none;padding:10px 16px;display:inline-block;border-radius:4px;font-size:14px;">
+        View full report
+    </a>
+</p>
+</bx:output>

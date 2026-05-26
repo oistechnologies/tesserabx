@@ -80,7 +80,8 @@ class {
                 { id : "development.api",           section : "development", title : "API resources + webhooks",      audience : "developer", sortWeight : 100, source : "resources/help/development/10-api.md",        searchable : true,  keywords : [ "API", "REST", "webhook", "OpenAPI" ] },
                 { id : "development.custom-fields", section : "development", title : "Custom fields + entity extension", audience : "developer", sortWeight : 110, source : "resources/help/development/11-custom-fields.md", searchable : true, keywords : [ "custom field", "entity extension" ] },
                 { id : "development.notifications", section : "development", title : "Notifications + channels",      audience : "developer", sortWeight : 120, source : "resources/help/development/12-notifications.md", searchable : true,  keywords : [ "notification", "template", "channel" ] },
-                { id : "development.help",          section : "development", title : "Help pages + sections",         audience : "developer", sortWeight : 130, source : "resources/help/development/13-help.md",         searchable : true,  keywords : [ "help", "page", "section", "audience" ] }
+                { id : "development.help",          section : "development", title : "Help pages + sections",         audience : "developer", sortWeight : 130, source : "resources/help/development/13-help.md",         searchable : true,  keywords : [ "help", "page", "section", "audience" ] },
+                { id : "development.email-templates", section : "development", title : "Email templates + composer",    audience : "developer", sortWeight : 140, source : "resources/help/development/14-email-templates.md", searchable : true, keywords : [ "email", "template", "composer", "MailComposerService", "branding", "multipart" ] }
             ]
         };
 

@@ -168,6 +168,23 @@ class {
                     { eventKey : "exampleSync.issue_linked", channel : "inapp", recipientType : "agent", titleTemplate : "Issue {{issueKey}} linked",                            bodyTemplate : "Ticket {{ticketNumber}} is now linked to external issue {{issueKey}}.", linkTemplate : "/agent/tickets/{{ticketId}}",       placeholders : [ "ticketNumber", "issueKey", "ticketId" ] }
                 ],
 
+                // ---- Email composer body templates ----
+                // Add-ons that want a richer HTML body than the
+                // composer's auto-render produces declare it here
+                // and point at a .bxm partial under their views/
+                // folder. The wrapping brand chrome stays default;
+                // only the inner body comes from this partial.
+                emailTemplates : [
+                    {
+                        id           : "issueLinkedDigest",
+                        displayName  : "Issue-linked digest",
+                        subject      : "Daily digest: {{linkedCount}} ticket links",
+                        module       : "example-sync",
+                        partial      : "emails/issue_linked_digest",
+                        placeholders : [ "linkedCount", "appBaseUrl", "productName" ]
+                    }
+                ],
+
                 // ---- Phase 11: help pages ----
                 helpSections : [
                     { id : "example-sync", title : "Example Sync", audience : "agent", sortWeight : 800, icon : "bi bi-arrow-repeat" }

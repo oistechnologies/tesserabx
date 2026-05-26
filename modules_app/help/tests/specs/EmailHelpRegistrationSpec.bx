@@ -1,0 +1,55 @@
+/**
+ * EmailHelpRegistrationSpec: regression guard for the
+ * development.email-templates help chapter registration.
+ *
+ * Catches the common breakage of someone tweaking the help page
+ * registration in ModuleConfig.bx (sortWeight collision, wrong
+ * audience, missing source file) without realizing the chapter
+ * stops surfacing in the /help nav.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.registry = getController().getWireBox().getInstance( "HelpPageRegistry@help" );
+    }
+
+    function run(){
+        describe( "development.email-templates help page", function(){
+
+            it( "is registered in HelpPageRegistry", function(){
+                var page = variables.registry.findById( "development.email-templates" );
+                expect( isNull( page ) ).toBeFalse(
+                    "Expected development.email-templates to be registered. Did ModuleConfig.bx lose the entry?"
+                );
+            } );
+
+            it( "sits in the development section under the audience=developer band", function(){
+                var page = variables.registry.findById( "development.email-templates" );
+                expect( page.section  ?: "" ).toBe( "development" );
+                expect( page.audience ?: "" ).toBe( "developer" );
+            } );
+
+            it( "has a non-colliding sortWeight in the developer section", function(){
+                var page = variables.registry.findById( "development.email-templates" );
+                expect( page.sortWeight ?: 0 ).toBe( 140 );
+                // No other developer page should share this weight.
+                var collisions = variables.registry.listForSection( "development" )
+                    .filter( function( p ){
+                        return ( p.sortWeight ?: 0 ) == 140 && ( p.id ?: "" ) != "development.email-templates";
+                    } );
+                expect( arrayLen( collisions ) ).toBe( 0,
+                    "Another developer page also uses sortWeight 140: " & ( arrayLen( collisions ) ? collisions[ 1 ].id : "" )
+                );
+            } );
+
+            it( "points at the chapter file shipped with this work", function(){
+                var page = variables.registry.findById( "development.email-templates" );
+                expect( page.source ?: "" ).toInclude( "14-email-templates.md" );
+            } );
+
+        } );
+    }
+
+}
