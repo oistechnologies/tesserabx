@@ -115,6 +115,7 @@ class {
         // first so /settings/branding et al. do not get swallowed.
         route( "settings/branding" ).withVerbs( "POST" ).to( "Settings.saveBranding" );
         route( "settings/mail" ).withVerbs( "POST" ).to( "Settings.saveMail" );
+        route( "settings/email" ).withVerbs( "POST" ).to( "Settings.saveEmail" );
         route( "settings/test-email" ).withVerbs( "POST" ).to( "Settings.testEmail" );
         route( "settings" ).to( "Settings.index" );
 

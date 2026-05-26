@@ -48,6 +48,22 @@ class singleton=true {
         };
     }
 
+    /**
+     * Email-shaping settings consumed by MailComposerService.
+     * Distinct from mailKeys() (SMTP server override) and from
+     * brandingKeys() (visual brand tokens) because these tune
+     * the composer's behavior rather than the underlying
+     * transport or look-and-feel.
+     */
+    public struct function emailKeys(){
+        return {
+            "email.from_name"          : { "label" : "Email From name",            "default" : "",     "type" : "string"  },
+            "email.reply_to"           : { "label" : "Email Reply-To address",     "default" : "",     "type" : "string"  },
+            "email.preheader_default"  : { "label" : "Default email preheader",    "default" : "",     "type" : "string"  },
+            "email.show_default_logo"  : { "label" : "Show bundled default logo when none configured", "default" : "true", "type" : "boolean" }
+        };
+    }
+
     // ---------------- Reads ----------------
 
     public string function getString( required string key, string default = "" ){

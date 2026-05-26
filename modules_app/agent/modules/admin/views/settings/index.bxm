@@ -79,5 +79,30 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Email composer</h5>
+            <p class="card-text text-body-secondary small">
+                Tune the friendly sender label, the Reply-To address, and a default inbox preheader for branded mail. These apply on top of the SMTP override above; both are independent.
+            </p>
+            <form method="post" action="/agent/admin/settings/email">
+                <bx:loop collection="#prc.emailKeys#" item="k">
+                    <div class="mb-3">
+                        <bx:if prc.emailKeys[ k ].type eq "boolean">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" value="true"<bx:if prc.emailValues[ k ]> checked</bx:if>>
+                                <label class="form-check-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.emailKeys[ k ].label )#</label>
+                            </div>
+                        <bx:else>
+                            <label class="form-label" for="#encodeForHTMLAttribute( k )#">#encodeForHTML( prc.emailKeys[ k ].label )#</label>
+                            <input type="text" id="#encodeForHTMLAttribute( k )#" name="#encodeForHTMLAttribute( k )#" class="form-control" value="#encodeForHTMLAttribute( prc.emailValues[ k ] )#">
+                        </bx:if>
+                    </div>
+                </bx:loop>
+                <button class="btn btn-primary" type="submit">Save email composer settings</button>
+            </form>
+        </div>
+    </div>
+
 </div>
 </bx:output>
