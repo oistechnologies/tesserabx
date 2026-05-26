@@ -42,9 +42,19 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
 
     function run(){
+        // CI runs without Mailpit; the dev compose stack has it.
+        // Probe at registration time because TestBox calls run()
+        // BEFORE beforeAll(), so variables.mailpitBase is not yet
+        // populated; build the URL locally for the probe.
+        var mailpitBase    = getSystemSetting( "MAILPIT_API_BASE", "http://mailpit:8025" );
+        var mailpitPresent = probeMailpit( mailpitBase );
+
         describe( "cbmailservices multipart send path on BoxLang", function(){
 
-            it( "sends a Mail with setHtml + setText without crashing and Mailpit receives both parts", function(){
+            it(
+                title = "sends a Mail with setHtml + setText without crashing and Mailpit receives both parts",
+                skip  = !mailpitPresent,
+                body  = function(){
                 var uniqueId = lCase( replace( createUUID(), "-", "", "all" ) );
                 var subject  = "Multipart guard " & uniqueId;
                 var htmlBody = "<html><body><p>HTML side for <strong>" & uniqueId & "</strong>.</p></body></html>";
@@ -96,6 +106,22 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
 
     // ---------------- private ----------------
+
+    /**
+     * Quick liveness probe so CI environments without a Mailpit
+     * service skip this spec instead of failing on the SMTP send.
+     * Takes the base URL as an explicit argument because the
+     * probe runs from inside run(), before beforeAll() populates
+     * variables.mailpitBase.
+     */
+    private boolean function probeMailpit( required string baseUrl ){
+        try {
+            var resp = httpRequest( method = "GET", target = arguments.baseUrl & "/api/v1/info" );
+            return resp.status >= 200 && resp.status < 500;
+        } catch ( any e ) {
+            return false;
+        }
+    }
 
     private string function extractOuterContentType( required string raw ){
         // Headers are everything before the first blank line.
