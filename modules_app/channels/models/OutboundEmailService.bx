@@ -16,9 +16,8 @@
  */
 class singleton=true {
 
-    property name="wirebox"          inject="wirebox";
-    property name="mailService"      inject="MailService@cbmailservices";
-    property name="settingsService"  inject="SettingsService@admin";
+    property name="wirebox"       inject="wirebox";
+    property name="mailComposer"  inject="MailComposerService@core";
 
     public string function generateMessageId( string ticketId = "" ){
         var host = getSystemSetting( "MAIL_FROM_DOMAIN", "tesserabx.local" );
@@ -51,16 +50,20 @@ class singleton=true {
         var body    = autoAckBody( arguments.ticket );
 
         sendThreaded(
-            recipient : recipient,
-            subject   : subject,
-            body      : body,
-            messageId : msgId
+            recipient      : recipient,
+            subject        : subject,
+            body           : body,
+            messageId      : msgId,
+            organizationId : arguments.ticket.getOrganizationId() ?: "",
+            eventKey       : "tickets.auto_ack"
         );
 
         // Save the ack as a TicketMessage so the conversation thread
         // reflects what the client received, and so a later inbound
         // reply that quotes our Message-ID can match back to this
-        // ticket via In-Reply-To.
+        // ticket via In-Reply-To. The unwrapped plain-text body is
+        // stored here on purpose; the HTML chrome belongs only to
+        // the wire (composer wraps it inside sendThreaded).
         wirebox.getInstance( "TicketsService@tickets" ).addMessage( {
             ticketId    : arguments.ticket.getId(),
             body        : body,
@@ -94,12 +97,14 @@ class singleton=true {
         var thread = threadForTicket( arguments.ticket.getId(), arguments.message.getId() );
 
         sendThreaded(
-            recipient    : recipient,
-            subject      : subject,
-            body         : arguments.message.getBody(),
-            messageId    : msgId,
-            inReplyTo    : thread.inReplyTo,
-            references   : thread.references
+            recipient      : recipient,
+            subject         : subject,
+            body            : arguments.message.getBody(),
+            messageId       : msgId,
+            inReplyTo       : thread.inReplyTo,
+            references      : thread.references,
+            organizationId  : arguments.ticket.getOrganizationId() ?: "",
+            eventKey        : "tickets.agent_reply"
         );
 
         // Persist our Message-ID on the just-saved TicketMessage so a
@@ -181,31 +186,40 @@ class singleton=true {
         required string subject,
         required string body,
         required string messageId,
-        string inReplyTo  = "",
-        string references = ""
+        string inReplyTo      = "",
+        string references     = "",
+        string organizationId = "",
+        string eventKey       = ""
     ){
-        var mail = mailService.newMail(
-            to      = arguments.recipient,
-            from    = fromAddress(),
-            subject = arguments.subject,
-            type    = "text",
-            body    = arguments.body
-        );
-
-        // Apply the admin-managed mail server override. No-op when
-        // mail.enabled is false; .env-backed cbmailservices config
-        // is the fallback in that case.
-        settingsService.applyMailOverride( mail );
-
-        mail.addMailParam( name = "Message-ID", value = arguments.messageId );
+        // Threading headers (Message-ID / In-Reply-To /
+        // References) must reach the wire so mail clients group
+        // the conversation. We pass them through composer.headers
+        // which forwards each to mail.addMailParam.
+        var threadHeaders = { "Message-ID" : arguments.messageId };
         if ( len( arguments.inReplyTo ) ) {
-            mail.addMailParam( name = "In-Reply-To", value = arguments.inReplyTo );
+            threadHeaders[ "In-Reply-To" ] = arguments.inReplyTo;
         }
         if ( len( arguments.references ) ) {
-            mail.addMailParam( name = "References", value = arguments.references );
+            threadHeaders[ "References" ] = arguments.references;
         }
 
-        mailService.send( mail );
+        // style="reply" picks the thinner person-to-person
+        // chrome so the message threads naturally in Gmail /
+        // Apple Mail / Outlook instead of looking like a
+        // marketing blast.
+        var mail = mailComposer.compose(
+            to             = arguments.recipient,
+            from           = fromAddress(),
+            subject        = arguments.subject,
+            body           = arguments.body,
+            bodyFormat     = "text",
+            style          = "reply",
+            recipientType  = "contact",
+            organizationId = arguments.organizationId,
+            eventKey       = arguments.eventKey,
+            headers        = threadHeaders
+        );
+        mailComposer.send( mail );
     }
 
     private string function bracketed( required string value ){

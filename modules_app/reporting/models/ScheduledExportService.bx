@@ -19,7 +19,7 @@ class singleton=true {
     property name="wirebox"          inject="wirebox";
     property name="cbfs"             inject="DiskService@cbfs";
     property name="reportingService" inject="ReportingService@reporting";
-    property name="mailService"      inject="mailService@cbmailservices";
+    property name="mailComposer"     inject="MailComposerService@core";
     property name="settingsService"  inject="SettingsService@admin";
 
     // ---------------- CRUD ----------------
@@ -197,12 +197,19 @@ class singleton=true {
               : "An admin can download the file from /agent/admin/exports." & char( 10 );
 
         try {
-            var mail = mailService.newMail(
-                to       = arguments.recipients.toList( "," ),
-                from     = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
-                subject  = subject,
-                type     = "text/plain",
-                body     = body
+            // Compose via MailComposerService for branded HTML +
+            // text/plain alternative. Attachment is added on the
+            // returned Mail object below because attachments need
+            // a resolved physical path (CBFS info lookup) and the
+            // composer's `attachments` argument is reserved.
+            var mail = mailComposer.compose(
+                to            = arguments.recipients.toList( "," ),
+                subject       = subject,
+                body          = body,
+                bodyFormat    = "text",
+                recipientType = "agent",
+                eventKey      = "reporting.export.ready",
+                preheader     = "Scheduled export is ready to download."
             );
             if ( attach ) {
                 // cfmail attachments need a real filesystem path, not
@@ -225,10 +232,7 @@ class singleton=true {
                     );
                 }
             }
-            // Apply admin-managed mail server override (no-op when
-            // mail.enabled is false).
-            settingsService.applyMailOverride( mail );
-            mailService.send( mail );
+            mailComposer.send( mail );
         } catch ( any e ) {
             writeLog(
                 text : "ScheduledExportService.sendReadyEmail [#arguments.ex.getId()#] failed: " & e.message,

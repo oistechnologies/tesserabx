@@ -19,7 +19,7 @@ class extends="cbwire.models.Component" {
 
     property name="agentService"  inject="AgentService@agent";
     property name="totp"          inject="TotpService@agent";
-    property name="mailService"   inject="mailService@cbmailservices";
+    property name="mailComposer"  inject="MailComposerService@core";
     property name="auth"          inject="AuthenticationService@cbauth";
     // Curated time-zone list lives in coldbox settings so every
     // module shares the same picker without duplicating data.
@@ -285,14 +285,16 @@ class extends="cbwire.models.Component" {
                 & verifyUrl & char( 10 )
                 & "" & char( 10 )
                 & "If you did not request this change you can safely ignore this message." & char( 10 );
-            var mail = mailService.newMail(
-                to      = arguments.newEmail,
-                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
-                subject = "Confirm your new TesseraBX agent email",
-                type    = "text/plain",
-                body    = body
+            var mail = mailComposer.compose(
+                to            = arguments.newEmail,
+                subject       = "Confirm your new TesseraBX agent email",
+                body          = body,
+                bodyFormat    = "text",
+                recipientType = "agent",
+                eventKey      = "account.email_change.verify",
+                preheader     = "Confirm your new agent email address within 60 minutes."
             );
-            mailService.send( mail );
+            mailComposer.send( mail );
         } catch ( any e ) {
             writeLog(
                 text : "MyAccount email-change send failed: " & e.message,

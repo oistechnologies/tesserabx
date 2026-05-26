@@ -15,8 +15,8 @@
  */
 class singleton=true {
 
-    property name="mailService"     inject="mailService@cbmailservices";
-    property name="settingsService" inject="SettingsService@admin";
+    property name="mailComposer" inject="MailComposerService@core";
+    property name="wirebox"      inject="wirebox";
 
     public string function getChannelId(){
         return "email";
@@ -42,15 +42,51 @@ class singleton=true {
                 arguments.notification.save();
                 return;
             }
-            var mail = mailService.newMail(
-                to      = to,
-                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
-                subject = arguments.notification.getTitle(),
-                type    = "text/plain",
-                body    = arguments.notification.getBody() ?: ""
+            // Route through MailComposerService so the branded
+            // HTML chrome wraps the rendered body and the
+            // plain-text alternative is also sent. The notification
+            // body comes from NotificationsService.render() which
+            // does {{token}} substitution on the template's text;
+            // bodyFormat="text" paragraphizes and autolinks it for
+            // the HTML side.
+            // Mint a per-recipient one-click unsubscribe URL.
+            // The /unsubscribe public endpoint verifies the
+            // signed token and flips the notification_preferences
+            // row for the (recipient, event, channel) tuple.
+            // Lazy-resolved via WireBox to avoid the dispatcher
+            // and EmailChannel ending up in a circular dep chain
+            // through the channel registry.
+            var unsubscribeUrl = "";
+            try {
+                unsubscribeUrl = wirebox.getInstance( "NotificationsService@notifications" )
+                    .buildUnsubscribeUrl(
+                        arguments.notification.getRecipientType(),
+                        arguments.notification.getRecipientId(),
+                        arguments.notification.getEventKey() ?: "",
+                        "email"
+                    );
+            } catch ( any e ) {
+                // Non-fatal: the email still ships without the
+                // List-Unsubscribe header. Worth a log line so a
+                // future cleanup notices.
+                writeLog(
+                    text : "EmailChannel could not build unsubscribe URL: " & e.message,
+                    log  : "tesserabx",
+                    type : "warning"
+                );
+            }
+
+            var mail = mailComposer.compose(
+                to                 = to,
+                subject            = arguments.notification.getTitle(),
+                body               = arguments.notification.getBody() ?: "",
+                bodyFormat         = "text",
+                recipientType      = arguments.notification.getRecipientType(),
+                organizationId     = arguments.notification.getOrganizationId() ?: "",
+                eventKey           = arguments.notification.getEventKey() ?: "",
+                listUnsubscribeUrl = unsubscribeUrl
             );
-            settingsService.applyMailOverride( mail );
-            var result = mailService.send( mail );
+            var result = mailComposer.send( mail );
             var failed = false;
             try { if ( isStruct( result ) && structKeyExists( result, "error" ) && result.error ) failed = true; }
             catch ( any e ) {}

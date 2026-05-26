@@ -19,7 +19,7 @@
 class singleton=true {
 
     property name="ticketsService"   inject="TicketsService@tickets";
-    property name="mailService"      inject="MailService@cbmailservices";
+    property name="mailComposer"     inject="MailComposerService@core";
     property name="settingsService"  inject="SettingsService@admin";
 
     // Per build plan + .env documentation: a verification link is
@@ -181,20 +181,22 @@ class singleton=true {
                 & "your email address and create the ticket:" & nl & nl
                 & confirmLink & nl & nl
                 & "If you did not submit this request you can safely ignore this message." & nl;
-            // Match OutboundEmailService.sendThreaded: type="text"
-            // (not "text/plain", which crashes cbmailservices on
-             // BoxLang with "Can't cast Struct to a string") and
-             // apply the admin-managed mail-server override so the
-             // dev stack actually routes to Mailpit.
-            var mail = mailService.newMail(
-                to      = arguments.toEmail,
-                from    = getSystemSetting( "MAIL_FROM", "no-reply@tesserabx.local" ),
-                subject = "Confirm your support request",
-                type    = "text",
-                body    = body
+            // Route through MailComposerService so the message
+            // gets the branded HTML chrome (auto-rendered from
+            // the plain-text body via bodyFormat="text") plus the
+            // text/plain alternative for clients that need it.
+            // The admin-managed SMTP override and ops headers are
+            // applied inside compose().
+            var mail = mailComposer.compose(
+                to            = arguments.toEmail,
+                subject       = "Confirm your support request",
+                body          = body,
+                bodyFormat    = "text",
+                recipientType = "raw",
+                eventKey      = "portal.pending_ticket.verify",
+                preheader     = "Confirm your support request to create the ticket."
             );
-            settingsService.applyMailOverride( mail );
-            mailService.send( mail );
+            mailComposer.send( mail );
         } catch ( any e ) {
             writeLog(
                 text : "PendingTicketsService email send failed: " & e.message,
