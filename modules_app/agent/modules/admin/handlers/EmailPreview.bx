@@ -1,0 +1,132 @@
+/**
+ * /agent/admin/email-preview handler.
+ *
+ * Admin tool for visually verifying the branded email chrome
+ * before going live with a brand change. Pick a style
+ * (notification or reply), a brand source (global or any
+ * organization), paste sample HTML for the body, and either:
+ *   - render: see the composed HTML in an iframe + plain-text
+ *     alternative below it, or
+ *   - send: fire a real send via MailComposerService so the
+ *     admin can verify deliverability and client rendering in
+ *     their actual inbox.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*.
+ *
+ * The template picker (EmailTemplateRegistry-driven dropdown of
+ * add-on-contributed views) is intentionally deferred to a
+ * follow-up. v1 ships the raw-HTML preview path which exercises
+ * the same composer code paths and is enough to verify the
+ * chrome.
+ */
+class {
+
+    property name="composer"        inject="MailComposerService@core";
+    property name="branding"        inject="BrandingService@admin";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.style           = "notification";
+        param rc.organizationId  = "";
+        param rc.subject         = "TesseraBX email preview";
+        param rc.body            = "<p>This is a sample email body. Replace it with whatever you want to preview.</p>"
+                                 & "<p><a href=""https://example.com"">Sample link</a></p>";
+        param rc.preheader       = "Inbox preview text shown here.";
+        param rc.renderRequested = false;
+
+        prc.pageTitle      = "Email preview";
+        prc.organizations  = contactsService.listOrganizations();
+        prc.selectedOrgId  = rc.organizationId;
+        prc.style          = ( rc.style == "reply" ) ? "reply" : "notification";
+        prc.subject        = rc.subject;
+        prc.body           = rc.body;
+        prc.preheader      = rc.preheader;
+        prc.renderRequested = !!rc.renderRequested;
+        prc.previewMail    = javaCast( "null", "" );
+        prc.previewHtml    = "";
+        prc.previewText    = "";
+
+        if ( prc.renderRequested ) {
+            prc.previewMail = buildPreviewMail( rc );
+            for ( var p in prc.previewMail.getMailParts() ) {
+                if ( ( p.type ?: "" ) == "text/html"  ) prc.previewHtml = p.body ?: "";
+                if ( ( p.type ?: "" ) == "text/plain" ) prc.previewText = p.body ?: "";
+            }
+        }
+
+        event.setView( "email-preview/index" );
+    }
+
+    /**
+     * GET / POST /agent/admin/email-preview/render
+     * Re-displays the form with the rendered preview filled in.
+     */
+    function render( event, rc, prc ){
+        rc.renderRequested = true;
+        return index( argumentCollection = arguments );
+    }
+
+    /**
+     * POST /agent/admin/email-preview/sendTest
+     * Fires a real send to the recipient address. Defaults to
+     * the current agent's address when blank.
+     */
+    function sendTest( event, rc, prc ){
+        param rc.to = "";
+        var to = trim( rc.to );
+        if ( !len( to ) ) to = currentAgentEmail();
+        if ( !len( to ) ) {
+            messagebox.error( "No recipient address available for the test send." );
+            relocate( uri = "/agent/admin/email-preview" );
+            return;
+        }
+        try {
+            var mail = buildPreviewMail( rc, to );
+            composer.send( mail );
+            messagebox.info( "Preview email queued to " & to & "." );
+        } catch ( any e ) {
+            messagebox.error( "Test send failed: " & e.message );
+        }
+        relocate(
+            uri        : "/agent/admin/email-preview",
+            persistStruct : { style : rc.style ?: "notification", organizationId : rc.organizationId ?: "" }
+        );
+    }
+
+    // ---------- internals ----------
+
+    private any function buildPreviewMail( required struct rc, string to = "" ){
+        var recipientType = "raw";
+        if ( len( arguments.rc.organizationId ?: "" ) ) {
+            // Per-org brand only resolves for contact-recipient
+            // mail. Force the recipientType to contact so the
+            // preview reflects what a real client would see.
+            recipientType = "contact";
+        }
+        return composer.compose(
+            to             = len( arguments.to ) ? arguments.to : "preview-recipient@example.com",
+            subject        = arguments.rc.subject ?: "TesseraBX email preview",
+            body           = arguments.rc.body ?: "",
+            bodyFormat     = "html",
+            style          = ( arguments.rc.style ?: "" ) == "reply" ? "reply" : "notification",
+            organizationId = arguments.rc.organizationId ?: "",
+            recipientType  = recipientType,
+            preheader      = arguments.rc.preheader ?: "",
+            eventKey       = "admin.email_preview"
+        );
+    }
+
+    private string function currentAgentEmail(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        try { return u.getEmail() ?: ""; } catch ( any e ) { return ""; }
+    }
+
+}

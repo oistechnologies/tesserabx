@@ -211,6 +211,11 @@ class singleton=true {
         // settings page (drives SettingsRegistry).
         register( { id : "admin.addons",          title : "Add-ons",              description : "Discover, enable, and configure installed add-ons.",                  route : "/agent/admin/addons",        icon : "bi bi-puzzle",          sortWeight : 600, requiredPermission : "admin.addons.manage"   } );
         register( { id : "admin.addon-settings",  title : "Add-on settings",      description : "Per-tenant overrides for add-on-declared settings.",                 route : "/agent/admin/addon-settings", icon : "bi bi-gear-wide-connected", sortWeight : 610, requiredPermission : "admin.addons.manage" } );
+
+        // Email composer admin: per-org branding overrides and a
+        // visual preview tool for the branded HTML email chrome.
+        register( { id : "admin.organization-branding", title : "Organization branding", description : "Per-organization overrides for product name, logo, colors, and footer.", route : "/agent/admin/organization-branding", icon : "bi bi-palette",   sortWeight : 230, requiredPermission : "admin.settings.manage" } );
+        register( { id : "admin.email-preview",         title : "Email preview",         description : "Render the branded HTML email chrome against any brand source and send a test.", route : "/agent/admin/email-preview",         icon : "bi bi-envelope-paper", sortWeight : 235, requiredPermission : "admin.settings.manage" } );
     }
 
 }

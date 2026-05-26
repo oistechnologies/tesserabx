@@ -1,0 +1,72 @@
+<bx:output>
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="card-title">Email preview</h2>
+        <p class="card-text text-body-secondary mb-3">
+            Render any email body through the branded chrome to verify
+            colors, logo, and footer before going live. Pick a brand
+            source (global or a specific organization), pick a style
+            (notification or reply), drop sample HTML into the body
+            field, and click <strong>Render preview</strong>. The
+            <strong>Send to my address</strong> button fires a real
+            send through the dev mail trap so you can also verify how
+            Gmail / Outlook / Apple Mail render the result.
+        </p>
+
+        <form method="get" action="/agent/admin/email-preview/render" class="row g-3">
+            <div class="col-md-4">
+                <label for="ep_style" class="form-label">Style</label>
+                <select class="form-select" id="ep_style" name="style">
+                    <option value="notification"<bx:if prc.style eq "notification"> selected</bx:if>>notification (full chrome)</option>
+                    <option value="reply"<bx:if prc.style eq "reply"> selected</bx:if>>reply (thin chrome)</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="ep_org" class="form-label">Brand source</label>
+                <select class="form-select" id="ep_org" name="organizationId">
+                    <option value="">Global (provider) brand</option>
+                    <bx:loop array="#prc.organizations#" item="org">
+                        <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.selectedOrgId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="ep_subject" class="form-label">Subject</label>
+                <input class="form-control" id="ep_subject" name="subject" value="#encodeForHTMLAttribute( prc.subject )#">
+            </div>
+            <div class="col-12">
+                <label for="ep_preheader" class="form-label">Preheader (inbox preview text)</label>
+                <input class="form-control" id="ep_preheader" name="preheader" value="#encodeForHTMLAttribute( prc.preheader )#">
+            </div>
+            <div class="col-12">
+                <label for="ep_body" class="form-label">Body HTML</label>
+                <textarea class="form-control font-monospace" id="ep_body" name="body" rows="8">#encodeForHTML( prc.body )#</textarea>
+                <div class="form-text">Paste any HTML; the composer will wrap it in the chosen chrome. To preview a token-substituted notification template, paste the post-substitution body here.</div>
+            </div>
+            <div class="col-12 d-flex gap-2">
+                <input type="hidden" name="renderRequested" value="true">
+                <button type="submit" class="btn btn-primary">Render preview</button>
+                <button type="submit" class="btn btn-outline-secondary" formaction="/agent/admin/email-preview/sendTest" formmethod="post">Send to my address</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<bx:if prc.renderRequested>
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">HTML preview</h5>
+            <p class="small text-body-secondary">Iframe sandboxes the rendered HTML so its styles do not leak into the admin layout. Inspect the iframe directly to see the real document.</p>
+            <iframe srcdoc="#encodeForHTMLAttribute( prc.previewHtml )#" style="width:100%;min-height:560px;border:1px solid ##dee2e6;border-radius:6px;background:##ffffff;"></iframe>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Plain-text alternative</h5>
+            <p class="small text-body-secondary">Auto-generated from the HTML body via HtmlToText. This is what spam filters and text-only clients see.</p>
+            <pre class="bg-light p-3 mb-0 border rounded" style="white-space:pre-wrap;">#encodeForHTML( prc.previewText )#</pre>
+        </div>
+    </div>
+</bx:if>
+</bx:output>

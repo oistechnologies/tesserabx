@@ -1,0 +1,79 @@
+<bx:output>
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="card-title">Organization branding</h2>
+        <p class="card-text text-body-secondary mb-3">
+            Per-organization overrides for the five brand keys that drive outbound email and the customer portal. Leave a field blank to fall through to the global brand on that column.
+        </p>
+        <form method="get" action="/agent/admin/organization-branding" class="row g-2 align-items-end">
+            <div class="col-md-6">
+                <label for="organizationId" class="form-label">Organization</label>
+                <select class="form-select" id="organizationId" name="organizationId" onchange="this.form.submit()">
+                    <option value="">-- choose an organization --</option>
+                    <bx:loop array="#prc.organizations#" item="org">
+                        <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if ( prc.selectedOrgId ?: "" ) eq org.getId()> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                    </bx:loop>
+                </select>
+            </div>
+        </form>
+    </div>
+</div>
+
+<bx:if !len( prc.selectedOrgId ?: "" )>
+    <div class="alert alert-info">Choose an organization to manage its branding override.</div>
+<bx:else>
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title mb-3">Override values</h5>
+            <p class="small text-body-secondary mb-3">
+                <bx:if prc.hasOverride>
+                    This organization has a per-tenant branding row. Edit any field and save, or clear all fields to remove the override entirely.
+                <bx:else>
+                    This organization currently uses the global brand for every column. Fill any field to start overriding.
+                </bx:if>
+            </p>
+
+            <form method="post" action="/agent/admin/organization-branding/save">
+                <input type="hidden" name="organizationId" value="#encodeForHTMLAttribute( prc.selectedOrgId )#">
+
+                <div class="mb-3">
+                    <label for="ob_product_name" class="form-label">Product name</label>
+                    <input class="form-control" id="ob_product_name" name="productName" value="#encodeForHTMLAttribute( prc.values.productName )#" placeholder="#encodeForHTMLAttribute( prc.globalBrand.productName )#">
+                    <div class="form-text">Global value: <code>#encodeForHTML( prc.globalBrand.productName )#</code></div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="ob_tagline" class="form-label">Tagline</label>
+                    <input class="form-control" id="ob_tagline" name="tagline" value="#encodeForHTMLAttribute( prc.values.tagline )#" placeholder="#encodeForHTMLAttribute( prc.globalBrand.tagline )#">
+                    <div class="form-text">Global value: <code>#encodeForHTML( prc.globalBrand.tagline )#</code></div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="ob_logo_url" class="form-label">Logo URL</label>
+                    <input class="form-control" id="ob_logo_url" name="logoUrl" value="#encodeForHTMLAttribute( prc.values.logoUrl )#" placeholder="#encodeForHTMLAttribute( prc.globalBrand.logoUrl )#">
+                    <div class="form-text">Absolute URL preferred so email clients can fetch it. Global value: <code>#encodeForHTML( len( prc.globalBrand.logoUrl ) ? prc.globalBrand.logoUrl : "(bundled default)" )#</code></div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="ob_primary_color" class="form-label">Primary color</label>
+                    <input class="form-control" id="ob_primary_color" name="primaryColor" value="#encodeForHTMLAttribute( prc.values.primaryColor )#" placeholder="#encodeForHTMLAttribute( prc.globalBrand.primaryColor )#">
+                    <div class="form-text">CSS hex (e.g. <code>##0d6efd</code>). Global value: <code>#encodeForHTML( prc.globalBrand.primaryColor )#</code></div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="ob_footer_text" class="form-label">Footer text</label>
+                    <textarea class="form-control" id="ob_footer_text" name="footerText" rows="2" placeholder="#encodeForHTMLAttribute( prc.globalBrand.footerText )#">#encodeForHTML( prc.values.footerText )#</textarea>
+                    <div class="form-text">Global value: <code>#encodeForHTML( prc.globalBrand.footerText )#</code></div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">Save override</button>
+                    <bx:if prc.hasOverride>
+                        <button type="submit" formaction="/agent/admin/organization-branding/clear" class="btn btn-outline-danger">Remove override (use global)</button>
+                    </bx:if>
+                </div>
+            </form>
+        </div>
+    </div>
+</bx:if>
+</bx:output>

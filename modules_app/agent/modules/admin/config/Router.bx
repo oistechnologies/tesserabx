@@ -131,6 +131,16 @@ class {
         route( "addon-settings/save" ).withVerbs( "POST" ).to( "AddonSettings.save" );
         route( "addon-settings" ).to( "AddonSettings.index" );
 
+        // Per-organization branding overrides (email + portal chrome).
+        route( "organization-branding/save"  ).withVerbs( "POST" ).to( "OrganizationBranding.save"  );
+        route( "organization-branding/clear" ).withVerbs( "POST" ).to( "OrganizationBranding.clear" );
+        route( "organization-branding" ).to( "OrganizationBranding.index" );
+
+        // Email composer preview tool.
+        route( "email-preview/render"   ).to( "EmailPreview.render"   );
+        route( "email-preview/sendTest" ).withVerbs( "POST" ).to( "EmailPreview.sendTest" );
+        route( "email-preview" ).to( "EmailPreview.index" );
+
         // Provider-user RBAC. Most-specific patterns first.
         //  - /users/new and /users/:id/edit serve the CBWire form
         //    component (AgentForm@admin).

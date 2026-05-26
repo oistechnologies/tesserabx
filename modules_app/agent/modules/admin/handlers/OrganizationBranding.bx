@@ -1,0 +1,113 @@
+/**
+ * /agent/admin/organization-branding handler.
+ *
+ * Per-organization branding overrides for the five brand keys.
+ * Mirrors the AddonSettings pattern: the admin picks an
+ * organization from a dropdown; the form populates with the
+ * override values (or blank when the org falls through to global
+ * on a given column). Save persists non-blank values; blank
+ * values clear that column so it falls through to global.
+ *
+ * Admin-only via the cbSecurity rule on /agent/admin/*.
+ */
+class {
+
+    property name="branding"        inject="BrandingService@admin";
+    property name="settings"        inject="SettingsService@admin";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        param rc.organizationId = "";
+        prc.pageTitle     = "Organization branding";
+        prc.organizations = contactsService.listOrganizations();
+        prc.selectedOrgId = rc.organizationId;
+        prc.globalBrand   = settings.getBranding();
+
+        prc.values = {
+            productName  : "",
+            tagline      : "",
+            logoUrl      : "",
+            primaryColor : "",
+            footerText   : ""
+        };
+        prc.hasOverride = false;
+        if ( len( rc.organizationId ) ) {
+            var row = branding.getOverride( rc.organizationId );
+            if ( !isNull( row ) ) {
+                prc.hasOverride = true;
+                prc.values = {
+                    productName  : row.product_name  ?: "",
+                    tagline      : row.tagline       ?: "",
+                    logoUrl      : row.logo_url      ?: "",
+                    primaryColor : row.primary_color ?: "",
+                    footerText   : row.footer_text   ?: ""
+                };
+            }
+        }
+
+        event.setView( "organization-branding/index" );
+    }
+
+    /**
+     * POST /agent/admin/organization-branding/save
+     */
+    function save( event, rc, prc ){
+        param rc.organizationId = "";
+        param rc.productName    = "";
+        param rc.tagline        = "";
+        param rc.logoUrl        = "";
+        param rc.primaryColor   = "";
+        param rc.footerText     = "";
+
+        if ( !len( rc.organizationId ) ) {
+            messagebox.error( "Pick an organization first." );
+            relocate( uri = "/agent/admin/organization-branding" );
+            return;
+        }
+
+        branding.saveOverride(
+            organizationId : rc.organizationId,
+            values         : {
+                productName  : rc.productName,
+                tagline      : rc.tagline,
+                logoUrl      : rc.logoUrl,
+                primaryColor : rc.primaryColor,
+                footerText   : rc.footerText
+            },
+            actorAgentId   : currentAgentId()
+        );
+        messagebox.info( "Per-organization branding saved." );
+        relocate( uri = "/agent/admin/organization-branding?organizationId=" & rc.organizationId );
+    }
+
+    /**
+     * POST /agent/admin/organization-branding/clear
+     */
+    function clear( event, rc, prc ){
+        param rc.organizationId = "";
+        if ( !len( rc.organizationId ) ) {
+            messagebox.error( "Pick an organization first." );
+            relocate( uri = "/agent/admin/organization-branding" );
+            return;
+        }
+        branding.clearOverride( rc.organizationId );
+        messagebox.info( "Per-organization branding cleared. This organization now uses the global brand." );
+        relocate( uri = "/agent/admin/organization-branding?organizationId=" & rc.organizationId );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        if ( isNull( u ) ) return "";
+        return u.getId();
+    }
+
+}
