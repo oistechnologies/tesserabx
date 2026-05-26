@@ -18,9 +18,17 @@ class singleton=true {
 
     public array function listActions(){
         return [
-            { key : "assign",        label : "Assign to agent",        paramKey : "assignedToAgentId" },
-            { key : "change_status", label : "Change status",          paramKey : "status" },
-            { key : "add_tag",       label : "Add tag",                paramKey : "tag" }
+            { key : "assign",            label : "Assign to agent",         paramKey : "assignedToAgentId" },
+            { key : "change_status",     label : "Change status",           paramKey : "status" },
+            { key : "add_tag",           label : "Add tag",                 paramKey : "tag" },
+            // Spam blocklist actions mirror the single-ticket
+            // "Block this sender" card on /agent/tickets/<id>: for
+            // every selected ticket, blacklist the originating
+            // address (or its domain), drop an internal note on the
+            // ticket, and slam it closed. No extra UI param: the
+            // address comes from each ticket's originating_email.
+            { key : "spam_block_email",  label : "Spam - Block by Email",  paramKey : "" },
+            { key : "spam_block_domain", label : "Spam - Block by Domain", paramKey : "" }
         ];
     }
 

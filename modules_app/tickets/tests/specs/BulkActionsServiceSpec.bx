@@ -26,6 +26,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( keys ).toInclude( "assign" );
                 expect( keys ).toInclude( "change_status" );
                 expect( keys ).toInclude( "add_tag" );
+                expect( keys ).toInclude( "spam_block_email" );
+                expect( keys ).toInclude( "spam_block_domain" );
             } );
 
             it( "rejects an unknown action key", function(){
@@ -84,6 +86,58 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupAgent( assigneeId );
             } );
 
+            it( "spam_block_email blacklists each ticket's sender + closes the ticket", function(){
+                var channels   = getController().getWireBox().getInstance( "ChannelsService@channels" );
+                var actorId    = seedAgent();
+                var t1         = seedTicket();
+                var t2         = seedTicket();
+                var senders    = [ t1.getOriginatingEmail(), t2.getOriginatingEmail() ];
+
+                variables.svc.enqueue(
+                    action       : "spam_block_email",
+                    ticketIds    : [ t1.getId(), t2.getId() ],
+                    actorAgentId : actorId,
+                    connection   : "sync"
+                );
+
+                for ( var addr in senders ) {
+                    expect( channels.isBlocked( addr ) ).toBeTrue();
+                }
+                expect( variables.tsvc.getTicket( t1.getId() ).getStatus() ).toBe( "closed" );
+                expect( variables.tsvc.getTicket( t2.getId() ).getStatus() ).toBe( "closed" );
+
+                cleanupBlacklist( senders );
+                cleanupTickets( [ t1.getId(), t2.getId() ] );
+                cleanupAgent( actorId );
+            } );
+
+            it( "spam_block_domain blacklists each ticket's sender domain", function(){
+                var channels = getController().getWireBox().getInstance( "ChannelsService@channels" );
+                var actorId  = seedAgent();
+                // Two tickets from the same domain to confirm the
+                // domain-level entry survives a duplicate-add on
+                // the second ticket (ChannelsService is idempotent).
+                var domain   = "bulk-domain-" & createUUID() & ".example.com";
+                var t1       = seedTicketFromDomain( domain );
+                var t2       = seedTicketFromDomain( domain );
+
+                variables.svc.enqueue(
+                    action       : "spam_block_domain",
+                    ticketIds    : [ t1.getId(), t2.getId() ],
+                    actorAgentId : actorId,
+                    connection   : "sync"
+                );
+
+                // Any address on the domain is now considered blocked.
+                expect( channels.isBlocked( "anybody@" & domain ) ).toBeTrue();
+                expect( variables.tsvc.getTicket( t1.getId() ).getStatus() ).toBe( "closed" );
+                expect( variables.tsvc.getTicket( t2.getId() ).getStatus() ).toBe( "closed" );
+
+                cleanupBlacklistDomain( domain );
+                cleanupTickets( [ t1.getId(), t2.getId() ] );
+                cleanupAgent( actorId );
+            } );
+
             it( "isolates per-ticket failures; the rest of the batch still applies", function(){
                 var actorId = seedAgent();
                 var good    = seedTicket();
@@ -126,6 +180,31 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             firstMessage     : "test",
             source           : "spec"
         } );
+    }
+
+    private any function seedTicketFromDomain( required string domain ){
+        return variables.tsvc.createAccountlessTicket( {
+            subject          : "bulk-spec-" & createUUID(),
+            originatingEmail : "bulk-spec-" & createUUID() & "@" & arguments.domain,
+            firstMessage     : "test",
+            source           : "spec"
+        } );
+    }
+
+    private void function cleanupBlacklist( required array values ){
+        for ( var v in arguments.values ) {
+            queryExecute(
+                "DELETE FROM channel_blacklist WHERE entry_type = 'email' AND value = :v",
+                { v : lCase( v ) }
+            );
+        }
+    }
+
+    private void function cleanupBlacklistDomain( required string domain ){
+        queryExecute(
+            "DELETE FROM channel_blacklist WHERE entry_type = 'domain' AND value = :v",
+            { v : lCase( arguments.domain ) }
+        );
     }
 
     private void function cleanupTickets( required array ticketIds ){

@@ -90,11 +90,79 @@ class extends="cbq.models.Jobs.AbstractJob" {
                 );
                 return;
 
+            case "spam_block_email":
+                applyBlock( arguments.ts, arguments.ticketId, "email", arguments.actorId );
+                return;
+
+            case "spam_block_domain":
+                applyBlock( arguments.ts, arguments.ticketId, "domain", arguments.actorId );
+                return;
+
             default:
                 throw(
                     type    : "BulkTicketActionJob.UnknownAction",
                     message : "Unknown bulk action: " & arguments.action
                 );
+        }
+    }
+
+    /**
+     * Per-ticket spam-block step. Mirrors the single-ticket
+     * blockSender handler at modules_app/agent/handlers/Tickets.bx:
+     * blacklist the originating address (or its domain) through
+     * ChannelsService, drop a permanent internal note so the close
+     * is traceable on the timeline, then transition the ticket to
+     * closed. Idempotent on the blacklist side: ChannelsService
+     * returns the existing entry when one is already present, so a
+     * bulk of duplicates is safe.
+     */
+    private void function applyBlock(
+        required any ts,
+        required string ticketId,
+        required string scope,
+        required string actorId
+    ){
+        var t = arguments.ts.getTicket( arguments.ticketId );
+        if ( isNull( t ) ) {
+            throw(
+                type    : "BulkTicketActionJob.UnknownTicket",
+                message : "Ticket [#arguments.ticketId#] does not exist"
+            );
+        }
+        var sender = t.getOriginatingEmail() ?: "";
+        if ( !len( sender ) ) {
+            throw(
+                type    : "BulkTicketActionJob.NoSender",
+                message : "Ticket [#arguments.ticketId#] has no originating email to block"
+            );
+        }
+
+        var channels     = getInstance( "ChannelsService@channels" );
+        var blockedScope = "";
+        if ( arguments.scope == "domain" ) {
+            var domain = listLast( sender, "@" );
+            channels.blockDomain( domain : domain, addedByAgentId : arguments.actorId );
+            blockedScope = "domain @" & domain;
+        } else {
+            channels.blockEmail( email : sender, addedByAgentId : arguments.actorId );
+            blockedScope = "address " & sender;
+        }
+
+        arguments.ts.addMessage( {
+            ticketId      : t.getId(),
+            body          : "Sender " & blockedScope & " added to the inbound blacklist via bulk action."
+                          & char( 10 ) & "Ticket auto-closed.",
+            authorAgentId : arguments.actorId,
+            isInternal    : true
+        } );
+
+        if ( t.getStatus() != "closed" ) {
+            arguments.ts.changeStatus( {
+                ticketId  : t.getId(),
+                status    : "closed",
+                actorType : "agent",
+                actorId   : arguments.actorId
+            } );
         }
     }
 
