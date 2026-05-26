@@ -1,0 +1,128 @@
+/**
+ * BrandingServiceSpec: pins the global vs per-org branding merge
+ * resolution used by MailComposerService.
+ *
+ * Setup creates a transient organization row for the spec to hang
+ * an organization_branding row off of (the row's FK CASCADEs on
+ * org delete, so cleanup tears the org down).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.branding = getController().getWireBox().getInstance( "BrandingService@admin" );
+        variables.settings = getController().getWireBox().getInstance( "SettingsService@admin" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    private void function cleanGlobal(){
+        queryExecute( "DELETE FROM app_settings WHERE key LIKE 'brand.%'" );
+        variables.settings.invalidateCache();
+        variables.branding.invalidateAll();
+    }
+
+    private string function makeOrg(){
+        var org = variables.contacts.createOrganization( {
+            name : "Brand Spec Org " & createUUID(),
+            slug : "bs-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        return org.getId();
+    }
+
+    private void function dropOrg( required string orgId ){
+        queryExecute( "DELETE FROM organization_branding WHERE organization_id = :id", { id : arguments.orgId } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.orgId } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.orgId } );
+    }
+
+    function run(){
+        describe( "BrandingService.resolveBranding", function(){
+
+            beforeEach( function( currentSpec ){
+                cleanGlobal();
+            } );
+
+            it( "returns the global brand when organizationId is blank", function(){
+                variables.settings.set( "brand.product_name", "Global Product" );
+                var brand = variables.branding.resolveBranding();
+                expect( brand.productName ).toBe( "Global Product" );
+            } );
+
+            it( "returns the global brand when no per-org override row exists", function(){
+                variables.settings.set( "brand.product_name", "Global Product" );
+                var orgId = makeOrg();
+                try {
+                    var brand = variables.branding.resolveBranding( orgId );
+                    expect( brand.productName ).toBe( "Global Product" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+            it( "merges a per-org override over the global brand column-by-column", function(){
+                variables.settings.set( "brand.product_name", "Global Product" );
+                variables.settings.set( "brand.tagline",      "Global Tagline" );
+                variables.settings.set( "brand.footer_text",  "Global Footer" );
+                var orgId = makeOrg();
+                try {
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : {
+                            productName : "Acme Brand",
+                            tagline     : "",
+                            footerText  : "Acme Footer"
+                        }
+                    );
+                    var brand = variables.branding.resolveBranding( orgId );
+                    // Override columns win when non-blank...
+                    expect( brand.productName ).toBe( "Acme Brand" );
+                    expect( brand.footerText  ).toBe( "Acme Footer" );
+                    // ...and blank columns fall through to global.
+                    expect( brand.tagline     ).toBe( "Global Tagline" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+            it( "honors clearOverride: per-org row deleted, all columns fall through to global", function(){
+                variables.settings.set( "brand.product_name", "Global Product" );
+                var orgId = makeOrg();
+                try {
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : { productName : "Acme Brand" }
+                    );
+                    expect( variables.branding.resolveBranding( orgId ).productName ).toBe( "Acme Brand" );
+
+                    variables.branding.clearOverride( orgId );
+                    expect( variables.branding.resolveBranding( orgId ).productName ).toBe( "Global Product" );
+                    expect( isNull( variables.branding.getOverride( orgId ) ) ).toBeTrue();
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+            it( "invalidates the per-org cache on write", function(){
+                var orgId = makeOrg();
+                try {
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : { productName : "First" }
+                    );
+                    expect( variables.branding.resolveBranding( orgId ).productName ).toBe( "First" );
+
+                    variables.branding.saveOverride(
+                        organizationId : orgId,
+                        values         : { productName : "Second" }
+                    );
+                    expect( variables.branding.resolveBranding( orgId ).productName ).toBe( "Second" );
+                } finally {
+                    dropOrg( orgId );
+                }
+            } );
+
+        } );
+    }
+
+}

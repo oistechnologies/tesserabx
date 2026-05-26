@@ -55,6 +55,9 @@ class {
         binder.map( "SettingsService@admin" )
               .to( "#moduleMapping#.models.SettingsService" )
               .asSingleton();
+        binder.map( "BrandingService@admin" )
+              .to( "#moduleMapping#.models.BrandingService" )
+              .asSingleton();
         binder.map( "AdminPagesRegistry@admin" )
               .to( "#moduleMapping#.models.AdminPagesRegistry" )
               .asSingleton();

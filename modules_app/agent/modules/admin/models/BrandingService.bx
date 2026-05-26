@@ -1,0 +1,192 @@
+/**
+ * BrandingService: resolves the effective branding for a recipient.
+ *
+ * v1 of the branded email work introduces per-organization
+ * overrides. This service is the single read path the composer
+ * calls; callers do not touch organization_branding rows or
+ * app_settings directly.
+ *
+ * Resolution rule, column by column:
+ *   - When organizationId is blank, return the global brand.
+ *   - When an organization_branding row exists for organizationId,
+ *     merge non-null per-org columns over the global brand;
+ *     null or blank per-org columns fall through to global.
+ *
+ * The service is cached per-org in memory; writes invalidate the
+ * cache for that org. Global writes (through SettingsService) do
+ * not currently cross-invalidate; admin handlers that flip global
+ * brand should call invalidateAll() to keep things consistent.
+ *
+ * Architectural note: this service lives in `admin` (not contacts)
+ * to keep the module dependency arrow pointing the same direction
+ * as today's code. `admin` already reaches into `contacts`
+ * services; `contacts` never imports `admin`. The
+ * organization_branding TABLE conceptually belongs to contacts
+ * (its rows are scoped by Organization), but the resolution
+ * service that overlays global settings naturally pairs with
+ * SettingsService which lives here.
+ */
+class singleton=true {
+
+    property name="settings" inject="SettingsService@admin";
+
+    variables.cache        = {};
+    variables.cacheLock    = "branding-service-cache";
+
+    /**
+     * Resolve the effective branding for a recipient.
+     *
+     * @organizationId Tenant id (empty for global / provider-side
+     *                 mail).
+     */
+    public struct function resolveBranding( string organizationId = "" ){
+        var global = variables.settings.getBranding();
+        if ( !len( arguments.organizationId ) ) return global;
+
+        var override = lookupOverride( arguments.organizationId );
+        if ( isNull( override ) ) return global;
+
+        return mergeOverrides( global, override );
+    }
+
+    /**
+     * Read the per-org override row (raw, unmerged). Returns null
+     * when no row exists. Public for the admin CRUD page.
+     */
+    public any function getOverride( required string organizationId ){
+        return lookupOverride( arguments.organizationId );
+    }
+
+    /**
+     * Upsert the per-org override row. Pass blank / null for any
+     * field to "use global". Returns the merged effective brand
+     * the caller can show in a confirmation message.
+     */
+    public struct function saveOverride(
+        required string organizationId,
+        required struct values,
+        string actorAgentId = ""
+    ){
+        var existing = lookupOverride( arguments.organizationId );
+        var record = {
+            organization_id     : arguments.organizationId,
+            product_name        : nullableString( arguments.values.productName    ?: "" ),
+            tagline             : nullableString( arguments.values.tagline        ?: "" ),
+            logo_url            : nullableString( arguments.values.logoUrl        ?: "" ),
+            primary_color       : nullableString( arguments.values.primaryColor   ?: "" ),
+            footer_text         : nullableString( arguments.values.footerText     ?: "" ),
+            updated_by_agent_id : len( arguments.actorAgentId )
+                                  ? arguments.actorAgentId
+                                  : javaCast( "null", "" )
+        };
+
+        if ( isNull( existing ) ) {
+            queryExecute(
+                "INSERT INTO organization_branding
+                    ( organization_id, product_name, tagline, logo_url, primary_color, footer_text, updated_by_agent_id )
+                 VALUES
+                    ( :organization_id, :product_name, :tagline, :logo_url, :primary_color, :footer_text, :updated_by_agent_id )",
+                record
+            );
+        } else {
+            queryExecute(
+                "UPDATE organization_branding
+                    SET product_name        = :product_name,
+                        tagline             = :tagline,
+                        logo_url            = :logo_url,
+                        primary_color       = :primary_color,
+                        footer_text         = :footer_text,
+                        updated_at          = CURRENT_TIMESTAMP,
+                        updated_by_agent_id = :updated_by_agent_id
+                  WHERE organization_id = :organization_id",
+                record
+            );
+        }
+        invalidate( arguments.organizationId );
+        return resolveBranding( arguments.organizationId );
+    }
+
+    /**
+     * Drop the per-org override row so the org falls all the way
+     * through to global on every column.
+     */
+    public void function clearOverride( required string organizationId ){
+        queryExecute(
+            "DELETE FROM organization_branding WHERE organization_id = :id",
+            { id : arguments.organizationId }
+        );
+        invalidate( arguments.organizationId );
+    }
+
+    /**
+     * Drop the in-memory cache for one org (called on writes).
+     */
+    public void function invalidate( required string organizationId ){
+        lock name="#variables.cacheLock#" type="exclusive" timeout="5" {
+            structDelete( variables.cache, arguments.organizationId );
+        }
+    }
+
+    /**
+     * Drop the entire in-memory cache. Admin handlers that flip
+     * the global brand should call this so per-org reads pick up
+     * the new global baseline immediately.
+     */
+    public void function invalidateAll(){
+        lock name="#variables.cacheLock#" type="exclusive" timeout="5" {
+            variables.cache = {};
+        }
+    }
+
+    // --------------- private ---------------
+
+    private any function lookupOverride( required string organizationId ){
+        lock name="#variables.cacheLock#" type="readonly" timeout="5" {
+            if ( structKeyExists( variables.cache, arguments.organizationId ) ) {
+                var hit = variables.cache[ arguments.organizationId ];
+                return ( hit.isMiss ?: false ) ? javaCast( "null", "" ) : hit.row;
+            }
+        }
+        var row = readRow( arguments.organizationId );
+        lock name="#variables.cacheLock#" type="exclusive" timeout="5" {
+            variables.cache[ arguments.organizationId ] = isNull( row )
+                ? { isMiss : true }
+                : { isMiss : false, row : row };
+        }
+        return isNull( row ) ? javaCast( "null", "" ) : row;
+    }
+
+    private any function readRow( required string organizationId ){
+        var rows = queryExecute(
+            "SELECT organization_id, product_name, tagline, logo_url, primary_color, footer_text
+               FROM organization_branding
+              WHERE organization_id = :id",
+            { id : arguments.organizationId },
+            { returntype : "array" }
+        );
+        if ( !arrayLen( rows ) ) return javaCast( "null", "" );
+        return rows[ 1 ];
+    }
+
+    private struct function mergeOverrides( required struct global, required struct override ){
+        var merged = duplicate( arguments.global );
+        // Column-by-column merge: per-org non-blank value wins.
+        if ( len( arguments.override.product_name  ?: "" ) ) merged.productName  = arguments.override.product_name;
+        if ( len( arguments.override.tagline       ?: "" ) ) merged.tagline      = arguments.override.tagline;
+        if ( len( arguments.override.logo_url      ?: "" ) ) merged.logoUrl      = arguments.override.logo_url;
+        if ( len( arguments.override.primary_color ?: "" ) ) merged.primaryColor = arguments.override.primary_color;
+        if ( len( arguments.override.footer_text   ?: "" ) ) merged.footerText   = arguments.override.footer_text;
+        return merged;
+    }
+
+    /**
+     * Treat blank as NULL so the column-by-column merge can
+     * fall through to global. An admin clearing a per-org field
+     * gets back the global value.
+     */
+    private any function nullableString( required string value ){
+        var v = trim( arguments.value );
+        return len( v ) ? v : javaCast( "null", "" );
+    }
+
+}
