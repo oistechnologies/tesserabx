@@ -20,6 +20,16 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
 
     function run(){
+        // The auto-ack TicketMessage row is now only persisted when
+        // the underlying cbmailservices send actually shipped (see
+        // OutboundEmailService.sendAutoAcknowledgement); a CI run
+        // without Mailpit gets a send error from cbmailservices and
+        // the ack row is correctly skipped. Specs whose assertion
+        // depends on the ack message landing skip in that
+        // environment. Probe at the top of run() per the project
+        // memo "TestBox run() runs before beforeAll()".
+        var mailpitPresent = probeMailpit( getSystemSetting( "MAILPIT_API_BASE", "http://mailpit:8025" ) );
+
         describe( "InboundEmailProcessor", function(){
 
             it( "creates an accountless ticket for an unknown sender", function(){
@@ -137,7 +147,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupTicket( first.getTicketId() );
             } );
 
-            it( "appends to an existing ticket when In-Reply-To matches a prior inbound", function(){
+            it( title = "appends to an existing ticket when In-Reply-To matches a prior inbound", skip = !mailpitPresent, body = function(){
                 var sender = "thread-" & createUUID() & "@example.com";
                 var msgIdA = "msg-A-" & createUUID() & "@example.com";
                 var first  = variables.processor.process( {
@@ -406,6 +416,28 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
     private void function cleanupInbound( required string id ){
         queryExecute( "DELETE FROM inbound_emails WHERE id = :id", { id : arguments.id } );
+    }
+
+    /**
+     * Probe Mailpit by opening a tiny HTTP connection. Mirrors the
+     * helper in OutboundEmailServiceSpec / CbmailservicesMultipartSpec.
+     * Using java.net.URLConnection rather than cfhttp because the
+     * probe runs at the top of run() before BoxLang's request scope
+     * is fully wired and cfhttp has been flaky in that window.
+     */
+    private boolean function probeMailpit( required string base ){
+        try {
+            var connectionHandle = createObject( "java", "java.net.URL" )
+                .init( arguments.base & "/api/v1/info" )
+                .openConnection();
+            connectionHandle.setRequestMethod( "GET" );
+            connectionHandle.setConnectTimeout( javaCast( "int", 1500 ) );
+            connectionHandle.setReadTimeout( javaCast( "int", 1500 ) );
+            var status = connectionHandle.getResponseCode();
+            return status >= 200 && status < 500;
+        } catch ( any e ) {
+            return false;
+        }
     }
 
     private void function cleanupTicket( required string id ){
