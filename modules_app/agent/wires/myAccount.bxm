@@ -17,10 +17,6 @@
         </div>
     </bx:if>
 
-    <bx:if len( notice )>
-        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )#">#encodeForHTML( notice )#</div>
-    </bx:if>
-
     <ul class="nav nav-tabs mb-3">
         <li class="nav-item">
             <a class="nav-link #( local.tab == 'profile'  ? 'active' : '' )#" wire:click.prevent="setTab('profile')"  href="##">Profile</a>

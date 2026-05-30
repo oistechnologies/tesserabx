@@ -13,8 +13,9 @@
  */
 class {
 
-    property name="kb"   inject="KnowledgebaseService@knowledgebase";
-    property name="auth" inject="AuthenticationService@cbauth";
+    property name="kb"         inject="KnowledgebaseService@knowledgebase";
+    property name="auth"       inject="AuthenticationService@cbauth";
+    property name="messagebox" inject="messagebox@cbmessagebox";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         // Reuse whichever layout matches the current user: agents
@@ -80,6 +81,10 @@ class {
             ipHash    : ipHash( event ),
             comment   : rc.comment
         } );
+        // Flash success rides the relocate and renders as a toast through
+        // the shared toast_flash partial; ?thanks=1 keeps the voting form
+        // hidden so the reader does not immediately re-vote.
+        messagebox.success( "Thanks for the feedback!" );
         relocate( uri = "/kb/" & article.getSlug() & "?thanks=1" );
     }
 

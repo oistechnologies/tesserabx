@@ -19,6 +19,7 @@ class extends="cbwire.models.Component" {
     property name="agentService" inject="AgentService@agent";
     property name="rbacService"  inject="RbacService@agent";
     property name="auth"         inject="AuthenticationService@cbauth";
+    property name="messagebox"   inject="messagebox@cbmessagebox";
     // Curated time-zone list lives in coldbox settings so every
     // module shares the same picker without duplicating data.
     property name="timezoneList" inject="coldbox:setting:timezones";
@@ -54,16 +55,15 @@ class extends="cbwire.models.Component" {
         // Role state: array of role_keys currently granted.
         "grantedRoles"     : [],
 
-        // Transient UI feedback. The avatar upload UI is rendered
-        // outside the wire (in views/users/edit.bxm) so the wire
-        // view stays under the cbwire+BoxLang preprocessor size
+        // Validation errors are shown inline near the form. Save
+        // success is delivered as a toast on the destination list page
+        // via a flash message (see save()). The avatar upload UI is
+        // rendered outside the wire (in views/users/edit.bxm) so the
+        // wire view stays under the cbwire+BoxLang preprocessor size
         // limit (~15.5KB) and so cbwire's FileUpload object never
         // enters the wire's data struct (BoxLang's duplicate() can't
-        // clone the ScheduledThreadPoolExecutor it transitively
-        // holds).
-        "errors"           : [],
-        "notice"           : "",
-        "noticeKind"       : "info"
+        // clone the ScheduledThreadPoolExecutor it transitively holds).
+        "errors"           : []
     };
 
     // agentId and isEdit must not be mutable from the client; the
@@ -168,6 +168,7 @@ class extends="cbwire.models.Component" {
                     data         : buildPersistStruct( includePassword : false ),
                     actorAgentId : actor
                 );
+                messagebox.success( "Agent updated." );
             } else {
                 var newId = agentService.createAgent(
                     data         : buildPersistStruct( includePassword : true ),
@@ -175,7 +176,10 @@ class extends="cbwire.models.Component" {
                 );
                 data.agentId = newId;
                 data.isEdit  = true;
+                messagebox.success( "Agent created." );
             }
+            // Flash success rides the redirect; the list page renders it
+            // as a toast through the shared toast_flash partial.
             redirect( "/agent/admin/users", true );
         } catch ( any e ) {
             data.errors = [ "Save failed: " & e.message ];

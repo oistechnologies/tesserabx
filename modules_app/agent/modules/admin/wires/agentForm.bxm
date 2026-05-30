@@ -29,10 +29,6 @@
         </div>
     </bx:if>
 
-    <bx:if len( notice )>
-        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )#" role="status">#encodeForHTML( notice )#</div>
-    </bx:if>
-
     <form wire:submit.prevent="save" autocomplete="off">
         <div class="row g-3">
 

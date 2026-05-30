@@ -1,0 +1,61 @@
+<bx:output>
+<bx:script>
+    // Shared flash -> toast bridge. Each former cbMessageBox render point
+    // now includes this partial instead. Rather than emitting an on-page
+    // alert box, it reads the pending cbMessageBox message and emits a
+    // <script> that fires the matching window.TesseraBX toast helper, then
+    // clears the message so it shows exactly once (mirroring the old
+    // render's purge-on-render behavior).
+    //
+    // Handlers keep calling messagebox.info/success/error/warn(...) as
+    // before; only the render changes.
+    local.hasToast = false;
+
+    local.mb = getInstance( "messagebox@cbmessagebox" );
+    if ( !local.mb.isEmptyMessage() ) {
+        local.msg  = local.mb.getMessage();
+        local.type = lCase( trim( local.msg.type ?: "" ) );
+
+        // cbMessageBox type -> TesseraBX helper. cbMessageBox uses "warn"
+        // (not "warning"); error stays sticky via the helper's own default.
+        switch ( local.type ) {
+            case "success" : local.helper = "showSuccessToast"; break;
+            case "error"   : local.helper = "showErrorToast";   break;
+            case "warn"    : local.helper = "showWarningToast"; break;
+            case "info"    : local.helper = "showInfoToast";    break;
+            case "dark"    : local.helper = "showDarkToast";    break;
+            case "light"   : local.helper = "showLightToast";   break;
+            default        : local.helper = "showInfoToast";
+        }
+
+        // Validation summaries arrive as <br>-joined lines (e.g.
+        // errors.toList( "<br>" )). Escape the whole message so user data
+        // cannot inject markup, then restore only the <br> separators that
+        // cbMessageBox itself inserted, and render with allowHtml so the
+        // line breaks survive. Everything else stays inert text.
+        local.safeHtml = encodeForHTML( local.msg.message ?: "" );
+        local.safeHtml = replace( local.safeHtml, "&lt;br&gt;",   "<br>", "all" );
+        local.safeHtml = replace( local.safeHtml, "&lt;br/&gt;",  "<br>", "all" );
+        local.safeHtml = replace( local.safeHtml, "&lt;br /&gt;", "<br>", "all" );
+
+        // Purge so a redirect-then-render shows the toast a single time.
+        local.mb.clearMessage();
+
+        local.hasToast = len( trim( local.safeHtml ) ) > 0;
+    }
+</bx:script>
+<bx:if local.hasToast>
+    <script>
+    (function(){
+        function show(){
+            // title/icon/timeout left undefined so each helper's own
+            // defaults apply (e.g. error stays sticky). allowHtml is true
+            // because the message is pre-escaped above.
+            window.TesseraBX.#local.helper#( #jsonSerialize( local.safeHtml )#, undefined, undefined, undefined, { allowHtml: true } );
+        }
+        if ( window.TesseraBX ) { show(); }
+        else { document.addEventListener( "DOMContentLoaded", show ); }
+    })();
+    </script>
+</bx:if>
+</bx:output>

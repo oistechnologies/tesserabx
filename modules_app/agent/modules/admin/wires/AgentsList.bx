@@ -23,15 +23,12 @@ class extends="cbwire.models.Component" {
     property name="rbacService"  inject="RbacService@agent";
     property name="teamsService" inject="TeamsService@agent";
     property name="auth"         inject="AuthenticationService@cbauth";
-    property name="messagebox"   inject="messagebox@cbmessagebox";
 
     // Reactive state. All of these are user-controlled filters or
     // pagination/sort knobs; URL-persisted via queryString below.
-    //
-    // notice + noticeKind hold a transient one-shot message for the
-    // user (e.g. "you cannot deactivate yourself"). Wire actions
-    // mutate them; the template renders an alert when notice has
-    // length and clears it on the next mutation.
+    // Transient one-shot feedback (e.g. "you cannot deactivate
+    // yourself") is delivered as a toast through the notice() helper,
+    // not held in state.
     data = {
         "q"               : "",
         "status"          : "active",
@@ -43,9 +40,7 @@ class extends="cbwire.models.Component" {
         "page"            : 1,
         "pageSize"        : 25,
         "selectedIds"     : [],
-        "selectAllOnPage" : false,
-        "notice"          : "",
-        "noticeKind"      : "info"
+        "selectAllOnPage" : false
     };
 
     queryString = [ "q", "status", "roleKey", "teamId", "department", "sort", "dir", "page", "pageSize" ];
@@ -200,9 +195,20 @@ class extends="cbwire.models.Component" {
 
     // ---------------- internals ----------------
 
+    // Fire a one-shot toast through the global TesseraBX utility instead of
+    // holding the message in state and rendering an inline alert. jsonSerialize
+    // produces a safe JS string literal for the message.
     private void function notice( msg, kind = "info" ){
-        data.notice     = arguments.msg;
-        data.noticeKind = arguments.kind;
+        var fn = "showInfoToast";
+        switch ( arguments.kind ) {
+            case "success" : fn = "showSuccessToast"; break;
+            case "error"   :
+            case "danger"  : fn = "showErrorToast";   break;
+            case "warn"    :
+            case "warning" : fn = "showWarningToast"; break;
+            default        : fn = "showInfoToast";
+        }
+        js( "window.TesseraBX." & fn & "( " & jsonSerialize( arguments.msg ) & " )" );
     }
 
     private void function flashBulkResult( verb, ok, failed ){

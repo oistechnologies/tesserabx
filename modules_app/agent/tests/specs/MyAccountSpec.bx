@@ -41,7 +41,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 var fresh = variables.svc.getAgentById( id );
                 expect( fresh.getFirstName() ).toBe( "Updated" );
                 expect( fresh.getPhoneWork() ).toBe( "777-9999" );
-                expect( c.getData().notice ).toBe( "Profile saved." );
+                // Feedback is now a toast fired via js(), not inline data.
+                expect( firedToast( c ) ).toInclude( "showSuccessToast" );
+                expect( firedToast( c ) ).toInclude( "Profile saved." );
                 cleanup( id );
             } );
 
@@ -79,7 +81,7 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 c.getData().newPassword        = "rotated-pass-1234";
                 c.getData().newPasswordConfirm = "rotated-pass-1234";
                 c.changePassword();
-                expect( c.getData().notice ).toBe( "Password updated." );
+                expect( firedToast( c ) ).toInclude( "Password updated." );
                 expect( c.getData().currentPassword ).toBeEmpty();
                 cleanup( id );
             } );
@@ -136,6 +138,22 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         return variables.loader.load( "MyAccount@agent", false )
             ._withEvent( event )
             ._withParams( {}, false );
+    }
+
+    /**
+     * Concatenate the JavaScript expressions a wire queued through
+     * js() this request. cbwire stores them on the _xjs property
+     * (accessors=true), so the generated getter exposes them; the
+     * fallback covers BoxLang's accessor naming for the leading
+     * underscore. Used to assert toast feedback that used to live in
+     * the (now removed) notice data key.
+     */
+    private string function firedToast( required any wire ){
+        var calls = [];
+        try { calls = arguments.wire.get_xjs(); }
+        catch ( any e1 ) { try { calls = arguments.wire.getXjs(); } catch ( any e2 ) { calls = []; } }
+        if ( !isArray( calls ) ) return "";
+        return calls.reduce( ( acc, item ) => acc & ( item.expression ?: "" ), "" );
     }
 
     private string function seed( struct extras = {} ){

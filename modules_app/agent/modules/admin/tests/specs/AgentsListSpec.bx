@@ -52,8 +52,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 } );
                 var c = newWire();
                 c.deactivate( id );
-                expect( c.getData().notice     ).toBe( "Agent deactivated." );
-                expect( c.getData().noticeKind ).toBe( "success" );
+                // Feedback is now a success toast fired via js(), not inline data.
+                expect( firedToast( c ) ).toInclude( "showSuccessToast" );
+                expect( firedToast( c ) ).toInclude( "Agent deactivated." );
                 expect( variables.svc.getAgentById( id ).getIsActive() ).toBeFalse();
                 cleanupAgent( id );
             } );
@@ -97,6 +98,21 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
     private any function newWire(){
         return variables.loader.load( "AgentsList@admin", false );
+    }
+
+    /**
+     * Concatenate the JavaScript expressions a wire queued through
+     * js() this request. cbwire stores them on the _xjs property
+     * (accessors=true); the fallback covers BoxLang's accessor naming
+     * for the leading underscore. Used to assert toast feedback that
+     * used to live in the (now removed) notice data key.
+     */
+    private string function firedToast( required any wire ){
+        var calls = [];
+        try { calls = arguments.wire.get_xjs(); }
+        catch ( any e1 ) { try { calls = arguments.wire.getXjs(); } catch ( any e2 ) { calls = []; } }
+        if ( !isArray( calls ) ) return "";
+        return calls.reduce( ( acc, item ) => acc & ( item.expression ?: "" ), "" );
     }
 
     private string function uniqueEmail(){

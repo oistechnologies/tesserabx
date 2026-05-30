@@ -17,7 +17,7 @@
             <div class="small text-body-secondary mt-1">Save your recovery codes</div>
         </div>
         <div class="card-body login-card-body">
-            #getInstance( "messagebox@cbmessagebox" ).renderIt()#
+            #view( view = "_partials/toast_flash", module = "core" )#
             <p class="login-box-msg">
                 Each code below works exactly once if you lose access to your authenticator app.
                 They will not be shown again. Save them in a password manager or print them now.

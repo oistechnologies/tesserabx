@@ -1,0 +1,35 @@
+/**
+ * agent:Dev handler.
+ *
+ * Development-only diagnostic pages. Currently serves /agent/dev/toasts,
+ * a manual proving ground for the global window.TesseraBX toast utility
+ * (includes/js/TesseraBX.js): one button per helper, plus HTML-escaping,
+ * allowHtml, sticky-error, custom-timeout, and CBWire js() round-trip
+ * cases.
+ *
+ * Gated to ENVIRONMENT=development. In any other environment every action
+ * returns a 404 so the surface never exists in production. Sits behind the
+ * agent firewall and renders in the Agent layout (which loads TesseraBX.js).
+ */
+class {
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        // Hard gate: outside development this handler does not exist.
+        if ( getSystemSetting( "ENVIRONMENT", "production" ) != "development" ){
+            event.renderData(
+                type       = "html",
+                data       = "<h1>404 Not Found</h1>",
+                statusCode = 404
+            );
+            event.noExecution();
+            return;
+        }
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function toasts( event, rc, prc ){
+        prc.pageTitle = "Toast Test";
+        event.setView( "dev/toasts" );
+    }
+
+}
