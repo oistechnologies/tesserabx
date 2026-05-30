@@ -7,6 +7,7 @@
     },
     "web":{
         "caseSensitivePaths":"false",
+        "useProxyForwardedIP":"true",
         "host":"0.0.0.0",
         "http":{
             "port":"${PORT:-8080}"
