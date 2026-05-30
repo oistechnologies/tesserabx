@@ -133,16 +133,17 @@ class singleton=true {
 
     /**
      * Count tickets matching the same filters listTickets accepts
-     * (status, priority, organizationId, search, requesterContactIds,
-     * accountlessOnly). Backs portal/agent pagination: the caller pairs
-     * this with listTickets( limit, offset ) to compute total pages.
-     * Bypasses the tenant scope like listTickets; callers scope by
-     * organizationId / requesterContactIds.
+     * (status, priority, organizationId, assignedToAgentId, search,
+     * requesterContactIds, accountlessOnly). Backs portal/agent
+     * pagination: the caller pairs this with listTickets( limit, offset )
+     * to compute total pages. Bypasses the tenant scope like listTickets;
+     * callers scope by organizationId / requesterContactIds.
      */
     public numeric function countTickets(
         any status,
         string priority,
         string organizationId,
+        string assignedToAgentId,
         string search,
         boolean accountlessOnly = false,
         array requesterContactIds
@@ -161,6 +162,7 @@ class singleton=true {
         }
         if ( structKeyExists( arguments, "priority" ) && len( arguments.priority ?: "" ) ) q = q.where( "priority", arguments.priority );
         if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) q = q.where( "organization_id", arguments.organizationId );
+        if ( structKeyExists( arguments, "assignedToAgentId" ) && len( arguments.assignedToAgentId ?: "" ) ) q = q.where( "assigned_to_agent_id", arguments.assignedToAgentId );
         if ( arguments.accountlessOnly ) q = q.whereNull( "organization_id" );
         if ( structKeyExists( arguments, "search" ) && len( trim( arguments.search ?: "" ) ) ) {
             q = q.whereRaw( "search_vector @@ plainto_tsquery( 'english', ? )", [ trim( arguments.search ) ] );

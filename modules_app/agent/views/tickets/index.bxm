@@ -6,6 +6,26 @@
 <bx:set local.exportQs &= "priority=" & encodeForURL( prc.filters.priority ?: "" )
                        & "&organizationId=" & encodeForURL( prc.filters.organizationId ?: "" ) >
 
+<!--- Query string for pagination links: every active filter plus the
+      statusFilterApplied sentinel so paging never re-applies the saved
+      default status set (an empty status group means "show all", and
+      the sentinel preserves that across pages). Mirrors the shape the
+      GET filter form would post. --->
+<bx:set local.pageQs = "statusFilterApplied=1" >
+<bx:loop array="#prc.statusArray#" item="s">
+    <bx:set local.pageQs &= "&status=" & encodeForURL( s ) >
+</bx:loop>
+<bx:set local.pageQs &= "&priority=" & encodeForURL( prc.filters.priority ?: "" )
+                     & "&organizationId=" & encodeForURL( prc.filters.organizationId ?: "" )
+                     & "&assignedToAgentId=" & encodeForURL( prc.filters.assignedToAgentId ?: "" )
+                     & "&q=" & encodeForURL( prc.filters.q ?: "" ) >
+<bx:if ( prc.filters.accountlessOnly ?: "" ) eq "true" or ( prc.filters.accountlessOnly ?: false ) eq true>
+    <bx:set local.pageQs &= "&accountlessOnly=true" >
+</bx:if>
+<bx:if ( prc.filters.vipOnly ?: "" ) eq "true" or ( prc.filters.vipOnly ?: false ) eq true>
+    <bx:set local.pageQs &= "&vipOnly=true" >
+</bx:if>
+
 <!-- Primary actions: always visible, mirrors the organizations / contacts list pages. -->
 <div class="d-flex justify-content-end gap-2 mb-3 flex-wrap">
     <a class="btn btn-outline-secondary" href="/agent/reports/export/tickets.csv?#local.exportQs#">
@@ -302,6 +322,32 @@
         </table>
         </div>
     </div>
+
+    <bx:if ( prc.totalPages ?: 1 ) gt 1>
+        <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span class="small text-body-secondary">Page #encodeForHTML( prc.page )# of #encodeForHTML( prc.totalPages )# &middot; #encodeForHTML( prc.total )# ticket(s)</span>
+            <nav aria-label="Ticket pages">
+                <ul class="pagination pagination-sm mb-0">
+                    <bx:set local.prevHref = "/agent/tickets?page=" & ( prc.page - 1 ) & "&" & local.pageQs >
+                    <li class="page-item#( prc.page lte 1 ) ? ' disabled' : ''#">
+                        <a class="page-link" href="#encodeForHTMLAttribute( local.prevHref )#">Previous</a>
+                    </li>
+                    <bx:set local.startWin = max( 1, prc.page - 2 ) >
+                    <bx:set local.endWin   = min( prc.totalPages, prc.page + 2 ) >
+                    <bx:loop from="#local.startWin#" to="#local.endWin#" index="local.p">
+                        <bx:set local.pHref = "/agent/tickets?page=" & local.p & "&" & local.pageQs >
+                        <li class="page-item#( local.p eq prc.page ) ? ' active' : ''#">
+                            <a class="page-link" href="#encodeForHTMLAttribute( local.pHref )#">#local.p#</a>
+                        </li>
+                    </bx:loop>
+                    <bx:set local.nextHref = "/agent/tickets?page=" & ( prc.page + 1 ) & "&" & local.pageQs >
+                    <li class="page-item#( prc.page gte prc.totalPages ) ? ' disabled' : ''#">
+                        <a class="page-link" href="#encodeForHTMLAttribute( local.nextHref )#">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    </bx:if>
 </div>
 
 <script>

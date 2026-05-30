@@ -55,6 +55,7 @@ class {
         param rc.accountlessOnly   = false;
         param rc.vipOnly           = false;
         param rc.q                 = "";
+        param rc.page              = "1";
 
         prc.pageTitle     = "Tickets";
         prc.statuses      = ticketsService.listStatuses();
@@ -74,23 +75,36 @@ class {
             ? rc.status
             : listToArray( rc.status ?: "", "," );
 
-        var listArgs = {
+        var filter = {
             status            : prc.statusArray,
             priority          : rc.priority,
             organizationId    : rc.organizationId,
             assignedToAgentId : rc.assignedToAgentId,
             search            : rc.q,
-            accountlessOnly   : ( rc.accountlessOnly == "true" || rc.accountlessOnly == "1" || rc.accountlessOnly == true ),
-            limit             : 200
+            accountlessOnly   : ( rc.accountlessOnly == "true" || rc.accountlessOnly == "1" || rc.accountlessOnly == true )
         };
         // VIP filter: restrict to tickets whose requester is a VIP
         // contact. Resolve the VIP contact ids through ContactsService
         // (tickets module never reads the contacts table) and pass them
         // as the requester filter; an empty set yields no matches.
         if ( rc.vipOnly == "true" || rc.vipOnly == "1" || rc.vipOnly == true ) {
-            listArgs.requesterContactIds = contactsService.vipContactIds();
+            filter.requesterContactIds = contactsService.vipContactIds();
         }
-        prc.tickets       = ticketsService.listTickets( argumentCollection = listArgs );
+
+        // Paginate. countTickets honors the same filter set so the page
+        // total matches the filtered list; the slice reuses the filter
+        // with a limit + offset. Changing any filter re-submits the GET
+        // form without a page param, which resets the view to page 1.
+        var pageSize   = 25;
+        prc.total      = ticketsService.countTickets( argumentCollection = filter );
+        prc.pageSize   = pageSize;
+        prc.totalPages = max( 1, ceiling( prc.total / pageSize ) );
+        prc.page       = min( max( 1, int( val( rc.page ) ) ), prc.totalPages );
+
+        var listArgs    = duplicate( filter );
+        listArgs.limit  = pageSize;
+        listArgs.offset = ( prc.page - 1 ) * pageSize;
+        prc.tickets     = ticketsService.listTickets( argumentCollection = listArgs );
         prc.orgNamesById = {};
         for ( var o in prc.organizations ) {
             prc.orgNamesById[ o.getId() ] = o.getName();
