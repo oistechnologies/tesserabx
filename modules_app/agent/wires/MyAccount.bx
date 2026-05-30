@@ -58,10 +58,9 @@ class extends="cbwire.models.Component" {
         "currentEmail"     : "",
         "mfaEnabled"       : false,
 
-        // Transient UI feedback (one-shot; cleared by next action).
-        "errors"           : [],
-        "notice"           : "",
-        "noticeKind"       : "info"
+        // Transient validation errors are shown inline near the form;
+        // success/info notices fire as toasts via the notice() helper.
+        "errors"           : []
     };
 
     // Identity values are loaded once from the signed-in agent and
@@ -77,7 +76,6 @@ class extends="cbwire.models.Component" {
     function setTab( tab ){
         data.activeTab = arguments.tab;
         data.errors    = [];
-        data.notice    = "";
     }
 
     // ---------------- Profile ----------------
@@ -143,7 +141,6 @@ class extends="cbwire.models.Component" {
         data.mfaEnrollSecret = totp.generateSecret();
         data.mfaEnrollCode   = "";
         data.errors          = [];
-        data.notice          = "";
     }
 
     function confirmMfaEnroll(){
@@ -260,9 +257,20 @@ class extends="cbwire.models.Component" {
         data.mfaEnabled      = !!agent.getMfaEnabled();
     }
 
+    // Fire a one-shot toast through the global TesseraBX utility instead of
+    // rendering an inline alert. Maps the legacy notice "kind" to the right
+    // helper; jsonSerialize produces a safe JS string literal for the message.
     private void function notice( msg, kind = "info" ){
-        data.notice     = arguments.msg;
-        data.noticeKind = arguments.kind;
+        var fn = "showInfoToast";
+        switch ( arguments.kind ) {
+            case "success" : fn = "showSuccessToast"; break;
+            case "error"   :
+            case "danger"  : fn = "showErrorToast";   break;
+            case "warn"    :
+            case "warning" : fn = "showWarningToast"; break;
+            default        : fn = "showInfoToast";
+        }
+        js( "window.TesseraBX." & fn & "( " & jsonSerialize( arguments.msg ) & " )" );
     }
 
     private void function sendVerificationEmail( newEmail, rawToken ){

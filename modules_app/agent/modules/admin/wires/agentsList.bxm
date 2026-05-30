@@ -33,13 +33,6 @@
         </a>
     </div>
 
-    <bx:if len( notice )>
-        <div class="alert alert-#encodeForHTMLAttribute( noticeKind )# d-flex justify-content-between align-items-center" role="alert">
-            <span>#encodeForHTML( notice )#</span>
-            <button type="button" class="btn-close" aria-label="Dismiss" wire:click="$set('notice','')"></button>
-        </div>
-    </bx:if>
-
     <!-- Filter toolbar -->
     <div class="card mb-3">
         <div class="card-body">

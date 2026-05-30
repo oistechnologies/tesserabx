@@ -1,0 +1,106 @@
+<bx:output>
+<div class="container-fluid">
+
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <div>
+            <h2 class="mb-0">TesseraBX Toast Test</h2>
+            <small class="text-body-secondary">
+                Development-only diagnostic for <code>window.TesseraBX</code>.
+                Loaded from <code>/includes/js/TesseraBX.js</code> via the shared layout.
+            </small>
+        </div>
+        <span class="badge text-bg-warning text-black">dev only</span>
+    </div>
+
+    <!-- Per-type helpers -->
+    <div class="card mb-3">
+        <div class="card-header fw-semibold">Type helpers</div>
+        <div class="card-body d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-success"   data-tbx-demo="success">success</button>
+            <button type="button" class="btn btn-info"      data-tbx-demo="info">info</button>
+            <button type="button" class="btn btn-warning"   data-tbx-demo="warning">warning</button>
+            <button type="button" class="btn btn-primary"   data-tbx-demo="primary">primary</button>
+            <button type="button" class="btn btn-secondary" data-tbx-demo="secondary">secondary</button>
+            <button type="button" class="btn btn-light border" data-tbx-demo="light">light</button>
+            <button type="button" class="btn btn-dark"      data-tbx-demo="dark">dark</button>
+            <button type="button" class="btn btn-danger"    data-tbx-demo="danger">danger (sticky)</button>
+            <button type="button" class="btn btn-outline-danger" data-tbx-demo="error">error (sticky)</button>
+        </div>
+    </div>
+
+    <!-- Behavior + safety cases -->
+    <div class="card mb-3">
+        <div class="card-header fw-semibold">Behavior &amp; safety</div>
+        <div class="card-body d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-secondary" data-tbx-demo="custom"
+                data-bs-toggle="tooltip" title="Custom title and a 3s auto-dismiss">
+                custom title + 3s timeout
+            </button>
+            <button type="button" class="btn btn-outline-secondary" data-tbx-demo="escape">
+                HTML-escape (XSS) test
+            </button>
+            <button type="button" class="btn btn-outline-secondary" data-tbx-demo="html">
+                allowHtml (link) test
+            </button>
+            <button type="button" class="btn btn-outline-secondary" data-tbx-demo="stack">
+                stack 3 at once
+            </button>
+        </div>
+        <div class="card-footer small text-body-secondary">
+            The escape test passes a message containing tags and quotes; it must render as
+            literal text, not execute. The allowHtml test renders a real link. Danger/error
+            toasts stay until dismissed; the rest auto-dismiss. The tooltip on the first button
+            also exercises tooltip init.
+        </div>
+    </div>
+
+    <!-- CBWire js() round-trip -->
+    <div class="card mb-3">
+        <div class="card-header fw-semibold">CBWire <code>js()</code> round-trip</div>
+        <div class="card-body">
+            <p class="text-body-secondary small mb-2">
+                This button calls a server-side wire action that returns
+                <code>js( "TesseraBX.showSuccessToast(...)" )</code>. A toast appearing proves
+                the wire path works end to end.
+            </p>
+            #wire( name = "DevToastTest@agent" )#
+        </div>
+    </div>
+
+</div>
+</bx:output>
+<script>
+// Placed after the output block on purpose: this view renders in BoxLang
+// output mode, so a literal hash inside an evaluated block would be read
+// as an interpolation delimiter. Out here the script text is left alone.
+(function () {
+    function fire( kind ) {
+        var T = window.TesseraBX;
+        if ( !T ) { console.error( "window.TesseraBX is not defined" ); return; }
+        switch ( kind ) {
+            case "success":   T.showSuccessToast( "Operation completed successfully." ); break;
+            case "info":      T.showInfoToast( "Here is something you might want to know." ); break;
+            case "warning":   T.showWarningToast( "Double-check this before continuing." ); break;
+            case "primary":   T.showPrimaryToast( "A primary-styled notice." ); break;
+            case "secondary": T.showSecondaryToast( "A secondary-styled notice." ); break;
+            case "light":     T.showLightToast( "A light-styled notice." ); break;
+            case "dark":      T.showDarkToast( "A dark-styled notice." ); break;
+            case "danger":    T.showDangerToast( "Something went wrong (danger)." ); break;
+            case "error":     T.showErrorToast( "Something went wrong (error)." ); break;
+            case "custom":    T.showSuccessToast( "Saved with a custom title and short timeout.", "All done", "", 3000 ); break;
+            case "escape":    T.showInfoToast( 'Contact <b>Jane "JD" Doe</b> & Co. <img src=x onerror=alert(1)>' ); break;
+            case "html":      T.showInfoToast( 'View the <a href="/agent" class="alert-link">agent dashboard</a>.', "Link", "", 20000, { allowHtml: true } ); break;
+            case "stack":
+                T.showSuccessToast( "First." );
+                T.showInfoToast( "Second." );
+                T.showWarningToast( "Third." );
+                break;
+        }
+    }
+    document.addEventListener( "click", function ( e ) {
+        var btn = e.target.closest( "[data-tbx-demo]" );
+        if ( !btn ) return;
+        fire( btn.getAttribute( "data-tbx-demo" ) );
+    } );
+})();
+</script>

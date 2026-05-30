@@ -20,6 +20,12 @@
     <script src="/includes/vendor/bootstrap-5.3.7/js/bootstrap.bundle.min.js"></script>
     <script src="/includes/vendor/adminlte-4.0.0-rc7/js/adminlte.min.js"></script>
 
+    <!-- TesseraBX global site utility (toast notifications, tooltip init).
+         Loaded after the Bootstrap bundle so window.bootstrap.Toast /
+         Tooltip exist, and it constructs window.TesseraBX synchronously so
+         any earlier-in-body flash or CBWire js() script can rely on it. -->
+    <script src="/includes/js/TesseraBX.js"></script>
+
     <!-- OverlayScrollbars init for the sidebar. Lifted verbatim from
          AdminLTE 4 rc7's reference examples; skips mobile so touch
          scrolling stays native. -->

@@ -1,0 +1,11 @@
+<bx:output>
+<div class="d-flex flex-wrap align-items-center gap-2">
+    <button type="button" class="btn btn-success" wire:click="ping">
+        <i class="bi bi-lightning-charge-fill"></i> Fire success via wire js()
+    </button>
+    <button type="button" class="btn btn-outline-danger" wire:click="fail">
+        <i class="bi bi-exclamation-octagon-fill"></i> Fire error via wire js()
+    </button>
+    <span class="text-body-secondary small">server round-trips: #clicks#</span>
+</div>
+</bx:output>

@@ -24,6 +24,11 @@ class {
         route( "home/preferences/reset"   ).withVerbs( "POST" ).to( "Home.resetPreferences" );
         route( "/" ).to( "Home.index" );
 
+        // Development-only diagnostics. The Dev handler hard-gates on
+        // ENVIRONMENT=development and 404s otherwise, so this route is
+        // inert in production. /agent/dev/toasts proves out window.TesseraBX.
+        route( "dev/toasts" ).to( "Dev.toasts" );
+
         // Auth
         route( "login/verify" ).withHandler( "Mfa" ).toAction( {
             "GET"  : "verifyForm",

@@ -241,7 +241,7 @@
             } )#
             <div class="app-content">
                 <div class="container-fluid">
-                    #getInstance( "messagebox@cbmessagebox" ).renderIt()#
+                    #view( view = "_partials/toast_flash", module = "core" )#
                     #view()#
                 </div>
             </div>

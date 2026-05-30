@@ -1,0 +1,26 @@
+/**
+ * DevToastTest: a throwaway CBWire component used only by the
+ * /agent/dev/toasts diagnostic page. Its single action fires a toast
+ * through CBWire's js() method, proving the server-to-client toast path
+ * works the same way real components will use it:
+ *
+ *     js( "TesseraBX.showSuccessToast('...')" )
+ *
+ * Not wired into any production surface.
+ */
+class extends="cbwire.models.Component" {
+
+    data = {
+        "clicks" : 0
+    };
+
+    function ping(){
+        data.clicks++;
+        js( "TesseraBX.showSuccessToast('Toast fired from a CBWire js() action.', 'Wire OK')" );
+    }
+
+    function fail(){
+        js( "TesseraBX.showErrorToast('Sticky error fired from a CBWire js() action.', 'Wire error')" );
+    }
+
+}
