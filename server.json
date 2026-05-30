@@ -6,6 +6,7 @@
         "engineConfigFile":".boxlang.json"
     },
     "web":{
+        "caseSensitivePaths":"false",
         "host":"0.0.0.0",
         "http":{
             "port":"${PORT:-8080}"
