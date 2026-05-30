@@ -73,7 +73,6 @@ services:
 
   mailpit:
     image: axllent/mailpit:latest
-    container_name: tesserabx-mailpit
     restart: unless-stopped
     ports:
       - "${MAILPIT_UI_PORT:-8025}:8025"   # web UI
@@ -84,7 +83,6 @@ services:
 
   adminer:
     image: adminer:latest
-    container_name: tesserabx-adminer
     restart: unless-stopped
     ports:
       - "${ADMINER_PORT:-8081}:8080"
@@ -92,8 +90,6 @@ services:
       ADMINER_DEFAULT_SERVER: db
 
 networks:
-  default:
-    name: tesserabx_default
   # Override removes the external proxy attachment for standalone dev.
   proxy:
     external: false
