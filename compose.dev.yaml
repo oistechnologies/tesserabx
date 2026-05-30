@@ -15,6 +15,11 @@
 services:
 
   app:
+    build:
+      # Full install (testbox, cbdebugger, dev CLIs) for the dev image.
+      # Production uses the Dockerfile default of --production.
+      args:
+        BOX_INSTALL_FLAGS: ""
     environment:
       ENVIRONMENT: development
       BOX_SERVER_PROFILE: development
@@ -33,6 +38,9 @@ services:
         condition: service_started
 
   worker:
+    build:
+      args:
+        BOX_INSTALL_FLAGS: ""
     environment:
       ENVIRONMENT: development
     networks:
@@ -44,6 +52,9 @@ services:
       - /app/testbox
 
   scheduler:
+    build:
+      args:
+        BOX_INSTALL_FLAGS: ""
     environment:
       ENVIRONMENT: development
     networks:
@@ -59,10 +70,6 @@ services:
       # Exposed to host so adminer (or external psql) can reach it
       # directly during dev.
       - "${DB_HOST_PORT:-5432}:5432"
-
-  redis:
-    ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
 
   mailpit:
     image: axllent/mailpit:latest

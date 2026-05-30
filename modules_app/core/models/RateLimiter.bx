@@ -3,10 +3,11 @@
  * time window and reports whether the caller should be allowed
  * through.
  *
- * Backed by CacheBox so the counter survives across requests and
- * across worker / scheduler containers (the cbcache provider is
- * Redis in dev and prod). A tiny over-count under concurrency is
- * fine; this is a rate limiter, not a strict semaphore.
+ * Backed by CacheBox (in-memory). The counter survives across requests
+ * within a container; it is not shared across containers, so running
+ * multiple app replicas scales the effective limit with the replica
+ * count. A tiny over-count under concurrency is fine; this is a rate
+ * limiter, not a strict semaphore.
  *
  * Typical usage from a public-intake handler:
  *

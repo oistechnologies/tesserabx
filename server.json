@@ -24,6 +24,6 @@
     "console":true,
     "trayEnable":false,
     "scripts":{
-        "onServerInitialInstall":"install bx-compat-cfml,bx-ai,bx-esapi,bx-postgresql,bx-redis,bx-image,bx-mail,bx-markdown"
+        "onServerInitialInstall":"install bx-compat-cfml,bx-ai,bx-esapi,bx-postgresql,bx-image,bx-mail,bx-markdown"
     }
 }

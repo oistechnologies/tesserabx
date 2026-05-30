@@ -10,7 +10,6 @@
 #   worker     - same image as app; runs the cbq worker pool
 #   scheduler  - same image as app; runs ColdBox scheduled tasks
 #   db         - PostgreSQL 16 with pgvector
-#   redis      - cache and cbq queue backend
 #
 # To scale the worker:  docker compose up --scale worker=N
 
@@ -31,8 +30,6 @@ services:
       SCHEDULER_MODE: "false"
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     networks:
       - default
@@ -70,8 +67,6 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     # Skip the migration entrypoint: app has already applied migrations
     # by the time it's healthy (via depends_on).
     command: [ "/usr/local/lib/build/run.sh" ]
@@ -98,8 +93,6 @@ services:
       app:
         condition: service_healthy
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     command: [ "/usr/local/lib/build/run.sh" ]
     healthcheck:
@@ -128,25 +121,8 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
-    container_name: tesserabx-redis
-    restart: unless-stopped
-    command: >
-      redis-server
-      --appendonly yes
-      --save 60 1
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
 volumes:
   db_data:
-  redis_data:
 
 networks:
   default:

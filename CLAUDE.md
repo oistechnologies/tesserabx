@@ -100,7 +100,7 @@ This is settled. Do not substitute components without an explicit instruction fr
 ### Data and infrastructure
 
 - **PostgreSQL 16** as the database, with the **`pgvector`** extension enabled. `pgvector` handles vector similarity search natively, so there is no separate vector-store service.
-- **Redis** for caching (CacheBox provider) and as the cbq queue backend.
+- **No Redis.** Caching uses the in-memory CacheBox provider; cbq uses the PostgreSQL-backed provider (the `tesserabx` datasource) as its queue backend. A shared external cache (Redis or similar) is only needed if the `app` tier is scaled to multiple replicas.
 - **No reverse proxy in the stack.** An external reverse proxy is assumed. Containers attach to an external Docker network whose name comes from `PROXY_NETWORK` in `.env`. TLS, HTTPS, and certificates are the external proxy's responsibility.
 - **CBFS storage** with two providers: a local disk provider (the default for development) and an S3-compatible provider. **Backblaze B2** is the S3-compatible target for shared, staging, and production environments. Buckets are private; files are served via time-limited signed URLs, with app-streaming behind cbSecurity as the documented fallback.
 - **Mailpit** as the development-only mail trap.
@@ -168,7 +168,6 @@ Every module follows the same internal layout: handlers, models (including its o
 - **Environment variables only. No secrets in source.** A committed `.env.example` documents every variable, including:
   - `PROXY_NETWORK` — the external Docker network name.
   - PostgreSQL credentials and connection.
-  - Redis connection.
   - The CBFS provider selection, plus Backblaze B2 credentials.
   - File upload constraints: a maximum file size and an allowed file-type list, both configurable.
   - Database backup retention: how many days (or how many dumps) of backups to keep before the backup task prunes older ones.
@@ -200,7 +199,7 @@ Every module follows the same internal layout: handlers, models (including its o
 
 ### Source control and CI
 
-- The project is a **GitHub** repository. CI runs on **GitHub Actions**, executing TestBox specs against a disposable PostgreSQL container (with `pgvector`) and Redis.
+- The project is a **GitHub** repository. CI runs on **GitHub Actions**, executing TestBox specs against a disposable PostgreSQL container (with `pgvector`).
 
 ### Testing
 
@@ -233,7 +232,6 @@ Every module follows the same internal layout: handlers, models (including its o
 - **worker** — same image as `app`, scheduler different entrypoint; the single cbq worker.
 - **scheduler** — the `app` image with a scheduler entrypoint, running ColdBox scheduled tasks.
 - **db** — PostgreSQL 16 with `pgvector`.
-- **redis** — cache and cbq queue backend.
 
 No `proxy` service and no vector-store service. `app` attaches to the external Docker network named by `PROXY_NETWORK`. Health-check endpoints on `app` and `worker`. Structured JSON logging through LogBox.
 

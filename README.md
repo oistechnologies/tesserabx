@@ -115,7 +115,7 @@ When enabled, AI powers ticket triage, suggested agent replies, thread summaries
 - **Framework**: ColdBox 8+.
 - **UI**: CBWire for server-driven reactive components, AdminLTE 4 (Bootstrap 5) for the layout shell.
 - **Database**: PostgreSQL 16 with the `pgvector` extension enabled (no separate vector store).
-- **Cache and queue**: Redis (CacheBox provider; cbq queue backend).
+- **Cache**: in-memory CacheBox (no external cache service). **Queue**: cbq on the PostgreSQL datasource.
 - **Storage**: CBFS with three providers (local disk, AWS S3, Backblaze B2 or any S3-compatible endpoint).
 - **AI (optional)**: `bx-ai` server module, accessed only through the `ai` middleware facade. OpenRouter is the documented default provider.
 
@@ -264,7 +264,7 @@ TesseraBX deploys by building the image from the working tree on the deploy host
 
 See [Quick Deploy](#quick-deploy) above for the minimum five-step recipe. The additional considerations for a real production host are:
 
-- Named volumes `db_data` and `redis_data` persist across `docker compose up --build`. Container rebuilds do not lose data, but a manual `docker volume rm` does.
+- The named volume `db_data` persists across `docker compose up --build`. Container rebuilds do not lose data, but a manual `docker volume rm` does.
 - `depends_on: condition: service_healthy` makes the worker and scheduler wait for the new `app` to be healthy before swapping in.
 - Scale the worker pool with `docker compose up -d --scale worker=N` once the baseline is in place. The scheduler is intended as a single replica.
 
@@ -301,7 +301,7 @@ git pull
 docker compose up -d --build
 ```
 
-`docker compose up --build` re-runs the Dockerfile from the new working tree. Containers are rebuilt and recreated; the named volumes (`db_data`, `redis_data`) persist across this. Migrations run automatically on the new `app` container at start.
+`docker compose up --build` re-runs the Dockerfile from the new working tree. Containers are rebuilt and recreated; the named volume `db_data` persists across this. Migrations run automatically on the new `app` container at start.
 
 What survives an update:
 
@@ -469,7 +469,7 @@ docker compose exec app box migrate up
 docker compose exec app box testbox run
 ```
 
-CI runs the same TestBox specs on a disposable PostgreSQL container (with `pgvector`) and Redis on every push to `main` and every pull request.
+CI runs the same TestBox specs on a disposable PostgreSQL container (with `pgvector`) on every push to `main` and every pull request.
 
 ## Current state
 

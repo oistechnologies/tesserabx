@@ -1,10 +1,10 @@
 /**
  * TesseraBX CacheBox config.
  *
- * Default + template caches use the in-memory provider. When real
- * Redis-backed caches are needed in later phases (session affinity
- * across worker scaling), additional caches register through their
- * owning modules rather than here.
+ * Default + template caches use the in-memory provider. The app tier
+ * runs as a single replica, so a shared cache is not required. If it is
+ * later scaled to multiple replicas (shared sessions, cross-replica
+ * counters), introduce a shared cache provider then; none is wired today.
  */
 class {
 

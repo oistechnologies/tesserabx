@@ -43,12 +43,16 @@ COPY ./ ${APP_DIR}/
 
 WORKDIR ${APP_DIR}
 
-# Install only production dependencies declared in box.json. This
-# excludes the dev-only tooling (testbox, cbdebugger, the cfformat and
-# cfconfig CLIs). The migration tooling the entrypoint needs at runtime
-# (commandbox-migrations, commandbox-dotenv) is a regular dependency,
-# so `--production` still installs it.
-RUN box install --production
+# Install CommandBox-managed dependencies declared in box.json.
+#
+# BOX_INSTALL_FLAGS defaults to --production, which excludes the dev-only
+# tooling (testbox, cbdebugger, the cfformat and cfconfig CLIs). The
+# migration tooling the entrypoint needs at runtime (commandbox-migrations,
+# commandbox-dotenv) is a regular dependency, so it installs either way.
+# The dev stack overrides BOX_INSTALL_FLAGS to "" (full install) via
+# compose.dev.yaml so testbox and cbdebugger are present in development.
+ARG BOX_INSTALL_FLAGS=--production
+RUN box install ${BOX_INSTALL_FLAGS}
 
 # Install any third-party add-ons declared in the git-ignored
 # box.addons.json manifest into modules/. Each is installed with

@@ -1,6 +1,6 @@
 /**
  * TestBox application context. Boots the same ColdBox app the
- * production stack runs, against the CI database/redis.
+ * production stack runs, against the CI database.
  *
  * The tesserabx datasource block mirrors the main /Application.bx so
  * Quick/qb resolve it at test time. Without it, qb's grammar reports
