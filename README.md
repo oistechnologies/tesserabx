@@ -285,7 +285,7 @@ cp box.addons.example.json box.addons.json
 }
 ```
 
-Each entry is any CommandBox-resolvable endpoint: a ForgeBox slug, a `slug@semver`, a git URL (optionally with a `#ref` tag or branch suffix), or a local path. `tesserabx-pm` is not published to ForgeBox, so it installs from its git repo URL as shown; for a private repo, use an SSH endpoint (`git+ssh://git@github.com/oistechnologies/tesserabx-pm.git#v1.0.0`) or make HTTPS credentials available to the build environment. On `docker compose up --build`, the image build installs each add-on into `modules/<slug>/` with `save=false` (so the tracked root `box.json` is never modified), and the `app` entrypoint stages and applies the add-on's migrations on the next boot.
+Each entry is any CommandBox-resolvable endpoint: a ForgeBox slug, a `slug@semver`, a public git URL, or a local path. `tesserabx-pm` is a public repo (not on ForgeBox), so it installs from its public git URL as shown, with no credentials. A private add-on cannot be installed this way (the docker build has no git credentials); vendor its source under `modules/<slug>/` instead. On `docker compose up --build`, the image build installs each add-on into `modules/<slug>/` with `save=false` (so the tracked root `box.json` is never modified), and the `app` entrypoint stages and applies the add-on's migrations on the next boot.
 
 Why `box.addons.json` and not `box.json`: the root `box.json` is tracked and is overwritten by `git pull` on every core update, so declaring add-ons there would make updates clobber your add-on list. `box.addons.json` is git-ignored, so a core update never touches it.
 
