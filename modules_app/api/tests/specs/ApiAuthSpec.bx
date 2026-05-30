@@ -20,6 +20,19 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.jwtSvc   = getController().getWireBox().getInstance( "JwtService@cbsecurity" );
     }
 
+    /**
+     * Failure-safe backstop: each spec deletes its seeded agent inline
+     * only on the success path, so a mid-test assertion failure would
+     * leak an agents row (and any agent_roles). The test-app boot
+     * scrub also catches '%@example.com' agents, but sweep our own
+     * fixture prefix here so a run leaves no residue.
+     */
+    function afterAll(){
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id IN ( SELECT id FROM agents WHERE email LIKE 'api-spec-%' )" );
+        queryExecute( "DELETE FROM agents WHERE email LIKE 'api-spec-%'" );
+        super.afterAll();
+    }
+
     function run(){
         describe( "REST API auth primitives", function(){
 

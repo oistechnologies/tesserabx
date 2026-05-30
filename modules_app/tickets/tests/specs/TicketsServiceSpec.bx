@@ -125,6 +125,34 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupFixture( f, [ t.getId() ] );
             } );
 
+            it( "listTickets filters by requesterContactIds (the VIP filter path)", function(){
+                var f = makeFixture();
+                var t = variables.tickets.createTicket( {
+                    requesterContactId : f.contact.getId(),
+                    subject            : "vip-filter-" & createUUID()
+                } );
+
+                // Matching set includes the ticket.
+                var matched = variables.tickets.listTickets(
+                    requesterContactIds : [ f.contact.getId() ],
+                    limit               : 200
+                );
+                var matchedIds = matched.map( ( tk ) => tk.getId() );
+                expect( matchedIds ).toInclude( t.getId() );
+
+                // A different requester set excludes it.
+                var others = variables.tickets.listTickets(
+                    requesterContactIds : [ createUUID() ],
+                    limit               : 200
+                );
+                expect( others.map( ( tk ) => tk.getId() ) ).notToInclude( t.getId() );
+
+                // An explicitly empty set yields no rows.
+                expect( arrayLen( variables.tickets.listTickets( requesterContactIds : [] ) ) ).toBe( 0 );
+
+                cleanupFixture( f, [ t.getId() ] );
+            } );
+
             it( "promotes an accountless ticket sender into a contact", function(){
                 var f = makeFixture();
                 var email = "promoted-" & createUUID() & "@example.com";

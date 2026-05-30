@@ -48,15 +48,13 @@ class {
     function new( event, rc, prc ){
         prc.pageTitle    = "New contact";
         prc.organizations = contactsService.listOrganizations();
-        prc.formData     = {
-            email           : "",
-            firstName       : "",
-            lastName        : "",
-            organizationId  : "",
-            officeId        : "",
-            password        : "",
-            organizationAdmin : false
-        };
+        prc.formData     = blankContactForm();
+        // If the agent arrived from an organization page, preselect it
+        // so the office dropdown can populate immediately.
+        prc.formData.organizationId = rc.organizationId ?: "";
+        prc.offices = len( prc.formData.organizationId )
+            ? contactsService.listOfficesForOrganization( prc.formData.organizationId )
+            : [];
         event.setView( "contacts/new" );
     }
 
@@ -75,18 +73,18 @@ class {
             prc.pageTitle    = "New contact";
             prc.organizations = contactsService.listOrganizations();
             prc.formData     = rc;
+            prc.offices      = len( rc.organizationId )
+                ? contactsService.listOfficesForOrganization( rc.organizationId )
+                : [];
             event.setView( "contacts/new" );
             return;
         }
 
-        var data = {
-            email          : rc.email,
-            firstName      : rc.firstName,
-            lastName       : rc.lastName,
-            organizationId : rc.organizationId,
-            officeId       : rc.officeId,
-            password       : rc.password
-        };
+        var data = contactDataFrom( rc );
+        data.email          = rc.email;
+        data.organizationId = rc.organizationId;
+        data.password       = rc.password;
+        data.source         = "agent";
         var contact = contactsService.provisionContact( data );
 
         if ( isBoolean( rc.organizationAdmin ) && rc.organizationAdmin ) {
@@ -110,6 +108,8 @@ class {
         }
         prc.pageTitle = "Edit contact";
         prc.roles     = contactsService.listRolesForContact( prc.contact.getId() );
+        // Office dropdown is scoped to the contact's organization.
+        prc.offices   = contactsService.listOfficesForOrganization( prc.contact.getOrganizationId() );
         prc.isOrgAdmin = false;
         for ( var r in prc.roles ) {
             if ( r.getRoleKey() == "organization-admin" ) {
@@ -139,12 +139,9 @@ class {
         // cannot coerce back into a varchar bind. The service uses a
         // targeted UPDATE that only touches the columns this form
         // changes.
-        contact = contactsService.updateContactProfile(
-            id        : contact.getId(),
-            firstName : rc.firstName,
-            lastName  : rc.lastName,
-            isActive  : isBoolean( rc.isActive ) ? rc.isActive : ( rc.isActive == "true" || rc.isActive == "1" )
-        );
+        var data = contactDataFrom( rc );
+        data.isActive = isBoolean( rc.isActive ) ? rc.isActive : ( rc.isActive == "true" || rc.isActive == "1" );
+        contact = contactsService.updateContactProfile( contact.getId(), data );
 
         var wantOrgAdmin = isBoolean( rc.organizationAdmin ) ? rc.organizationAdmin : ( rc.organizationAdmin == "true" || rc.organizationAdmin == "1" );
         if ( wantOrgAdmin ) {
@@ -165,6 +162,34 @@ class {
     }
 
     // ---------------- internals ----------------
+
+    /**
+     * The editable profile fields shared by create + update, read from
+     * the request collection. officeId is carried through as-is; the
+     * service maps a blank value to a real NULL (FK SET NULL).
+     */
+    private struct function contactDataFrom( required struct rc ){
+        return {
+            firstName   : trim( arguments.rc.firstName ?: "" ),
+            lastName    : trim( arguments.rc.lastName ?: "" ),
+            officeId    : trim( arguments.rc.officeId ?: "" ),
+            phone       : trim( arguments.rc.phone ?: "" ),
+            mobilePhone : trim( arguments.rc.mobilePhone ?: "" ),
+            jobTitle    : trim( arguments.rc.jobTitle ?: "" ),
+            timezone    : trim( arguments.rc.timezone ?: "" ),
+            locale      : trim( arguments.rc.locale ?: "" ),
+            isVip       : ( arguments.rc.isVip ?: "" ) == "true" || ( arguments.rc.isVip ?: "" ) == "1",
+            notes       : arguments.rc.notes ?: ""
+        };
+    }
+
+    private struct function blankContactForm(){
+        return {
+            email : "", firstName : "", lastName : "", organizationId : "", officeId : "",
+            password : "", organizationAdmin : false, phone : "", mobilePhone : "",
+            jobTitle : "", timezone : "", locale : "", isVip : false, notes : ""
+        };
+    }
 
     private array function validateNewContact( required struct rc ){
         var errors = [];

@@ -87,6 +87,71 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
             } );
 
+            it( "auto-provisions a contact when the sender is on a verified approved domain of an auto-provision org", function(){
+                var org = variables.contacts.createOrganization( {
+                    name : "AutoProv Org " & createUUID(),
+                    slug : "ap-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                variables.contacts.updateOrganization( org.getId(), { autoProvisionContacts : true } );
+                var domain = "ap-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+                variables.contacts.addDomainMapping( organizationId : org.getId(), domain : domain, isVerified : true );
+
+                var sender = "newhire-" & createUUID() & "@" & domain;
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@" & domain,
+                    from      : sender,
+                    subject   : "First request",
+                    body      : "Hello from a new person.",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+
+                var t = variables.tickets.getTicket( result.getTicketId() );
+                expect( t.isAccountless() ).toBeFalse();
+                expect( t.getOrganizationId() ).toBe( org.getId() );
+
+                var created = variables.contacts.getContactByEmail( sender );
+                expect( created ).notToBeNull();
+                expect( created.getSource() ).toBe( "domain-auto" );
+
+                cleanupInbound( result.getId() );
+                cleanupTicket( t.getId() );
+                queryExecute( "DELETE FROM contacts WHERE id = :id", { id : created.getId() } );
+                queryExecute( "DELETE FROM organization_domains WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+            } );
+
+            it( "leaves the ticket accountless when the approved domain is not verified", function(){
+                var org = variables.contacts.createOrganization( {
+                    name : "Unverified Org " & createUUID(),
+                    slug : "uv-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+                variables.contacts.updateOrganization( org.getId(), { autoProvisionContacts : true } );
+                var domain = "uv-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+                variables.contacts.addDomainMapping( organizationId : org.getId(), domain : domain, isVerified : false );
+
+                var sender = "stranger-" & createUUID() & "@" & domain;
+                var result = variables.processor.process( {
+                    messageId : "msg-" & createUUID() & "@" & domain,
+                    from      : sender,
+                    subject   : "Hello",
+                    body      : "No account here.",
+                    headers   : {}
+                } );
+                expect( result.getOutcome() ).toBe( "ticket_created" );
+
+                var t = variables.tickets.getTicket( result.getTicketId() );
+                expect( t.isAccountless() ).toBeTrue();
+                expect( variables.contacts.getContactByEmail( sender ) ).toBeNull();
+
+                cleanupInbound( result.getId() );
+                cleanupTicket( t.getId() );
+                queryExecute( "DELETE FROM organization_domains WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+            } );
+
             it( "drops a sender on the blacklist", function(){
                 var sender = "spammer-" & createUUID() & "@blocked.test";
                 var entry  = variables.channels.blockEmail( email = sender );

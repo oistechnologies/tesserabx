@@ -290,6 +290,7 @@ class singleton=true {
         // Agent main menu (left sidebar on /agent).
         register( { id : "agent.main.dashboard",          surface : "agent",  menu : "main",    label : "Dashboard",        route : "/agent",            icon : "bi bi-speedometer", sortWeight : 10,  requiresAuth : true } );
         register( { id : "agent.main.tickets",            surface : "agent",  menu : "main",    label : "Tickets",          route : "/agent/tickets",    icon : "bi bi-card-list",   sortWeight : 20,  requiresAuth : true, requiredPermission : "tickets.view" } );
+        register( { id : "agent.main.organizations",      surface : "agent",  menu : "main",    label : "Organizations",    route : "/agent/organizations", icon : "bi bi-building",  sortWeight : 25,  requiresAuth : true } );
         register( { id : "agent.main.contacts",           surface : "agent",  menu : "main",    label : "Contacts",         route : "/agent/contacts",   icon : "bi bi-people",      sortWeight : 30,  requiresAuth : true } );
         register( { id : "agent.main.notifications",      surface : "agent",  menu : "main",    label : "Notifications",    route : "/agent/notifications", icon : "bi bi-bell",     sortWeight : 40,  requiresAuth : true } );
         register( { id : "agent.main.reports",            surface : "agent",  menu : "main",    label : "Reports",          route : "/agent/reports",    icon : "bi bi-graph-up",    sortWeight : 50,  requiresAuth : true } );

@@ -1,0 +1,296 @@
+/**
+ * agent:Organizations handler.
+ *
+ * Agent-facing CRUD over the Organization entity (the tenant boundary)
+ * plus the per-org Approved Domains list. Offices are managed by the
+ * sibling Offices handler; this handler's show() page hosts both
+ * sections.
+ *
+ * All data access goes through ContactsService@contacts; this handler
+ * never imports a contacts entity directly.
+ *
+ * RBAC: any authenticated agent can view and edit. Creating and
+ * deactivating an organization, and removing an approved domain, are
+ * gated behind the `organizations.manage` permission via tbxCan().
+ * The /agent firewall is role-based (it cannot gate on a permission),
+ * so the check lives here in the handler.
+ */
+class {
+
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    // The lifecycle statuses offered in the edit form.
+    variables.STATUSES = [ "prospect", "active", "suspended", "archived" ];
+    // The default tier ladder (free-form; provider can type others).
+    variables.TIERS = [ "Bronze", "Silver", "Gold", "Platinum" ];
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle      = "Organizations";
+        prc.organizations  = contactsService.listOrganizations();
+        prc.counts         = contactsService.organizationCounts();
+        prc.canManage      = tbxCan( "organizations.manage" );
+        event.setView( "organizations/index" );
+    }
+
+    function show( event, rc, prc ){
+        prc.organization = contactsService.getOrganizationById( rc.id ?: "" );
+        if ( isNull( prc.organization ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        prc.pageTitle = prc.organization.getName();
+        prc.offices   = contactsService.listOfficesForOrganization( prc.organization.getId() );
+        prc.domains   = contactsService.listDomainMappingsForOrganization( prc.organization.getId() );
+        prc.contacts  = contactsService.listContactsForOrganization( prc.organization.getId() );
+        prc.canManage = tbxCan( "organizations.manage" );
+        event.setView( "organizations/show" );
+    }
+
+    function new( event, rc, prc ){
+        if ( !guardManage( "/agent/organizations" ) ) return;
+        prc.pageTitle = "New organization";
+        prc.statuses  = variables.STATUSES;
+        prc.tiers     = variables.TIERS;
+        prc.isNew     = true;
+        prc.contacts  = [];
+        prc.formData  = blankOrg();
+        event.setView( "organizations/edit" );
+    }
+
+    function create( event, rc, prc ){
+        if ( !guardManage( "/agent/organizations" ) ) return;
+        var errors = validateOrg( rc );
+        if ( arrayLen( errors ) ) {
+            messagebox.error( errors.toList( "<br>" ) );
+            prc.pageTitle = "New organization";
+            prc.statuses  = variables.STATUSES;
+            prc.tiers     = variables.TIERS;
+            prc.isNew     = true;
+            prc.contacts  = [];
+            prc.formData  = rc;
+            event.setView( "organizations/edit" );
+            return;
+        }
+        var org = contactsService.createOrganization( orgDataFrom( rc, true ) );
+        messagebox.info( "Organization created." );
+        relocate( uri = "/agent/organizations/" & org.getId() );
+    }
+
+    function edit( event, rc, prc ){
+        prc.organization = contactsService.getOrganizationById( rc.id ?: "" );
+        if ( isNull( prc.organization ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        prc.pageTitle = "Edit: " & prc.organization.getName();
+        prc.statuses  = variables.STATUSES;
+        prc.tiers     = variables.TIERS;
+        prc.isNew     = false;
+        // Primary-contact picker is drawn from this org's contacts.
+        prc.contacts  = contactsService.listContactsForOrganization( prc.organization.getId() );
+        prc.formData  = orgToForm( prc.organization );
+        event.setView( "organizations/edit" );
+    }
+
+    function update( event, rc, prc ){
+        var org = contactsService.getOrganizationById( rc.id ?: "" );
+        if ( isNull( org ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        var errors = validateOrg( rc );
+        if ( arrayLen( errors ) ) {
+            messagebox.error( errors.toList( "<br>" ) );
+            relocate( uri = "/agent/organizations/" & org.getId() & "/edit" );
+            return;
+        }
+        contactsService.updateOrganization( org.getId(), orgDataFrom( rc, false ) );
+        messagebox.info( "Organization updated." );
+        relocate( uri = "/agent/organizations/" & org.getId() );
+    }
+
+    function deactivate( event, rc, prc ){
+        if ( !guardManage( "/agent/organizations" ) ) return;
+        var org = contactsService.getOrganizationById( rc.id ?: "" );
+        if ( isNull( org ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        // A toggle: reactivate if currently inactive, else deactivate.
+        var nowActive = !org.getIsActive();
+        contactsService.setOrganizationActive( id : org.getId(), active : nowActive, actorId : currentAgentId() );
+        messagebox.info( nowActive ? "Organization reactivated." : "Organization deactivated." );
+        relocate( uri = "/agent/organizations/" & org.getId() );
+    }
+
+    // ---------------- Approved domains ----------------
+
+    function addDomain( event, rc, prc ){
+        param rc.id     = "";
+        param rc.domain = "";
+        var org = contactsService.getOrganizationById( rc.id );
+        if ( isNull( org ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        var domain = lCase( trim( rc.domain ) );
+        if ( !isValidDomain( domain ) ) {
+            messagebox.error( "Enter a valid domain, for example acme.com." );
+            relocate( uri = "/agent/organizations/" & org.getId() );
+            return;
+        }
+        // Phase-1 convention: a domain added by an agent in the
+        // dashboard is verified on the spot (the agent is asserting it).
+        contactsService.addDomainMapping(
+            organizationId : org.getId(),
+            domain         : domain,
+            isVerified     : true
+        );
+        messagebox.info( "Domain added." );
+        relocate( uri = "/agent/organizations/" & org.getId() );
+    }
+
+    function verifyDomain( event, rc, prc ){
+        param rc.id       = "";
+        param rc.domainId = "";
+        param rc.verified = "true";
+        contactsService.setDomainVerified(
+            id       : rc.domainId,
+            verified : ( rc.verified == "true" || rc.verified == "1" )
+        );
+        messagebox.info( "Domain verification updated." );
+        relocate( uri = "/agent/organizations/" & rc.id );
+    }
+
+    function removeDomain( event, rc, prc ){
+        if ( !guardManage( "/agent/organizations/" & ( rc.id ?: "" ) ) ) return;
+        param rc.id       = "";
+        param rc.domainId = "";
+        contactsService.removeDomainMapping( rc.domainId );
+        messagebox.info( "Domain removed." );
+        relocate( uri = "/agent/organizations/" & rc.id );
+    }
+
+    // ---------------- JSON: offices for an org ----------------
+
+    /**
+     * Offices for an organization as JSON. Feeds the dependent office
+     * dropdown on the contact-create form when the org changes.
+     */
+    function officesJson( event, rc, prc ){
+        param rc.id = "";
+        var out = [];
+        if ( len( rc.id ) ) {
+            for ( var office in contactsService.listOfficesForOrganization( rc.id ) ) {
+                out.append( { "id" : office.getId(), "name" : office.getName() } );
+            }
+        }
+        event.renderData( type = "json", data = out );
+    }
+
+    // ---------------- internals ----------------
+
+    private boolean function guardManage( required string redirectUri ){
+        if ( tbxCan( "organizations.manage" ) ) return true;
+        messagebox.warn( "You do not have permission to manage organizations." );
+        relocate( uri = arguments.redirectUri );
+        return false;
+    }
+
+    private array function validateOrg( required struct rc ){
+        var errors = [];
+        if ( !len( trim( arguments.rc.name ?: "" ) ) ) errors.append( "Name is required." );
+        return errors;
+    }
+
+    /**
+     * Build the data struct passed to the service. On create we also
+     * pass slug through (defaulted from name when blank). actorId tags
+     * the audit + event payloads.
+     */
+    private struct function orgDataFrom( required struct rc, required boolean isCreate ){
+        var data = {
+            name                  : trim( arguments.rc.name ?: "" ),
+            tier                  : trim( arguments.rc.tier ?: "" ),
+            status                : trim( arguments.rc.status ?: "active" ),
+            accountNumber         : trim( arguments.rc.accountNumber ?: "" ),
+            phone                 : trim( arguments.rc.phone ?: "" ),
+            website               : trim( arguments.rc.website ?: "" ),
+            industry              : trim( arguments.rc.industry ?: "" ),
+            addressLine1          : trim( arguments.rc.addressLine1 ?: "" ),
+            addressLine2          : trim( arguments.rc.addressLine2 ?: "" ),
+            city                  : trim( arguments.rc.city ?: "" ),
+            region                : trim( arguments.rc.region ?: "" ),
+            postalCode            : trim( arguments.rc.postalCode ?: "" ),
+            country               : trim( arguments.rc.country ?: "" ),
+            timezone              : trim( arguments.rc.timezone ?: "" ),
+            notes                 : arguments.rc.notes ?: "",
+            primaryContactId      : trim( arguments.rc.primaryContactId ?: "" ),
+            autoProvisionContacts : ( arguments.rc.autoProvisionContacts ?: "" ) == "true" || ( arguments.rc.autoProvisionContacts ?: "" ) == "1",
+            actorType             : "agent",
+            actorId               : currentAgentId()
+        };
+        if ( arguments.isCreate ) {
+            data.slug = trim( arguments.rc.slug ?: "" );
+        }
+        return data;
+    }
+
+    private struct function orgToForm( required any org ){
+        return {
+            name                  : arguments.org.getName() ?: "",
+            slug                  : arguments.org.getSlug() ?: "",
+            tier                  : arguments.org.getTier() ?: "",
+            status                : arguments.org.getStatus() ?: "active",
+            accountNumber         : arguments.org.getAccountNumber() ?: "",
+            phone                 : arguments.org.getPhone() ?: "",
+            website               : arguments.org.getWebsite() ?: "",
+            industry              : arguments.org.getIndustry() ?: "",
+            addressLine1          : arguments.org.getAddressLine1() ?: "",
+            addressLine2          : arguments.org.getAddressLine2() ?: "",
+            city                  : arguments.org.getCity() ?: "",
+            region                : arguments.org.getRegion() ?: "",
+            postalCode            : arguments.org.getPostalCode() ?: "",
+            country               : arguments.org.getCountry() ?: "",
+            timezone              : arguments.org.getTimezone() ?: "",
+            notes                 : arguments.org.getNotes() ?: "",
+            primaryContactId      : arguments.org.getPrimaryContactId() ?: "",
+            autoProvisionContacts : isBoolean( arguments.org.getAutoProvisionContacts() ) ? arguments.org.getAutoProvisionContacts() : false
+        };
+    }
+
+    private struct function blankOrg(){
+        return {
+            name : "", slug : "", tier : "", status : "active", accountNumber : "",
+            phone : "", website : "", industry : "", addressLine1 : "", addressLine2 : "",
+            city : "", region : "", postalCode : "", country : "", timezone : "",
+            notes : "", primaryContactId : "", autoProvisionContacts : false
+        };
+    }
+
+    private boolean function isValidDomain( required string domain ){
+        // A loose check: at least one dot, no @ or spaces, sane chars.
+        return len( arguments.domain )
+            && !findNoCase( "@", arguments.domain )
+            && reFind( "^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$", arguments.domain ) > 0;
+    }
+
+    private string function currentAgentId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var user = auth.getUser();
+        if ( isNull( user ) ) return "";
+        return user.getId();
+    }
+
+}

@@ -1,0 +1,146 @@
+/**
+ * agent:Offices handler.
+ *
+ * Full-location CRUD over the Office entity, always scoped to a parent
+ * organization (URLs are /agent/organizations/:orgId/offices/...). The
+ * organization show page lists offices and links here for the forms.
+ *
+ * All data access goes through ContactsService@contacts. Deleting an
+ * office is gated behind the `organizations.manage` permission via
+ * tbxCan(); create/edit are open to any authenticated agent (they are
+ * sub-edits of an org an agent can already edit).
+ */
+class {
+
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function new( event, rc, prc ){
+        param rc.orgId = "";
+        prc.organization = contactsService.getOrganizationById( rc.orgId );
+        if ( isNull( prc.organization ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        prc.pageTitle = "New office";
+        prc.isNew     = true;
+        prc.formData  = blankOffice();
+        event.setView( "offices/edit" );
+    }
+
+    function create( event, rc, prc ){
+        param rc.orgId = "";
+        var org = contactsService.getOrganizationById( rc.orgId );
+        if ( isNull( org ) ) {
+            messagebox.warn( "That organization does not exist." );
+            relocate( uri = "/agent/organizations" );
+            return;
+        }
+        if ( !len( trim( rc.name ?: "" ) ) ) {
+            messagebox.error( "Office name is required." );
+            relocate( uri = "/agent/organizations/" & org.getId() & "/offices/new" );
+            return;
+        }
+        contactsService.createOffice( org.getId(), officeDataFrom( rc ) );
+        messagebox.info( "Office created." );
+        relocate( uri = "/agent/organizations/" & org.getId() );
+    }
+
+    function edit( event, rc, prc ){
+        param rc.orgId = "";
+        param rc.id    = "";
+        prc.organization = contactsService.getOrganizationById( rc.orgId );
+        prc.office       = contactsService.getOfficeById( rc.id );
+        if ( isNull( prc.organization ) || isNull( prc.office ) || prc.office.getOrganizationId() != prc.organization.getId() ) {
+            messagebox.warn( "That office does not exist." );
+            relocate( uri = "/agent/organizations/" & rc.orgId );
+            return;
+        }
+        prc.pageTitle = "Edit office";
+        prc.isNew     = false;
+        prc.formData  = officeToForm( prc.office );
+        event.setView( "offices/edit" );
+    }
+
+    function update( event, rc, prc ){
+        param rc.orgId = "";
+        param rc.id    = "";
+        var org    = contactsService.getOrganizationById( rc.orgId );
+        var office = contactsService.getOfficeById( rc.id );
+        if ( isNull( org ) || isNull( office ) || office.getOrganizationId() != org.getId() ) {
+            messagebox.warn( "That office does not exist." );
+            relocate( uri = "/agent/organizations/" & rc.orgId );
+            return;
+        }
+        if ( !len( trim( rc.name ?: "" ) ) ) {
+            messagebox.error( "Office name is required." );
+            relocate( uri = "/agent/organizations/" & org.getId() & "/offices/" & office.getId() );
+            return;
+        }
+        contactsService.updateOffice( office.getId(), officeDataFrom( rc ) );
+        messagebox.info( "Office updated." );
+        relocate( uri = "/agent/organizations/" & org.getId() );
+    }
+
+    function delete( event, rc, prc ){
+        param rc.orgId = "";
+        param rc.id    = "";
+        if ( !tbxCan( "organizations.manage" ) ) {
+            messagebox.warn( "You do not have permission to delete offices." );
+            relocate( uri = "/agent/organizations/" & rc.orgId );
+            return;
+        }
+        var office = contactsService.getOfficeById( rc.id );
+        if ( !isNull( office ) && office.getOrganizationId() == rc.orgId ) {
+            contactsService.deleteOffice( office.getId() );
+            messagebox.info( "Office deleted. Any contacts assigned to it are now unassigned." );
+        }
+        relocate( uri = "/agent/organizations/" & rc.orgId );
+    }
+
+    // ---------------- internals ----------------
+
+    private struct function officeDataFrom( required struct rc ){
+        return {
+            name         : trim( arguments.rc.name ?: "" ),
+            addressLine1 : trim( arguments.rc.addressLine1 ?: "" ),
+            addressLine2 : trim( arguments.rc.addressLine2 ?: "" ),
+            city         : trim( arguments.rc.city ?: "" ),
+            region       : trim( arguments.rc.region ?: "" ),
+            postalCode   : trim( arguments.rc.postalCode ?: "" ),
+            country      : trim( arguments.rc.country ?: "" ),
+            phone        : trim( arguments.rc.phone ?: "" ),
+            timezone     : trim( arguments.rc.timezone ?: "" ),
+            isPrimary    : ( arguments.rc.isPrimary ?: "" ) == "true" || ( arguments.rc.isPrimary ?: "" ) == "1"
+        };
+    }
+
+    private struct function officeToForm( required any office ){
+        return {
+            name         : arguments.office.getName() ?: "",
+            addressLine1 : arguments.office.getAddressLine1() ?: "",
+            addressLine2 : arguments.office.getAddressLine2() ?: "",
+            city         : arguments.office.getCity() ?: "",
+            region       : arguments.office.getRegion() ?: "",
+            postalCode   : arguments.office.getPostalCode() ?: "",
+            country      : arguments.office.getCountry() ?: "",
+            phone        : arguments.office.getPhone() ?: "",
+            timezone     : arguments.office.getTimezone() ?: "",
+            isPrimary    : isBoolean( arguments.office.getIsPrimary() ) ? arguments.office.getIsPrimary() : false
+        };
+    }
+
+    private struct function blankOffice(){
+        return {
+            name : "", addressLine1 : "", addressLine2 : "", city : "", region : "",
+            postalCode : "", country : "", phone : "", timezone : "", isPrimary : false
+        };
+    }
+
+}

@@ -13,6 +13,15 @@ class
     property name="id";
     property name="organizationId" column="organization_id";
     property name="name";
+    property name="addressLine1"   column="address_line1";
+    property name="addressLine2"   column="address_line2";
+    property name="city";
+    property name="region";
+    property name="postalCode"     column="postal_code";
+    property name="country";
+    property name="phone";
+    property name="timezone";
+    property name="isPrimary"      column="is_primary";
     property name="createdAt"      column="created_at" sqltype="timestamp";
     property name="updatedAt"      column="updated_at" sqltype="timestamp";
 

@@ -24,8 +24,11 @@ component {
 
     function run( qb, mockdata ){
         seedOrganization( arguments.qb );
+        seedOffices( arguments.qb );
         seedContact( arguments.qb );
         seedAgent( arguments.qb );
+        seedDomains( arguments.qb );
+        linkPrimaryContact( arguments.qb );
         seedSlaCalendar( arguments.qb );
         seedSlaPolicy( arguments.qb );
     }
@@ -33,31 +36,133 @@ component {
     private void function seedOrganization( required any qb ){
         var existing = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
         if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) {
+            // Re-seeding an older dev database: turn on the demo
+            // attributes (and auto-provisioning) so the new feature is
+            // visible without a fresh DB.
+            arguments.qb.newQuery().from( "organizations" ).where( "id", existing.id ).update( {
+                "status"                  : "active",
+                "tier"                    : "Gold",
+                "website"                 : "https://acme.example.com",
+                "timezone"                : "America/New_York",
+                "auto_provision_contacts" : true
+            } );
             return;
         }
         arguments.qb.newQuery().from( "organizations" ).insert( {
-            "id"   : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
-            "name" : "Acme Corp",
-            "slug" : "acme"
+            "id"                      : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "name"                    : "Acme Corp",
+            "slug"                    : "acme",
+            "status"                  : "active",
+            "tier"                    : "Gold",
+            "website"                 : "https://acme.example.com",
+            "timezone"                : "America/New_York",
+            "auto_provision_contacts" : true
+        } );
+    }
+
+    /**
+     * A primary HQ office and one branch for Acme, so the office UI and
+     * contact-to-office assignment have data to work with.
+     */
+    private void function seedOffices( required any qb ){
+        var org = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
+        if ( isNull( org ) || !structKeyExists( org, "id" ) ) return;
+        var existing = arguments.qb.newQuery().from( "offices" ).where( "organization_id", org.id ).first();
+        if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) return;
+        arguments.qb.newQuery().from( "offices" ).insert( {
+            "id"              : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "organization_id" : org.id,
+            "name"            : "Headquarters",
+            "address_line1"   : "100 Market Street",
+            "city"            : "New York",
+            "region"          : "NY",
+            "postal_code"     : "10001",
+            "country"         : "US",
+            "phone"           : "+1-212-555-0100",
+            "timezone"        : "America/New_York",
+            "is_primary"      : true
+        } );
+        arguments.qb.newQuery().from( "offices" ).insert( {
+            "id"              : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "organization_id" : org.id,
+            "name"            : "West Coast Branch",
+            "address_line1"   : "555 Pine Avenue",
+            "city"            : "San Francisco",
+            "region"          : "CA",
+            "postal_code"     : "94104",
+            "country"         : "US",
+            "phone"           : "+1-415-555-0150",
+            "timezone"        : "America/Los_Angeles",
+            "is_primary"      : false
+        } );
+    }
+
+    /**
+     * The acme.com domain, verified, so an inbound email from a never-
+     * seen acme.com sender auto-creates a contact (Acme has
+     * auto_provision_contacts on).
+     */
+    private void function seedDomains( required any qb ){
+        var org = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
+        if ( isNull( org ) || !structKeyExists( org, "id" ) ) return;
+        var existing = arguments.qb.newQuery().from( "organization_domains" ).where( "domain", "acme.com" ).first();
+        if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) return;
+        arguments.qb.newQuery().from( "organization_domains" ).insert( {
+            "id"              : createObject( "java", "java.util.UUID" ).randomUUID().toString(),
+            "organization_id" : org.id,
+            "domain"          : "acme.com",
+            "is_verified"     : true
+        } );
+    }
+
+    /**
+     * Point Acme's primary_contact_id at the seeded client contact,
+     * once both exist. Idempotent: only sets it when currently empty.
+     */
+    private void function linkPrimaryContact( required any qb ){
+        var org = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
+        if ( isNull( org ) || !structKeyExists( org, "id" ) ) return;
+        if ( !isNull( org.primary_contact_id ?: "" ) && len( org.primary_contact_id ?: "" ) ) return;
+        var contact = arguments.qb.newQuery().from( "contacts" ).where( "email", "client@example.com" ).first();
+        if ( isNull( contact ) || !structKeyExists( contact, "id" ) ) return;
+        arguments.qb.newQuery().from( "organizations" ).where( "id", org.id ).update( {
+            "primary_contact_id" : contact.id
         } );
     }
 
     private void function seedContact( required any qb ){
+        var hqOffice = "";
+        var org = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
+        if ( !isNull( org ) && structKeyExists( org, "id" ) ) {
+            var office = arguments.qb.newQuery().from( "offices" )
+                .where( "organization_id", org.id ).where( "is_primary", true ).first();
+            if ( !isNull( office ) && structKeyExists( office, "id" ) ) hqOffice = office.id;
+        }
+
         var existing = arguments.qb.newQuery().from( "contacts" ).where( "email", "client@example.com" ).first();
         if ( !isNull( existing ) && structKeyExists( existing, "id" ) ) {
+            // Assign the seed contact to HQ if it has no office yet.
+            if ( len( hqOffice ) && ( isNull( existing.office_id ?: "" ) || !len( existing.office_id ?: "" ) ) ) {
+                arguments.qb.newQuery().from( "contacts" ).where( "id", existing.id ).update( { "office_id" : hqOffice } );
+            }
             ensureOrganizationAdminRole( arguments.qb, existing.id );
             return;
         }
-        var org = arguments.qb.newQuery().from( "organizations" ).where( "slug", "acme" ).first();
         var contactId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
-        arguments.qb.newQuery().from( "contacts" ).insert( {
+        var row = {
             "id"              : contactId,
             "organization_id" : org.id,
             "email"           : "client@example.com",
             "password_hash"   : variables.SEED_PASSWORD_HASH,
             "first_name"      : "Test",
-            "last_name"       : "Client"
-        } );
+            "last_name"       : "Client",
+            "job_title"       : "IT Manager",
+            "phone"           : "+1-212-555-0123",
+            "timezone"        : "America/New_York",
+            "source"          : "agent"
+        };
+        if ( len( hqOffice ) ) row[ "office_id" ] = hqOffice;
+        arguments.qb.newQuery().from( "contacts" ).insert( row );
         ensureOrganizationAdminRole( arguments.qb, contactId );
     }
 

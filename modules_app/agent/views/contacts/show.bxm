@@ -3,7 +3,12 @@
     <div class="col-12 col-lg-8">
         <div class="card">
             <div class="card-body">
-                <h2 class="card-title h4">#encodeForHTML( prc.contact.getEmail() )#</h2>
+                <h2 class="card-title h4">
+                    #encodeForHTML( prc.contact.getEmail() )#
+                    <bx:if isBoolean( prc.contact.getIsVip() ) and prc.contact.getIsVip()>
+                        <span class="badge text-bg-warning text-dark align-middle"><i class="bi bi-star-fill"></i> VIP</span>
+                    </bx:if>
+                </h2>
                 <dl class="row mb-0">
                     <dt class="col-sm-3">Name</dt>
                     <dd class="col-sm-9">#encodeForHTML( ( prc.contact.getFirstName() ?: "" ) & " " & ( prc.contact.getLastName() ?: "" ) )#</dd>

@@ -1,0 +1,61 @@
+<bx:output>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <p class="text-body-secondary mb-0">#arrayLen( prc.organizations )# organization#( arrayLen( prc.organizations ) eq 1 ? "" : "s" )#</p>
+    <bx:if prc.canManage>
+        <a class="btn btn-primary" href="/agent/organizations/new"><i class="bi bi-plus-lg"></i> New organization</a>
+    </bx:if>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Tier</th>
+                        <th>Status</th>
+                        <th class="text-end">Contacts</th>
+                        <th class="text-end">Offices</th>
+                        <th>Auto-provision</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <bx:if !arrayLen( prc.organizations )>
+                        <tr><td colspan="6" class="text-center text-body-secondary py-4">No organizations yet.</td></tr>
+                    </bx:if>
+                    <bx:loop array="#prc.organizations#" item="org">
+                        <bx:set theCounts = prc.counts[ org.getId() ] ?: { contacts : 0, offices : 0 } >
+                        <bx:set theStatus = lCase( org.getStatus() ?: "active" ) >
+                        <tr<bx:if !org.getIsActive()> class="opacity-75"</bx:if>>
+                            <td>
+                                <a href="/agent/organizations/#encodeForURL( org.getId() )#">#encodeForHTML( org.getName() )#</a>
+                                <bx:if !org.getIsActive()> <span class="badge text-bg-secondary">Inactive</span></bx:if>
+                            </td>
+                            <td>#encodeForHTML( org.getTier() ?: "" )#</td>
+                            <td>
+                                <bx:switch expression="#theStatus#">
+                                    <bx:case value="active"><span class="badge text-bg-success">Active</span></bx:case>
+                                    <bx:case value="prospect"><span class="badge text-bg-info text-black">Prospect</span></bx:case>
+                                    <bx:case value="suspended"><span class="badge text-bg-warning text-black">Suspended</span></bx:case>
+                                    <bx:case value="archived"><span class="badge text-bg-secondary">Archived</span></bx:case>
+                                    <bx:defaultcase><span class="badge text-bg-light text-black">#encodeForHTML( theStatus )#</span></bx:defaultcase>
+                                </bx:switch>
+                            </td>
+                            <td class="text-end">#theCounts.contacts#</td>
+                            <td class="text-end">#theCounts.offices#</td>
+                            <td>
+                                <bx:if isBoolean( org.getAutoProvisionContacts() ) and org.getAutoProvisionContacts()>
+                                    <span class="badge text-bg-primary"><i class="bi bi-magic"></i> On</span>
+                                <bx:else>
+                                    <span class="badge text-bg-light text-black">Off</span>
+                                </bx:if>
+                            </td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</bx:output>

@@ -1,0 +1,124 @@
+/**
+ * OrganizationsHandlerSpec: integration coverage for the agent
+ * Organizations handler, focused on the new RBAC gate.
+ *
+ * Create and deactivate are gated behind the `organizations.manage`
+ * permission via tbxCan(); a signed-in agent without it (anonymous
+ * viewer here) is redirected and no write happens. An admin viewer
+ * (is_admin mirrors to the agent-admin role, which carries
+ * organizations.manage) can create and deactivate.
+ *
+ * Dispatches against the handler with renderResults=true so relocates
+ * propagate to event state (the AccountHandlerSpec pattern).
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.agents   = getController().getWireBox().getInstance( "AgentService@agent" );
+    }
+
+    function run(){
+        describe( "Organizations handler RBAC", function(){
+
+            it( "blocks create for a viewer without organizations.manage", function(){
+                clearViewer();
+                var name = "Blocked Org " & createUUID();
+                var rc = getRequestContext();
+                rc.setValue( "name", name );
+                execute( event : "agent:Organizations.create", renderResults : true );
+
+                expect( orgIdByName( name ) ).toBe( "" );
+            } );
+
+            it( "creates an organization for an admin viewer and can deactivate it", function(){
+                var agentId = seedAdminAgent();
+                setViewer( agentId );
+
+                var name = "Spec Org " & createUUID();
+                var rc = getRequestContext();
+                rc.setValue( "name", name );
+                rc.setValue( "tier", "Gold" );
+                rc.setValue( "autoProvisionContacts", "true" );
+                execute( event : "agent:Organizations.create", renderResults : true );
+
+                var orgId = orgIdByName( name );
+                expect( orgId ).notToBe( "" );
+                var org = variables.contacts.getOrganizationById( orgId );
+                expect( org.getTier() ).toBe( "Gold" );
+                expect( org.getAutoProvisionContacts() ).toBeTrue();
+
+                // Deactivate via the handler.
+                setViewer( agentId );
+                var rc2 = getRequestContext();
+                rc2.setValue( "id", orgId );
+                execute( event : "agent:Organizations.deactivate", renderResults : true );
+                expect( variables.contacts.getOrganizationById( orgId ).getIsActive() ).toBeFalse();
+
+                cleanupOrg( orgId );
+                cleanupAgent( agentId );
+            } );
+
+            it( "adds an approved domain through the handler", function(){
+                var agentId = seedAdminAgent();
+                setViewer( agentId );
+                var org = variables.contacts.createOrganization( { name : "Dom Org " & createUUID(), slug : "dom-" & lCase( replace( createUUID(), "-", "", "all" ) ) } );
+
+                var domain = "handler-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+                var rc = getRequestContext();
+                rc.setValue( "id", org.getId() );
+                rc.setValue( "domain", domain );
+                execute( event : "agent:Organizations.addDomain", renderResults : true );
+
+                var mapping = variables.contacts.getDomainMapping( domain );
+                expect( mapping ).notToBeNull();
+                expect( mapping.getIsVerified() ).toBeTrue();
+
+                queryExecute( "DELETE FROM organization_domains WHERE organization_id = :id", { id : org.getId() } );
+                cleanupOrg( org.getId() );
+                cleanupAgent( agentId );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private void function setViewer( required string agentId ){
+        var prc = getRequestContext().getPrivateCollection();
+        prc.oCurrentUser = variables.agents.getAgentById( arguments.agentId );
+    }
+
+    private void function clearViewer(){
+        var prc = getRequestContext().getPrivateCollection();
+        structDelete( prc, "oCurrentUser" );
+    }
+
+    private string function seedAdminAgent(){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, 'x', TRUE, TRUE )",
+            { id : id, email : "orgspec-" & id & "@example.com" }
+        );
+        return id;
+    }
+
+    private string function orgIdByName( required string name ){
+        var rows = queryExecute( "SELECT id FROM organizations WHERE name = :n", { n : arguments.name } );
+        return rows.recordCount ? rows.id[ 1 ] : "";
+    }
+
+    private void function cleanupOrg( required string id ){
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.agentId } );
+    }
+
+}

@@ -95,6 +95,7 @@ class singleton=true {
             { id : "admin.settings.manage", label : "Edit application settings",        description : "App-wide settings, branding, integrations." },
             { id : "admin.audit.view",   label : "View the audit log",                  description : "Read-only access to the central compliance log." },
             { id : "admin.addons.manage", label : "Enable, disable, configure add-ons", description : "Drives the Add-ons admin page." },
+            { id : "organizations.manage", label : "Manage organizations",               description : "Create and deactivate organizations, offices, and approved domains." },
             { id : "tickets.view",       label : "View tickets",                        description : "Required for the agent ticket queue." },
             { id : "tickets.assign",     label : "Assign tickets",                      description : "Reassign tickets to other agents." },
             { id : "tickets.bulk",       label : "Bulk-edit tickets",                   description : "Apply actions to many tickets at once." }

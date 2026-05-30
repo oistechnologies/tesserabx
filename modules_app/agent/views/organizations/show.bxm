@@ -1,0 +1,165 @@
+<bx:output>
+<bx:set org    = prc.organization >
+<bx:set orgId  = encodeForHTMLAttribute( org.getId() ) >
+<bx:set orgUrl = "/agent/organizations/" & orgId >
+
+<div class="d-flex justify-content-end gap-2 mb-3">
+    <a class="btn btn-outline-secondary" href="/agent/contacts?organizationId=#orgId#"><i class="bi bi-people"></i> Contacts (#arrayLen( prc.contacts )#)</a>
+    <a class="btn btn-outline-secondary" href="#orgUrl#/edit"><i class="bi bi-pencil"></i> Edit</a>
+    <bx:if prc.canManage>
+        <form method="post" action="#orgUrl#/deactivate" class="d-inline" onsubmit="return confirm('#org.getIsActive() ? "Deactivate" : "Reactivate"# this organization?');">
+            <button type="submit" class="btn btn-outline-#org.getIsActive() ? "danger" : "success"#">
+                <i class="bi bi-#org.getIsActive() ? "slash-circle" : "check-circle"#"></i> #org.getIsActive() ? "Deactivate" : "Reactivate"#
+            </button>
+        </form>
+    </bx:if>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-lg-7">
+        <div class="card h-100">
+            <div class="card-header"><strong>Profile</strong></div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Status</dt>
+                    <dd class="col-sm-8">#encodeForHTML( org.getStatus() ?: "active" )#<bx:if !org.getIsActive()> <span class="badge text-bg-secondary">Inactive</span></bx:if></dd>
+
+                    <dt class="col-sm-4">Tier</dt>
+                    <dd class="col-sm-8">#encodeForHTML( org.getTier() ?: "-" )#</dd>
+
+                    <dt class="col-sm-4">Account number</dt>
+                    <dd class="col-sm-8">#encodeForHTML( org.getAccountNumber() ?: "-" )#</dd>
+
+                    <dt class="col-sm-4">Industry</dt>
+                    <dd class="col-sm-8">#encodeForHTML( org.getIndustry() ?: "-" )#</dd>
+
+                    <dt class="col-sm-4">Phone</dt>
+                    <dd class="col-sm-8">#encodeForHTML( org.getPhone() ?: "-" )#</dd>
+
+                    <dt class="col-sm-4">Website</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( org.getWebsite() ?: "" )><a href="#encodeForHTMLAttribute( org.getWebsite() )#" target="_blank" rel="noopener">#encodeForHTML( org.getWebsite() )#</a><bx:else>-</bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Time zone</dt>
+                    <dd class="col-sm-8">#encodeForHTML( org.getTimezone() ?: "-" )#</dd>
+
+                    <dt class="col-sm-4">Address</dt>
+                    <dd class="col-sm-8">
+                        <bx:set addr = [ org.getAddressLine1(), org.getAddressLine2(), org.getCity(), org.getRegion(), org.getPostalCode(), org.getCountry() ].filter( ( p ) => len( p ?: "" ) > 0 ) >
+                        <bx:if arrayLen( addr )>#encodeForHTML( addr.toList( ", " ) )#<bx:else>-</bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Auto-provision</dt>
+                    <dd class="col-sm-8">
+                        <bx:if isBoolean( org.getAutoProvisionContacts() ) and org.getAutoProvisionContacts()>
+                            <span class="badge text-bg-primary">On</span>
+                        <bx:else>
+                            <span class="badge text-bg-light text-black">Off</span>
+                        </bx:if>
+                    </dd>
+
+                    <bx:if len( org.getNotes() ?: "" )>
+                        <dt class="col-sm-4">Notes</dt>
+                        <dd class="col-sm-8" style="white-space:pre-wrap;">#encodeForHTML( org.getNotes() )#</dd>
+                    </bx:if>
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-5">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Approved domains</strong>
+            </div>
+            <div class="card-body">
+                <p class="text-body-secondary small">
+                    Email from a <em>verified</em> domain auto-creates a contact here when auto-provision is on.
+                </p>
+                <ul class="list-group list-group-flush mb-3">
+                    <bx:if !arrayLen( prc.domains )>
+                        <li class="list-group-item px-0 text-body-secondary">No approved domains yet.</li>
+                    </bx:if>
+                    <bx:loop array="#prc.domains#" item="dom">
+                        <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                            <span>
+                                #encodeForHTML( dom.getDomain() )#
+                                <bx:if dom.getIsVerified()>
+                                    <span class="badge text-bg-success ms-1">Verified</span>
+                                <bx:else>
+                                    <span class="badge text-bg-warning text-black ms-1">Unverified</span>
+                                </bx:if>
+                            </span>
+                            <span class="d-flex gap-1">
+                                <form method="post" action="#orgUrl#/domains/#encodeForHTMLAttribute( dom.getId() )#/verify" class="d-inline">
+                                    <input type="hidden" name="verified" value="#dom.getIsVerified() ? "false" : "true"#">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="#dom.getIsVerified() ? "Mark unverified" : "Mark verified"#">
+                                        <i class="bi bi-#dom.getIsVerified() ? "x-circle" : "check-circle"#"></i>
+                                    </button>
+                                </form>
+                                <bx:if prc.canManage>
+                                    <form method="post" action="#orgUrl#/domains/#encodeForHTMLAttribute( dom.getId() )#/remove" class="d-inline" onsubmit="return confirm('Remove this domain?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </bx:if>
+                            </span>
+                        </li>
+                    </bx:loop>
+                </ul>
+                <form method="post" action="#orgUrl#/domains/add" class="input-group">
+                    <input type="text" class="form-control" name="domain" placeholder="acme.com" aria-label="Domain">
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg"></i> Add</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Offices</strong>
+                <a class="btn btn-sm btn-primary" href="#orgUrl#/offices/new"><i class="bi bi-plus-lg"></i> Add office</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Location</th>
+                                <th>Phone</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <bx:if !arrayLen( prc.offices )>
+                                <tr><td colspan="4" class="text-center text-body-secondary py-4">No offices yet.</td></tr>
+                            </bx:if>
+                            <bx:loop array="#prc.offices#" item="office">
+                                <bx:set oloc = [ office.getCity(), office.getRegion(), office.getCountry() ].filter( ( p ) => len( p ?: "" ) > 0 ) >
+                                <tr>
+                                    <td>
+                                        #encodeForHTML( office.getName() )#
+                                        <bx:if isBoolean( office.getIsPrimary() ) and office.getIsPrimary()> <span class="badge text-bg-info text-black">Primary</span></bx:if>
+                                    </td>
+                                    <td>#encodeForHTML( arrayLen( oloc ) ? oloc.toList( ", " ) : "-" )#</td>
+                                    <td>#encodeForHTML( office.getPhone() ?: "-" )#</td>
+                                    <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-secondary" href="#orgUrl#/offices/#encodeForHTMLAttribute( office.getId() )#">Edit</a>
+                                        <bx:if prc.canManage>
+                                            <form method="post" action="#orgUrl#/offices/#encodeForHTMLAttribute( office.getId() )#/delete" class="d-inline" onsubmit="return confirm('Delete this office? Contacts assigned to it will be unassigned.');">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                            </form>
+                                        </bx:if>
+                                    </td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

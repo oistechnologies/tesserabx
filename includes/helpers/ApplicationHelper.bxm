@@ -125,6 +125,23 @@ array function tbxNavigation( required string surface, required string menu ){
 }
 
 /**
+ * Does the current viewer hold a permission? Resolves the viewer's
+ * roles to permissions through tbxViewer() (RoleRegistry) and tests
+ * membership. Use in handlers to gate write actions and in views to
+ * show/hide controls:
+ *
+ *   if ( !tbxCan( "organizations.manage" ) ) { ...block... }
+ *   <bx:if tbxCan( "organizations.manage" )> ...button... </bx:if>
+ *
+ * The /agent firewall is role-based and Agent.hasPermission() returns
+ * false, so cbSecurity cannot gate on a permission for agents; this
+ * helper is the permission-level check for the agent surface.
+ */
+boolean function tbxCan( required string permission ){
+    return arrayFindNoCase( tbxViewer().permissions ?: [], arguments.permission ) > 0;
+}
+
+/**
  * The application version, read once from `box.json` and cached in
  * the `application` scope. Returns an empty string if box.json is
  * unreadable or missing the `version` field, so callers can safely

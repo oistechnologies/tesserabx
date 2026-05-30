@@ -67,14 +67,40 @@ class singleton=true {
         return out;
     }
 
+    /**
+     * Contact + office counts per organization, keyed by org id, in a
+     * single aggregate query (avoids N+1 from the org list view).
+     * Orgs with no contacts/offices are still present with zeroes.
+     */
+    public struct function organizationCounts(){
+        var rows = queryExecute(
+            "SELECT o.id AS org_id,
+                    count( DISTINCT c.id ) AS contact_count,
+                    count( DISTINCT f.id ) AS office_count
+             FROM   organizations o
+             LEFT JOIN contacts c ON c.organization_id = o.id
+             LEFT JOIN offices  f ON f.organization_id = o.id
+             GROUP BY o.id"
+        );
+        var out = {};
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out[ rows.org_id[ i ] ] = {
+                "contacts" : rows.contact_count[ i ],
+                "offices"  : rows.office_count[ i ]
+            };
+        }
+        return out;
+    }
+
     public any function createOrganization( required struct data ){
         var org = wirebox.getInstance( "Organization@contacts" );
         org.setId( newId() );
         org.setName( arguments.data.name );
-        org.setSlug( arguments.data.slug ?: slugify( arguments.data.name ) );
-        if ( structKeyExists( arguments.data, "tier" ) ) {
-            org.setTier( arguments.data.tier );
-        }
+        org.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : slugify( arguments.data.name ) );
+        applyOrganizationData( org, arguments.data );
+        // Organizations carry no jsonb/PGobject column, so Quick's
+        // save() is safe here (unlike Contact, which must use a
+        // targeted UPDATE because of mfa_recovery_codes).
         org.save();
         recordAudit(
             eventType      : "organization.created",
@@ -99,23 +125,254 @@ class singleton=true {
         return org;
     }
 
+    /**
+     * Update an organization's attributes. Only the keys present in
+     * `data` are touched; absent keys are left as they are. Quick's
+     * save() is safe because organizations have no jsonb column.
+     */
+    public any function updateOrganization( required string id, required struct data ){
+        var org = getOrganizationById( arguments.id );
+        if ( isNull( org ) ) return javaCast( "null", "" );
+        if ( structKeyExists( arguments.data, "name" ) && len( arguments.data.name ) ) {
+            org.setName( arguments.data.name );
+        }
+        if ( structKeyExists( arguments.data, "slug" ) && len( arguments.data.slug ) ) {
+            org.setSlug( slugify( arguments.data.slug ) );
+        }
+        applyOrganizationData( org, arguments.data );
+        org.save();
+        recordAudit(
+            eventType      : "organization.updated",
+            entityType     : "Organization",
+            entityId       : org.getId(),
+            organizationId : org.getId(),
+            actorType      : arguments.data.actorType ?: "agent",
+            actorId        : arguments.data.actorId ?: "",
+            metadata       : { "name" : org.getName(), "slug" : org.getSlug() }
+        );
+
+        interceptorService.announce(
+            "onOrganizationUpdated",
+            eventPayloadBuilder.build(
+                event          : "onOrganizationUpdated",
+                organizationId : org.getId(),
+                actorType      : arguments.data.actorType ?: "agent",
+                actorId        : arguments.data.actorId ?: "system",
+                entity         : { type : "Organization", id : org.getId() },
+                metadata       : { name : org.getName() }
+            ),
+            true
+        );
+        return org;
+    }
+
+    /**
+     * Flip an organization's active flag. Deactivation also moves the
+     * lifecycle status to "archived" so the list view reflects it;
+     * reactivation restores "active".
+     */
+    public any function setOrganizationActive(
+        required string  id,
+        required boolean active,
+        string actorId = ""
+    ){
+        var org = getOrganizationById( arguments.id );
+        if ( isNull( org ) ) return javaCast( "null", "" );
+        org.setIsActive( arguments.active );
+        org.setStatus( arguments.active ? "active" : "archived" );
+        org.save();
+        var eventType = arguments.active ? "organization.activated" : "organization.deactivated";
+        recordAudit(
+            eventType      : eventType,
+            entityType     : "Organization",
+            entityId       : org.getId(),
+            organizationId : org.getId(),
+            actorType      : "agent",
+            actorId        : arguments.actorId
+        );
+
+        interceptorService.announce(
+            arguments.active ? "onOrganizationUpdated" : "onOrganizationDeactivated",
+            eventPayloadBuilder.build(
+                event          : arguments.active ? "onOrganizationUpdated" : "onOrganizationDeactivated",
+                organizationId : org.getId(),
+                actorType      : "agent",
+                actorId        : len( arguments.actorId ) ? arguments.actorId : "system",
+                entity         : { type : "Organization", id : org.getId() }
+            ),
+            true
+        );
+        return org;
+    }
+
+    public any function deactivateOrganization( required string id, string actorId = "" ){
+        return setOrganizationActive( id : arguments.id, active : false, actorId : arguments.actorId );
+    }
+
+    /**
+     * Apply the editable attribute columns from a data struct onto an
+     * Organization entity. Shared by create + update. Each key is
+     * optional; only present keys are set. `name`, `slug`, `id`, and
+     * audit/actor keys are handled by the callers, not here.
+     */
+    private void function applyOrganizationData( required any org, required struct data ){
+        var fields = [
+            "tier", "accountNumber", "status", "phone", "website", "industry",
+            "addressLine1", "addressLine2", "city", "region", "postalCode",
+            "country", "timezone", "notes"
+        ];
+        for ( var f in fields ) {
+            if ( structKeyExists( arguments.data, f ) ) {
+                invoke( arguments.org, "set" & f, [ arguments.data[ f ] ] );
+            }
+        }
+        if ( structKeyExists( arguments.data, "autoProvisionContacts" ) ) {
+            arguments.org.setAutoProvisionContacts( normalizeBoolean( arguments.data.autoProvisionContacts ) );
+        }
+        // primary_contact_id is an FK with ON DELETE SET NULL. An empty
+        // string is not a valid contact id and would violate the FK, so
+        // map blank to a real null.
+        if ( structKeyExists( arguments.data, "primaryContactId" ) ) {
+            arguments.org.setPrimaryContactId(
+                len( trim( arguments.data.primaryContactId ?: "" ) )
+                    ? arguments.data.primaryContactId
+                    : javaCast( "null", "" )
+            );
+        }
+    }
+
+    private boolean function normalizeBoolean( required any value ){
+        if ( isBoolean( arguments.value ) ) return arguments.value;
+        var s = lCase( trim( toString( arguments.value ) ) );
+        return ( s == "true" || s == "1" || s == "yes" || s == "on" );
+    }
+
     // ---------------- Offices ----------------
 
     public array function listOfficesForOrganization( required string organizationId ){
         return wirebox.getInstance( "Office@contacts" )
             .withoutGlobalScope()
             .where( "organization_id", arguments.organizationId )
+            .orderBy( "is_primary", "desc" )
             .orderBy( "name" )
             .get();
     }
 
-    public any function createOffice( required string organizationId, required string name ){
+    public any function getOfficeById( required string id ){
+        var office = wirebox.getInstance( "Office@contacts" )
+            .withoutGlobalScope()
+            .where( "id", arguments.id )
+            .first();
+        return isNull( office ) ? javaCast( "null", "" ) : office;
+    }
+
+    /**
+     * Create a full office / location record. `data` carries at least
+     * `name`; the address / phone / timezone / isPrimary fields are
+     * optional. Offices have no jsonb column, so Quick's save() is safe.
+     */
+    public any function createOffice( required string organizationId, required struct data ){
         var office = wirebox.getInstance( "Office@contacts" );
         office.setId( newId() );
         office.setOrganizationId( arguments.organizationId );
-        office.setName( arguments.name );
+        office.setName( arguments.data.name ?: "" );
+        applyOfficeData( office, arguments.data );
         office.save();
+        recordAudit(
+            eventType      : "office.created",
+            entityType     : "Office",
+            entityId       : office.getId(),
+            organizationId : arguments.organizationId,
+            metadata       : { "name" : office.getName() }
+        );
+
+        interceptorService.announce(
+            "onOfficeCreated",
+            eventPayloadBuilder.build(
+                event          : "onOfficeCreated",
+                organizationId : arguments.organizationId,
+                actorType      : arguments.data.actorType ?: "agent",
+                actorId        : arguments.data.actorId ?: "system",
+                entity         : { type : "Office", id : office.getId() },
+                metadata       : { name : office.getName() }
+            ),
+            true
+        );
         return office;
+    }
+
+    public any function updateOffice( required string id, required struct data ){
+        var office = getOfficeById( arguments.id );
+        if ( isNull( office ) ) return javaCast( "null", "" );
+        if ( structKeyExists( arguments.data, "name" ) && len( arguments.data.name ) ) {
+            office.setName( arguments.data.name );
+        }
+        applyOfficeData( office, arguments.data );
+        office.save();
+        recordAudit(
+            eventType      : "office.updated",
+            entityType     : "Office",
+            entityId       : office.getId(),
+            organizationId : office.getOrganizationId(),
+            metadata       : { "name" : office.getName() }
+        );
+
+        interceptorService.announce(
+            "onOfficeUpdated",
+            eventPayloadBuilder.build(
+                event          : "onOfficeUpdated",
+                organizationId : office.getOrganizationId(),
+                entity         : { type : "Office", id : office.getId() },
+                metadata       : { name : office.getName() }
+            ),
+            true
+        );
+        return office;
+    }
+
+    /**
+     * Hard-delete an office. Contacts assigned to it have office_id set
+     * to NULL by the FK (ON DELETE SET NULL), so no contact is orphaned.
+     */
+    public void function deleteOffice( required string id ){
+        var office = getOfficeById( arguments.id );
+        if ( isNull( office ) ) return;
+        var orgId = office.getOrganizationId();
+        var name  = office.getName();
+        office.delete();
+        recordAudit(
+            eventType      : "office.deleted",
+            entityType     : "Office",
+            entityId       : arguments.id,
+            organizationId : orgId,
+            metadata       : { "name" : name }
+        );
+
+        interceptorService.announce(
+            "onOfficeDeleted",
+            eventPayloadBuilder.build(
+                event          : "onOfficeDeleted",
+                organizationId : orgId,
+                entity         : { type : "Office", id : arguments.id },
+                metadata       : { name : name }
+            ),
+            true
+        );
+    }
+
+    private void function applyOfficeData( required any office, required struct data ){
+        var fields = [
+            "addressLine1", "addressLine2", "city", "region",
+            "postalCode", "country", "phone", "timezone"
+        ];
+        for ( var f in fields ) {
+            if ( structKeyExists( arguments.data, f ) ) {
+                invoke( arguments.office, "set" & f, [ arguments.data[ f ] ] );
+            }
+        }
+        if ( structKeyExists( arguments.data, "isPrimary" ) ) {
+            arguments.office.setIsPrimary( normalizeBoolean( arguments.data.isPrimary ) );
+        }
     }
 
     // ---------------- Contacts ----------------
@@ -152,17 +409,20 @@ class singleton=true {
             binds[ "c" & i ] = ids[ i ];
         }
         var rows = queryExecute(
-            "SELECT id, email, first_name, last_name
-             FROM   contacts
-             WHERE  id IN ( " & placeholders.toList() & " )",
+            "SELECT c.id, c.email, c.first_name, c.last_name, c.is_vip, o.name AS office_name
+             FROM   contacts c
+             LEFT JOIN offices o ON o.id = c.office_id
+             WHERE  c.id IN ( " & placeholders.toList() & " )",
             binds
         );
         for ( var i = 1; i <= rows.recordCount; i++ ) {
             out[ rows.id[ i ] ] = {
-                id        : rows.id[ i ],
-                email     : rows.email[ i ]      ?: "",
-                firstName : rows.first_name[ i ] ?: "",
-                lastName  : rows.last_name[ i ]  ?: ""
+                id         : rows.id[ i ],
+                email      : rows.email[ i ]       ?: "",
+                firstName  : rows.first_name[ i ]  ?: "",
+                lastName   : rows.last_name[ i ]   ?: "",
+                isVip      : !!rows.is_vip[ i ],
+                officeName : rows.office_name[ i ] ?: ""
             };
         }
         return out;
@@ -178,6 +438,62 @@ class singleton=true {
             .where( "email", lCase( arguments.email ) )
             .first();
         return isNull( contact ) ? javaCast( "null", "" ) : contact;
+    }
+
+    /**
+     * Inbound-channel resolver: given a sender email, return the
+     * Contact to attach to a ticket, auto-creating one when the
+     * sender's domain is an approved+verified domain on an
+     * organization that has opted in to auto-provisioning.
+     *
+     * This is the single place the tenant-assignment decision lives;
+     * the channels module calls it rather than reaching into entities
+     * directly (CLAUDE.md cross-module rule). Returns null when no
+     * Contact applies, so the caller falls back to an accountless
+     * ticket exactly as before.
+     *
+     * Order:
+     *   1. Known email wins (global lookup; an email already owned by
+     *      another org keeps its org, preserving existing behavior).
+     *   2. Domain must be mapped AND is_verified.
+     *   3. Organization must exist, be active, and have
+     *      auto_provision_contacts enabled.
+     *   4. Provision with source = "domain-auto".
+     */
+    public any function resolveOrAutoProvisionContact( required string email ){
+        var existing = getContactByEmail( arguments.email );
+        if ( !isNull( existing ) ) return existing;
+
+        var domain = extractDomain( arguments.email );
+        if ( !len( domain ) ) return javaCast( "null", "" );
+
+        var mapping = getDomainMapping( domain );
+        if ( isNull( mapping ) || !mapping.getIsVerified() ) return javaCast( "null", "" );
+
+        var org = getOrganizationById( mapping.getOrganizationId() );
+        if ( isNull( org ) || !org.getIsActive() || !org.getAutoProvisionContacts() ) {
+            return javaCast( "null", "" );
+        }
+
+        return provisionContact( {
+            organizationId : org.getId(),
+            email          : arguments.email,
+            source         : "domain-auto",
+            actorType      : "system"
+        } );
+    }
+
+    /**
+     * Ids of every VIP contact. Used by the agent ticket list to
+     * filter to VIP-requester tickets without the tickets module
+     * having to read the contacts table directly (the handler passes
+     * these ids into TicketsService.listTickets).
+     */
+    public array function vipContactIds(){
+        var rows = queryExecute( "SELECT id FROM contacts WHERE is_vip = TRUE" );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.id[ i ] );
+        return out;
     }
 
     public array function listContactsForOrganization( required string organizationId ){
@@ -212,6 +528,21 @@ class singleton=true {
         if ( structKeyExists( arguments.data, "officeId" ) && len( arguments.data.officeId ) ) {
             contact.setOfficeId( arguments.data.officeId );
         }
+        // Optional support-CRM profile fields.
+        for ( var f in [ "phone", "mobilePhone", "jobTitle", "timezone", "locale", "notes" ] ) {
+            if ( structKeyExists( arguments.data, f ) ) invoke( contact, "set" & f, [ arguments.data[ f ] ] );
+        }
+        if ( structKeyExists( arguments.data, "isVip" ) ) {
+            contact.setIsVip( normalizeBoolean( arguments.data.isVip ) );
+        }
+        // How this account came to exist: agent (default), portal,
+        // domain-auto, import, email. Recorded so the agent UI can
+        // distinguish auto-provisioned contacts.
+        contact.setSource( arguments.data.source ?: "agent" );
+        // INSERT of a fresh entity is safe with Quick's save(); the
+        // mfa_recovery_codes (jsonb) PGobject trap only bites on
+        // save() AFTER a load, which is why the update paths below use
+        // targeted UPDATEs instead.
         contact.save();
         recordAudit(
             eventType      : "contact.provisioned",
@@ -249,25 +580,57 @@ class singleton=true {
      * Mirrors the agent-side workaround in Mfa.bx and the existing
      * comments there.
      */
-    public any function updateContactProfile(
-        required string  id,
-        required string  firstName,
-        required string  lastName,
-        required boolean isActive
-    ){
-        queryExecute(
-            "UPDATE contacts
-             SET    first_name = :firstName,
-                    last_name  = :lastName,
-                    is_active  = cast( :isActive as boolean ),
-                    updated_at = NOW()
-             WHERE  id = :id",
-            {
-                id        : arguments.id,
-                firstName : arguments.firstName,
-                lastName  : arguments.lastName,
-                isActive  : arguments.isActive
+    public any function updateContactProfile( required string id, required struct data ){
+        var sets  = [ "updated_at = NOW()" ];
+        var binds = { "id" : arguments.id };
+
+        // Plain text columns: dataKey -> db column.
+        var textMap = {
+            "firstName"   : "first_name",
+            "lastName"    : "last_name",
+            "phone"       : "phone",
+            "mobilePhone" : "mobile_phone",
+            "jobTitle"    : "job_title",
+            "timezone"    : "timezone",
+            "locale"      : "locale",
+            "notes"       : "notes"
+        };
+        for ( var key in textMap ) {
+            if ( structKeyExists( arguments.data, key ) ) {
+                sets.append( textMap[ key ] & " = :" & key );
+                binds[ key ] = arguments.data[ key ];
             }
+        }
+
+        // Boolean columns. Every queryExecute bind goes in as varchar,
+        // so the non-text columns are wrapped in cast(... as boolean).
+        var boolMap = { "isActive" : "is_active", "isVip" : "is_vip" };
+        for ( var key in boolMap ) {
+            if ( structKeyExists( arguments.data, key ) ) {
+                sets.append( boolMap[ key ] & " = cast( :" & key & " as boolean )" );
+                binds[ key ] = normalizeBoolean( arguments.data[ key ] );
+            }
+        }
+
+        // office_id is a nullable FK (ON DELETE SET NULL). A blank value
+        // means "unassign", which must be a real NULL, not an empty
+        // string (no office has an empty id, so the FK would reject it).
+        if ( structKeyExists( arguments.data, "officeId" ) ) {
+            if ( len( trim( arguments.data.officeId ?: "" ) ) ) {
+                sets.append( "office_id = :officeId" );
+                binds[ "officeId" ] = arguments.data.officeId;
+            } else {
+                sets.append( "office_id = NULL" );
+            }
+        }
+
+        // Targeted UPDATE (NOT contact.save()): Quick's save() re-binds
+        // every column on the entity, including mfa_recovery_codes
+        // (jsonb / PGobject on load), which JDBC cannot coerce back into
+        // a varchar bind. See memory note [quick-save-pgobject].
+        queryExecute(
+            "UPDATE contacts SET " & sets.toList( ", " ) & " WHERE id = :id",
+            binds
         );
         return getContactById( arguments.id );
     }
@@ -388,14 +751,69 @@ class singleton=true {
     // ---------------- Domain mapping ----------------
 
     public any function resolveOrganizationForEmail( required string email ){
-        var parts = listToArray( arguments.email, "@" );
-        if ( arrayLen( parts ) < 2 ) return javaCast( "null", "" );
-        var domain = lCase( parts[ arrayLen( parts ) ] );
-        var mapping = wirebox.getInstance( "OrganizationDomain@contacts" )
-            .where( "domain", domain )
-            .first();
+        var domain = extractDomain( arguments.email );
+        if ( !len( domain ) ) return javaCast( "null", "" );
+        var mapping = getDomainMapping( domain );
         if ( isNull( mapping ) ) return javaCast( "null", "" );
         return getOrganizationById( mapping.getOrganizationId() );
+    }
+
+    /**
+     * Return the OrganizationDomain row for a bare domain (e.g.
+     * "acme.com"), or null. Callers that need is_verified ask here
+     * rather than through resolveOrganizationForEmail, which only
+     * yields the Organization.
+     */
+    public any function getDomainMapping( required string domain ){
+        var mapping = wirebox.getInstance( "OrganizationDomain@contacts" )
+            .where( "domain", lCase( trim( arguments.domain ) ) )
+            .first();
+        return isNull( mapping ) ? javaCast( "null", "" ) : mapping;
+    }
+
+    public any function setDomainVerified( required string id, required boolean verified ){
+        var mapping = wirebox.getInstance( "OrganizationDomain@contacts" )
+            .where( "id", arguments.id )
+            .first();
+        if ( isNull( mapping ) ) return javaCast( "null", "" );
+        mapping.setIsVerified( arguments.verified );
+        mapping.save();
+        recordAudit(
+            eventType      : "organization.domain_verified",
+            entityType     : "Organization",
+            entityId       : mapping.getOrganizationId(),
+            organizationId : mapping.getOrganizationId(),
+            metadata       : { "domain" : mapping.getDomain(), "isVerified" : arguments.verified }
+        );
+        return mapping;
+    }
+
+    public void function removeDomainMapping( required string id ){
+        var mapping = wirebox.getInstance( "OrganizationDomain@contacts" )
+            .where( "id", arguments.id )
+            .first();
+        if ( isNull( mapping ) ) return;
+        var orgId  = mapping.getOrganizationId();
+        var domain = mapping.getDomain();
+        mapping.delete();
+        recordAudit(
+            eventType      : "organization.domain_unmapped",
+            entityType     : "Organization",
+            entityId       : orgId,
+            organizationId : orgId,
+            metadata       : { "domain" : domain }
+        );
+
+        interceptorService.announce(
+            "onOrganizationDomainUnmapped",
+            eventPayloadBuilder.build(
+                event          : "onOrganizationDomainUnmapped",
+                organizationId : orgId,
+                entity         : { type : "Organization", id : orgId },
+                metadata       : { domain : domain }
+            ),
+            true
+        );
     }
 
     public any function addDomainMapping(
@@ -528,6 +946,16 @@ class singleton=true {
 
     private string function slugify( required string text ){
         return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+    }
+
+    /**
+     * The bare, lowercased domain of an email address ("a@b.com" ->
+     * "b.com"), or an empty string if the address has no domain part.
+     */
+    private string function extractDomain( required string email ){
+        var parts = listToArray( arguments.email, "@" );
+        if ( arrayLen( parts ) < 2 ) return "";
+        return lCase( trim( parts[ arrayLen( parts ) ] ) );
     }
 
     /**

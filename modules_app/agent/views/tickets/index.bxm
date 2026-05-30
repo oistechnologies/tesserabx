@@ -6,45 +6,53 @@
 <bx:set local.exportQs &= "priority=" & encodeForURL( prc.filters.priority ?: "" )
                        & "&organizationId=" & encodeForURL( prc.filters.organizationId ?: "" ) >
 
+<!-- Primary actions: always visible, mirrors the organizations / contacts list pages. -->
+<div class="d-flex justify-content-end gap-2 mb-3 flex-wrap">
+    <a class="btn btn-outline-secondary" href="/agent/reports/export/tickets.csv?#local.exportQs#">
+        <i class="bi bi-download"></i> Export CSV
+    </a>
+    <a class="btn btn-success" href="/agent/tickets/new"><i class="bi bi-plus-lg"></i> New ticket</a>
+</div>
+
 <form method="get" action="/agent/tickets" class="card mb-3" id="ticketFilterForm">
     <input type="hidden" name="statusFilterApplied" value="1">
+    <div class="card-header">
+        <a id="ticketFilterToggle"
+           class="d-flex w-100 align-items-center gap-2 flex-wrap text-reset text-decoration-none collapsed"
+           data-bs-toggle="collapse" href="##ticketFilterBody" role="button"
+           aria-expanded="false" aria-controls="ticketFilterBody">
+            <i class="bi bi-funnel"></i>
+            <span class="fw-semibold">Search and filters</span>
+            <bx:if len( prc.filters.q ?: "" )><span class="badge text-bg-info text-black">Search</span></bx:if>
+            <bx:if arrayLen( prc.statusArray )><span class="badge text-bg-secondary">Status: #encodeForHTML( arrayToList( prc.statusArray, ", " ) )#</span></bx:if>
+            <bx:if len( prc.filters.priority ?: "" )><span class="badge text-bg-secondary">Priority: #encodeForHTML( prc.filters.priority )#</span></bx:if>
+            <bx:if len( prc.filters.organizationId ?: "" )><span class="badge text-bg-secondary">#encodeForHTML( prc.orgNamesById[ prc.filters.organizationId ] ?: "Organization" )#</span></bx:if>
+            <bx:if ( prc.filters.accountlessOnly ?: "" ) eq "true" or ( prc.filters.accountlessOnly ?: false ) eq true><span class="badge text-bg-warning text-dark">Accountless</span></bx:if>
+            <bx:if ( prc.filters.vipOnly ?: "" ) eq "true" or ( prc.filters.vipOnly ?: false ) eq true><span class="badge text-bg-warning text-dark"><i class="bi bi-star-fill"></i> VIP</span></bx:if>
+            <i class="bi bi-chevron-down ms-auto"></i>
+        </a>
+    </div>
+    <div class="collapse" id="ticketFilterBody">
     <div class="card-body">
+        <!-- Search, priority, organization on one balanced row. -->
         <div class="row g-3">
-            <div class="col-12">
+            <div class="col-12 col-lg-6">
                 <label class="form-label" for="q">Search</label>
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <input type="search" class="form-control" id="q" name="q" placeholder="Subject or originating email..." value="#encodeForHTMLAttribute( prc.filters.q ?: "" )#">
                 </div>
             </div>
-            <div class="col-12 col-md-4">
-                <label class="form-label d-block">Status</label>
-                <div class="row row-cols-2 g-1" id="statusCheckboxes">
-                    <bx:loop array="#prc.statuses#" item="s">
-                        <div class="col">
-                            <div class="form-check">
-                                <input class="form-check-input status-filter-cb" type="checkbox"
-                                        name="status"
-                                        id="status_#encodeForHTMLAttribute( s )#"
-                                        value="#encodeForHTMLAttribute( s )#"
-                                        onchange="document.getElementById('ticketFilterForm').submit()"
-                                        <bx:if arrayContains( prc.statusArray, s )>checked</bx:if>>
-                                <label class="form-check-label" for="status_#encodeForHTMLAttribute( s )#">#encodeForHTML( s )#</label>
-                            </div>
-                        </div>
-                    </bx:loop>
-                </div>
-            </div>
-            <div class="col-12 col-md-3">
+            <div class="col-6 col-lg-3">
                 <label class="form-label" for="priority">Priority</label>
                 <select class="form-select" id="priority" name="priority" onchange="document.getElementById('ticketFilterForm').submit()">
-                    <option value="">All</option>
+                    <option value="">All priorities</option>
                     <bx:loop array="#prc.priorities#" item="p">
                         <option value="#encodeForHTMLAttribute( p )#"<bx:if ( prc.filters.priority ?: "" ) eq p> selected</bx:if>>#encodeForHTML( p )#</option>
                     </bx:loop>
                 </select>
             </div>
-            <div class="col-12 col-md-3">
+            <div class="col-6 col-lg-3">
                 <label class="form-label" for="organizationId">Organization</label>
                 <select class="form-select" id="organizationId" name="organizationId" onchange="document.getElementById('ticketFilterForm').submit()">
                     <option value="">All organizations</option>
@@ -53,16 +61,47 @@
                     </bx:loop>
                 </select>
             </div>
-            <div class="col-12 col-md-2 d-flex align-items-end">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="accountlessOnly" id="accountlessOnly" value="true"
-                            onchange="document.getElementById('ticketFilterForm').submit()"
-                            <bx:if ( prc.filters.accountlessOnly ?: "" ) eq "true" or ( prc.filters.accountlessOnly ?: false ) eq true> checked</bx:if>>
-                    <label class="form-check-label" for="accountlessOnly">Accountless only</label>
+        </div>
+
+        <!-- Status (multi-select) beside the boolean toggles. -->
+        <div class="mt-3">
+            <div class="row g-3">
+                <div class="col-12 col-lg-8">
+                    <label class="form-label d-block mb-2">Status</label>
+                    <div class="d-flex flex-wrap column-gap-4 row-gap-2" id="statusCheckboxes">
+                        <bx:loop array="#prc.statuses#" item="s">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input status-filter-cb" type="checkbox"
+                                        name="status"
+                                        id="status_#encodeForHTMLAttribute( s )#"
+                                        value="#encodeForHTMLAttribute( s )#"
+                                        onchange="document.getElementById('ticketFilterForm').submit()"
+                                        <bx:if arrayContains( prc.statusArray, s )>checked</bx:if>>
+                                <label class="form-check-label" for="status_#encodeForHTMLAttribute( s )#">#encodeForHTML( s )#</label>
+                            </div>
+                        </bx:loop>
+                    </div>
+                </div>
+                <div class="col-12 col-lg-4">
+                    <label class="form-label d-block mb-2">Show only</label>
+                    <div class="d-flex flex-wrap column-gap-4 row-gap-2">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" name="accountlessOnly" id="accountlessOnly" value="true"
+                                    onchange="document.getElementById('ticketFilterForm').submit()"
+                                    <bx:if ( prc.filters.accountlessOnly ?: "" ) eq "true" or ( prc.filters.accountlessOnly ?: false ) eq true> checked</bx:if>>
+                            <label class="form-check-label" for="accountlessOnly">Accountless</label>
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" name="vipOnly" id="vipOnly" value="true"
+                                    onchange="document.getElementById('ticketFilterForm').submit()"
+                                    <bx:if ( prc.filters.vipOnly ?: "" ) eq "true" or ( prc.filters.vipOnly ?: false ) eq true> checked</bx:if>>
+                            <label class="form-check-label" for="vipOnly"><i class="bi bi-star-fill text-warning"></i> VIP</label>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+        <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top flex-wrap gap-2">
             <div class="d-flex gap-2 small">
                 <form method="post" action="/agent/tickets/saveStatusDefault" class="d-inline" id="saveStatusDefaultForm">
                     <input type="hidden" name="status" id="saveStatusDefaultValue" value="">
@@ -74,16 +113,19 @@
                 </form>
             </div>
             <div class="d-flex gap-2 flex-wrap">
-                <a class="btn btn-outline-secondary" href="/agent/reports/export/tickets.csv?#local.exportQs#">
-                    <i class="bi bi-download"></i> Export CSV
-                </a>
-                <a class="btn btn-outline-secondary" href="/agent/tickets">Reset</a>
-                <a class="btn btn-success" href="/agent/tickets/new"><i class="bi bi-plus-lg"></i> New ticket</a>
+                <a class="btn btn-outline-secondary" href="/agent/tickets">Reset filters</a>
             </div>
         </div>
     </div>
+    </div>
 </form>
 
+<style>
+    /* Rotate the chevron when the search/filter panel is expanded. */
+    ##ticketFilterToggle { cursor: pointer; }
+    ##ticketFilterToggle .bi-chevron-down { transition: transform .15s ease; }
+    ##ticketFilterToggle:not(.collapsed) .bi-chevron-down { transform: rotate(180deg); }
+</style>
 <script>
     (function(){
         // The save-default form lives outside the main filter form (nested
@@ -98,6 +140,24 @@
                 ).map(function(cb){ return cb.value; });
                 document.getElementById('saveStatusDefaultValue').value = picked.join(',');
             });
+        }
+
+        // Search/filter panel: collapsed by default. Persist the
+        // open/closed state in sessionStorage so a filter change
+        // (each control auto-submits, reloading the page) does not
+        // slam the panel shut mid-edit. A fresh session has no stored
+        // value and therefore starts collapsed.
+        var KEY     = 'tbxTicketFiltersOpen';
+        var panel   = document.getElementById('ticketFilterBody');
+        var toggle  = document.getElementById('ticketFilterToggle');
+        if ( panel && toggle ) {
+            if ( sessionStorage.getItem( KEY ) === '1' ) {
+                panel.classList.add('show');
+                toggle.classList.remove('collapsed');
+                toggle.setAttribute('aria-expanded', 'true');
+            }
+            panel.addEventListener('shown.bs.collapse', function(){ sessionStorage.setItem( KEY, '1' ); });
+            panel.addEventListener('hidden.bs.collapse', function(){ sessionStorage.setItem( KEY, '0' ); });
         }
     })();
 </script>
@@ -163,7 +223,7 @@
                     <th style="width: 2.5rem;"><input type="checkbox" id="bulkSelectAll" class="form-check-input"></th>
                     <th>##</th>
                     <th>Subject</th>
-                    <th>Organization</th>
+                    <th>Requester</th>
                     <th>Status</th>
                     <th>Priority</th>
                     <th>SLA</th>
@@ -180,12 +240,34 @@
                     <tr>
                         <td><input type="checkbox" class="form-check-input bulk-row" value="#encodeForHTMLAttribute( t.getId() )#"></td>
                         <td class="text-body-secondary">##<a href="/agent/tickets/#encodeForURL( t.getId() )#" class="link-secondary">#t.getTicketNumber()#</a></td>
-                        <td><a href="/agent/tickets/#encodeForURL( t.getId() )#">#encodeForHTML( t.getSubject() )#</a></td>
+                        <td>
+                            <a href="/agent/tickets/#encodeForURL( t.getId() )#">#encodeForHTML( t.getSubject() )#</a>
+                            <bx:set rqId = t.getRequesterContactId() ?: "" >
+                            <bx:if len( rqId ) and ( prc.contactDirectory[ rqId ].isVip ?: false )>
+                                <span class="badge text-bg-warning text-dark ms-1" title="VIP requester"><i class="bi bi-star-fill"></i> VIP</span>
+                            </bx:if>
+                        </td>
                         <td>
                             <bx:if t.isAccountless()>
-                                <span class="badge text-bg-warning">Accountless</span>
+                                <div>#encodeForHTML( t.getOriginatingEmail() ?: "(no sender)" )#</div>
+                                <div class="small text-body-secondary">Unregistered</div>
                             <bx:else>
-                                #encodeForHTML( prc.orgNamesById[ t.getOrganizationId() ] ?: "(unknown)" )#
+                                <bx:set rq      = prc.contactDirectory[ t.getRequesterContactId() ?: "" ] ?: {} >
+                                <bx:set rqName  = trim( ( rq.firstName ?: "" ) & " " & ( rq.lastName ?: "" ) ) >
+                                <bx:set rqEmail = rq.email ?: "" >
+                                <!-- Line 1: Name (email), or just the email when there is no name. -->
+                                <bx:set nameLine = len( rqName )
+                                    ? rqName & ( len( rqEmail ) ? " (" & rqEmail & ")" : "" )
+                                    : ( len( rqEmail ) ? rqEmail : "(unknown)" ) >
+                                <!-- Line 2: Organization - Office. -->
+                                <bx:set loc = [] >
+                                <bx:set rqOrg = prc.orgNamesById[ t.getOrganizationId() ?: "" ] ?: "" >
+                                <bx:if len( rqOrg )><bx:set loc.append( rqOrg ) ></bx:if>
+                                <bx:if len( rq.officeName ?: "" )><bx:set loc.append( rq.officeName ) ></bx:if>
+                                <div class="fw-semibold">#encodeForHTML( nameLine )#</div>
+                                <bx:if arrayLen( loc )>
+                                    <div class="small text-body-secondary">#encodeForHTML( loc.toList( " - " ) )#</div>
+                                </bx:if>
                             </bx:if>
                         </td>
                         <td><span class="badge text-bg-secondary">#encodeForHTML( t.getStatus() )#</span></td>

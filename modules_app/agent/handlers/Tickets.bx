@@ -53,6 +53,7 @@ class {
         param rc.organizationId    = "";
         param rc.assignedToAgentId = "";
         param rc.accountlessOnly   = false;
+        param rc.vipOnly           = false;
         param rc.q                 = "";
 
         prc.pageTitle     = "Tickets";
@@ -73,7 +74,7 @@ class {
             ? rc.status
             : listToArray( rc.status ?: "", "," );
 
-        prc.tickets       = ticketsService.listTickets(
+        var listArgs = {
             status            : prc.statusArray,
             priority          : rc.priority,
             organizationId    : rc.organizationId,
@@ -81,7 +82,15 @@ class {
             search            : rc.q,
             accountlessOnly   : ( rc.accountlessOnly == "true" || rc.accountlessOnly == "1" || rc.accountlessOnly == true ),
             limit             : 200
-        );
+        };
+        // VIP filter: restrict to tickets whose requester is a VIP
+        // contact. Resolve the VIP contact ids through ContactsService
+        // (tickets module never reads the contacts table) and pass them
+        // as the requester filter; an empty set yields no matches.
+        if ( rc.vipOnly == "true" || rc.vipOnly == "1" || rc.vipOnly == true ) {
+            listArgs.requesterContactIds = contactsService.vipContactIds();
+        }
+        prc.tickets       = ticketsService.listTickets( argumentCollection = listArgs );
         prc.orgNamesById = {};
         for ( var o in prc.organizations ) {
             prc.orgNamesById[ o.getId() ] = o.getName();
@@ -97,6 +106,13 @@ class {
             if ( len( aid ) ) assigneeIds.append( aid );
         }
         prc.agentDirectory = agentService.directoryFor( assigneeIds );
+        // Requester directory so the list can flag VIP requesters.
+        var requesterIds = [];
+        for ( var tk in prc.tickets ) {
+            var rcid = tk.getRequesterContactId() ?: "";
+            if ( len( rcid ) ) requesterIds.append( rcid );
+        }
+        prc.contactDirectory = contactsService.directoryFor( requesterIds );
         prc.filters = rc;
         event.setView( "tickets/index" );
     }

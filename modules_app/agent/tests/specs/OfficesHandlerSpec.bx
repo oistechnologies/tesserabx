@@ -1,0 +1,117 @@
+/**
+ * OfficesHandlerSpec: integration coverage for the agent Offices
+ * handler. Create is open to any agent; delete is gated behind the
+ * `organizations.manage` permission via tbxCan().
+ *
+ * Dispatches against the handler with renderResults=true so relocates
+ * propagate to event state.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.agents   = getController().getWireBox().getInstance( "AgentService@agent" );
+    }
+
+    function run(){
+        describe( "Offices handler", function(){
+
+            it( "creates an office under its organization", function(){
+                var agentId = seedAdminAgent();
+                setViewer( agentId );
+                var org = makeOrg();
+
+                var rc = getRequestContext();
+                rc.setValue( "orgId", org.getId() );
+                rc.setValue( "name", "HQ Spec" );
+                rc.setValue( "city", "Denver" );
+                rc.setValue( "isPrimary", "true" );
+                execute( event : "agent:Offices.create", renderResults : true );
+
+                var offices = variables.contacts.listOfficesForOrganization( org.getId() );
+                expect( arrayLen( offices ) ).toBe( 1 );
+                expect( offices[ 1 ].getName() ).toBe( "HQ Spec" );
+                expect( offices[ 1 ].getIsPrimary() ).toBeTrue();
+
+                cleanupOrg( org.getId() );
+                cleanupAgent( agentId );
+            } );
+
+            it( "refuses to delete an office without organizations.manage", function(){
+                var org    = makeOrg();
+                var office = variables.contacts.createOffice( org.getId(), { name : "Keep me" } );
+
+                clearViewer();
+                var rc = getRequestContext();
+                rc.setValue( "orgId", org.getId() );
+                rc.setValue( "id", office.getId() );
+                execute( event : "agent:Offices.delete", renderResults : true );
+
+                // Still present: the gate blocked the delete.
+                expect( variables.contacts.getOfficeById( office.getId() ) ).notToBeNull();
+
+                cleanupOrg( org.getId() );
+            } );
+
+            it( "deletes an office for an admin viewer", function(){
+                var agentId = seedAdminAgent();
+                var org     = makeOrg();
+                var office  = variables.contacts.createOffice( org.getId(), { name : "Delete me" } );
+
+                setViewer( agentId );
+                var rc = getRequestContext();
+                rc.setValue( "orgId", org.getId() );
+                rc.setValue( "id", office.getId() );
+                execute( event : "agent:Offices.delete", renderResults : true );
+
+                expect( variables.contacts.getOfficeById( office.getId() ) ).toBeNull();
+
+                cleanupOrg( org.getId() );
+                cleanupAgent( agentId );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function makeOrg(){
+        return variables.contacts.createOrganization( {
+            name : "Office Spec Org " & createUUID(),
+            slug : "off-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+    }
+
+    private void function setViewer( required string agentId ){
+        var prc = getRequestContext().getPrivateCollection();
+        prc.oCurrentUser = variables.agents.getAgentById( arguments.agentId );
+    }
+
+    private void function clearViewer(){
+        var prc = getRequestContext().getPrivateCollection();
+        structDelete( prc, "oCurrentUser" );
+    }
+
+    private string function seedAdminAgent(){
+        var id = createUUID();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, 'x', TRUE, TRUE )",
+            { id : id, email : "officespec-" & id & "@example.com" }
+        );
+        return id;
+    }
+
+    private void function cleanupOrg( required string id ){
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.id } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupAgent( required string agentId ){
+        queryExecute( "DELETE FROM agent_roles WHERE agent_id = :id", { id : arguments.agentId } );
+        queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.agentId } );
+    }
+
+}

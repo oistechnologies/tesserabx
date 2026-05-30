@@ -258,4 +258,52 @@ class {
         return true;
     }
 
+    /**
+     * Final clearing of the Mailpit inbox after a spec run.
+     *
+     * `box testbox run` hits tests/runner.bxm as a single HTTP request,
+     * so this fires once per run (full suite or a single directory)
+     * after the runner has rendered its results. Specs that exercise
+     * the outbound mail path (OutboundEmailService, the inbound auto-
+     * acknowledgement, cbmailservices multipart) leave real messages
+     * in the dev Mailpit trap; this purges them so the inbox does not
+     * accumulate across runs.
+     *
+     * Best-effort: a CI environment without Mailpit just times out
+     * fast and is ignored. Mailpit's DELETE /api/v1/messages removes
+     * every message when given an empty body.
+     */
+    function onRequestEnd(){
+        purgeMailpitInbox();
+        return true;
+    }
+
+    private void function purgeMailpitInbox(){
+        try {
+            var base = getSystemSetting( "MAILPIT_API_BASE", "http://mailpit:8025" );
+            // Same java.net.URL pattern the Mailpit-using specs use;
+            // this BoxLang stack does not ship cfhttp.
+            var conn = createObject( "java", "java.net.URL" )
+                .init( base & "/api/v1/messages" )
+                .openConnection();
+            conn.setRequestMethod( "DELETE" );
+            // Short timeouts so a missing trap never stalls the run.
+            conn.setConnectTimeout( javaCast( "int", 1500 ) );
+            conn.setReadTimeout( javaCast( "int", 1500 ) );
+            conn.setRequestProperty( "Content-Type", "application/json" );
+            conn.setDoOutput( javaCast( "boolean", true ) );
+            var os = conn.getOutputStream();
+            try {
+                os.write( "{}".getBytes( "UTF-8" ) );
+                os.flush();
+            } finally {
+                os.close();
+            }
+            conn.getResponseCode();
+        } catch ( any e ) {
+            // Mailpit absent or unreachable (CI without the dev trap).
+            // Cleanup is best-effort; never fail a run over it.
+        }
+    }
+
 }

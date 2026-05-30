@@ -15,14 +15,25 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.rl = getController().getWireBox().getInstance( "RateLimiter@core" );
     }
 
-    function afterEach( spec ){
-        // Reset every key we might have touched. Tests use a fixed
-        // string we set on cgi below.
-        variables.rl.reset( "portal:contact", "203.0.113.99" );
-    }
-
     function run(){
         describe( "portal:Contact", function(){
+
+            // Failure-safe cleanup. Registered INSIDE describe() so it
+            // runs under TestBox BDD. The inline DELETEs in the specs
+            // only run on the success path, so sweep the fixtures here
+            // regardless of how each test exits. Burner tickets fan out
+            // notifications, which the spec's inline cleanup omits.
+            // (Only queryExecute is used here: the closure cannot see
+            // variables.rl, and the rate limiter is already reset inline
+            // at the top of every it().)
+            afterEach( function( spec ){
+                queryExecute( "DELETE FROM pending_tickets WHERE sender_email LIKE 'visitor-%'" );
+                queryExecute( "DELETE FROM notifications   WHERE ticket_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )" );
+                queryExecute( "DELETE FROM ticket_events    WHERE ticket_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )" );
+                queryExecute( "DELETE FROM ticket_messages  WHERE ticket_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )" );
+                queryExecute( "DELETE FROM audit_events     WHERE entity_id IN ( SELECT id FROM tickets WHERE originating_email LIKE 'burner-%' )" );
+                queryExecute( "DELETE FROM tickets          WHERE originating_email LIKE 'burner-%'" );
+            } );
 
             it( "GET /contact renders the form", function(){
                 var event = execute( event = "portal:Contact.index", renderResults = true );

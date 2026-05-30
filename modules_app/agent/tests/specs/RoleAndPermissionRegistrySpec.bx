@@ -29,6 +29,11 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( r.permissions ).toInclude( "admin.addons.manage" );
             } );
 
+            it( "grants agent-admin the organizations.manage permission", function(){
+                var r = variables.roles.findById( "agent-admin" );
+                expect( r.permissions ).toInclude( "organizations.manage" );
+            } );
+
             it( "seeds agent-supervisor with read-side ticket permissions only", function(){
                 var r = variables.roles.findById( "agent-supervisor" );
                 expect( r ).notToBeNull();
@@ -73,6 +78,12 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             it( "seeds tickets.view", function(){
                 var p = variables.permissions.findById( "tickets.view" );
                 expect( p ).notToBeNull();
+            } );
+
+            it( "seeds organizations.manage", function(){
+                var p = variables.permissions.findById( "organizations.manage" );
+                expect( p ).notToBeNull();
+                expect( p.label ).toInclude( "organization" );
             } );
 
             it( "returns null for an unknown permission id", function(){

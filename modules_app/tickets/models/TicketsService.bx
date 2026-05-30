@@ -74,10 +74,19 @@ class singleton=true {
         string assignedToAgentId,
         string search,
         boolean accountlessOnly = false,
+        array requesterContactIds,
         numeric limit = 100,
         numeric offset = 0
     ){
         var q = wirebox.getInstance( "Ticket@tickets" ).withoutGlobalScope();
+        // Restrict to a caller-supplied set of requester contacts (the
+        // agent VIP filter passes VIP contact ids here, resolved by
+        // ContactsService so this module never reads the contacts
+        // table). An explicitly empty set means "no matches".
+        if ( structKeyExists( arguments, "requesterContactIds" ) ) {
+            if ( !arrayLen( arguments.requesterContactIds ) ) return [];
+            q = q.whereIn( "requester_contact_id", arguments.requesterContactIds );
+        }
         if ( structKeyExists( arguments, "status" ) ) {
             var statusArr = isArray( arguments.status )
                 ? arguments.status

@@ -1,0 +1,127 @@
+<bx:output>
+<bx:set formAction = prc.isNew ? "/agent/organizations" : "/agent/organizations/" & encodeForHTMLAttribute( prc.organization.getId() ) >
+<bx:set cancelUri  = prc.isNew ? "/agent/organizations" : "/agent/organizations/" & encodeForHTMLAttribute( prc.organization.getId() ) >
+<div class="row">
+    <div class="col-12 col-lg-9">
+        <form method="post" action="#formAction#">
+            <div class="card mb-3">
+                <div class="card-header"><strong>Profile</strong></div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name" name="name" required value="#encodeForHTMLAttribute( prc.formData.name ?: "" )#">
+                        </div>
+                        <bx:if prc.isNew>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" for="slug">Slug</label>
+                                <input type="text" class="form-control" id="slug" name="slug" value="#encodeForHTMLAttribute( prc.formData.slug ?: "" )#">
+                                <div class="form-text">Used in URLs and login. Leave blank to derive from the name.</div>
+                            </div>
+                        </bx:if>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="status">Status</label>
+                            <select class="form-select" id="status" name="status">
+                                <bx:loop array="#prc.statuses#" item="st">
+                                    <option value="#encodeForHTMLAttribute( st )#"<bx:if ( prc.formData.status ?: "active" ) eq st> selected</bx:if>>#encodeForHTML( uCase( left( st, 1 ) ) & right( st, len( st ) - 1 ) )#</option>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="tier">Tier</label>
+                            <input type="text" class="form-control" id="tier" name="tier" list="tierOptions" value="#encodeForHTMLAttribute( prc.formData.tier ?: "" )#">
+                            <datalist id="tierOptions">
+                                <bx:loop array="#prc.tiers#" item="t"><option value="#encodeForHTMLAttribute( t )#"></bx:loop>
+                            </datalist>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="accountNumber">Account number</label>
+                            <input type="text" class="form-control" id="accountNumber" name="accountNumber" value="#encodeForHTMLAttribute( prc.formData.accountNumber ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="industry">Industry</label>
+                            <input type="text" class="form-control" id="industry" name="industry" value="#encodeForHTMLAttribute( prc.formData.industry ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="phone">Phone</label>
+                            <input type="text" class="form-control" id="phone" name="phone" value="#encodeForHTMLAttribute( prc.formData.phone ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="website">Website</label>
+                            <input type="text" class="form-control" id="website" name="website" placeholder="https://..." value="#encodeForHTMLAttribute( prc.formData.website ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="timezone">Time zone</label>
+                            <input type="text" class="form-control" id="timezone" name="timezone" placeholder="e.g. America/New_York" value="#encodeForHTMLAttribute( prc.formData.timezone ?: "" )#">
+                        </div>
+                        <bx:if !prc.isNew>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" for="primaryContactId">Primary contact</label>
+                                <select class="form-select" id="primaryContactId" name="primaryContactId">
+                                    <option value="">None</option>
+                                    <bx:loop array="#prc.contacts#" item="c">
+                                        <option value="#encodeForHTMLAttribute( c.getId() )#"<bx:if ( prc.formData.primaryContactId ?: "" ) eq c.getId()> selected</bx:if>>#encodeForHTML( ( ( c.getFirstName() ?: "" ) & " " & ( c.getLastName() ?: "" ) ) & " (" & c.getEmail() & ")" )#</option>
+                                    </bx:loop>
+                                </select>
+                            </div>
+                        </bx:if>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header"><strong>Address</strong></div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label" for="addressLine1">Address line 1</label>
+                            <input type="text" class="form-control" id="addressLine1" name="addressLine1" value="#encodeForHTMLAttribute( prc.formData.addressLine1 ?: "" )#">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="addressLine2">Address line 2</label>
+                            <input type="text" class="form-control" id="addressLine2" name="addressLine2" value="#encodeForHTMLAttribute( prc.formData.addressLine2 ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <label class="form-label" for="city">City</label>
+                            <input type="text" class="form-control" id="city" name="city" value="#encodeForHTMLAttribute( prc.formData.city ?: "" )#">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label" for="region">State / region</label>
+                            <input type="text" class="form-control" id="region" name="region" value="#encodeForHTMLAttribute( prc.formData.region ?: "" )#">
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label" for="postalCode">Postal code</label>
+                            <input type="text" class="form-control" id="postalCode" name="postalCode" value="#encodeForHTMLAttribute( prc.formData.postalCode ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-2">
+                            <label class="form-label" for="country">Country</label>
+                            <input type="text" class="form-control" id="country" name="country" maxlength="2" placeholder="US" value="#encodeForHTMLAttribute( prc.formData.country ?: "" )#">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header"><strong>Settings</strong></div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="autoProvisionContacts" name="autoProvisionContacts" value="true"<bx:if isBoolean( prc.formData.autoProvisionContacts ?: false ) and ( prc.formData.autoProvisionContacts ?: false )> checked</bx:if>>
+                        <label class="form-check-label" for="autoProvisionContacts">Auto-provision contacts from verified approved domains</label>
+                        <div class="form-text">When on, inbound email from a verified approved domain auto-creates a contact in this organization.</div>
+                    </div>
+                    <div>
+                        <label class="form-label" for="notes">Internal notes</label>
+                        <textarea class="form-control" id="notes" name="notes" rows="3">#encodeForHTML( prc.formData.notes ?: "" )#</textarea>
+                        <div class="form-text">Agent-only.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+                <a class="btn btn-outline-secondary" href="#cancelUri#">Cancel</a>
+                <button class="btn btn-primary" type="submit">#prc.isNew ? "Create organization" : "Save changes"#</button>
+            </div>
+        </form>
+    </div>
+</div>
+</bx:output>

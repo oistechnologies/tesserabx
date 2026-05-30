@@ -22,6 +22,16 @@
                             </select>
                         </div>
                         <div class="col-12 col-md-6">
+                            <label class="form-label" for="officeId">Office</label>
+                            <select class="form-select" id="officeId" name="officeId" data-selected="#encodeForHTMLAttribute( prc.formData.officeId ?: "" )#">
+                                <option value="">No office</option>
+                                <bx:loop array="#prc.offices ?: []#" item="office">
+                                    <option value="#encodeForHTMLAttribute( office.getId() )#"<bx:if ( prc.formData.officeId ?: "" ) eq office.getId()> selected</bx:if>>#encodeForHTML( office.getName() )#</option>
+                                </bx:loop>
+                            </select>
+                            <div class="form-text">Loads after an organization is selected.</div>
+                        </div>
+                        <div class="col-12 col-md-6">
                             <label class="form-label" for="firstName">First name</label>
                             <input type="text" class="form-control" id="firstName" name="firstName" value="#encodeForHTMLAttribute( prc.formData.firstName ?: "" )#">
                         </div>
@@ -30,11 +40,42 @@
                             <input type="text" class="form-control" id="lastName" name="lastName" value="#encodeForHTMLAttribute( prc.formData.lastName ?: "" )#">
                         </div>
                         <div class="col-12 col-md-6">
+                            <label class="form-label" for="jobTitle">Job title</label>
+                            <input type="text" class="form-control" id="jobTitle" name="jobTitle" value="#encodeForHTMLAttribute( prc.formData.jobTitle ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="phone">Phone</label>
+                            <input type="text" class="form-control" id="phone" name="phone" value="#encodeForHTMLAttribute( prc.formData.phone ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="mobilePhone">Mobile</label>
+                            <input type="text" class="form-control" id="mobilePhone" name="mobilePhone" value="#encodeForHTMLAttribute( prc.formData.mobilePhone ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="timezone">Time zone</label>
+                            <input type="text" class="form-control" id="timezone" name="timezone" placeholder="e.g. America/New_York" value="#encodeForHTMLAttribute( prc.formData.timezone ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="locale">Locale</label>
+                            <input type="text" class="form-control" id="locale" name="locale" placeholder="e.g. en_US" value="#encodeForHTMLAttribute( prc.formData.locale ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
                             <label class="form-label" for="password">Initial password <span class="text-danger">*</span></label>
                             <input type="text" class="form-control" id="password" name="password" required minlength="8" value="#encodeForHTMLAttribute( prc.formData.password ?: "" )#">
                             <div class="form-text">At least 8 characters. Share with the client out-of-band.</div>
                         </div>
                         <div class="col-12">
+                            <label class="form-label" for="notes">Internal notes</label>
+                            <textarea class="form-control" id="notes" name="notes" rows="3">#encodeForHTML( prc.formData.notes ?: "" )#</textarea>
+                            <div class="form-text">Agent-only. Never shown to the client.</div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="isVip" name="isVip" value="true"<bx:if isBoolean( prc.formData.isVip ?: false ) and ( prc.formData.isVip ?: false )> checked</bx:if>>
+                                <label class="form-check-label" for="isVip">VIP (priority handling)</label>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="organizationAdmin" name="organizationAdmin" value="true"<bx:if isBoolean( prc.formData.organizationAdmin ?: false ) and ( prc.formData.organizationAdmin ?: false )> checked</bx:if>>
                                 <label class="form-check-label" for="organizationAdmin">Grant Organization Admin role</label>
@@ -50,4 +91,42 @@
         </div>
     </div>
 </div>
+
+<script>
+( function () {
+    var orgSelect = document.getElementById( "organizationId" );
+    var officeSelect = document.getElementById( "officeId" );
+    if ( !orgSelect || !officeSelect ) return;
+
+    function loadOffices( orgId ) {
+        // Preserve the "No office" option, drop the rest.
+        officeSelect.length = 1;
+        if ( !orgId ) return;
+        fetch( "/agent/organizations/" + encodeURIComponent( orgId ) + "/office-options", { headers: { "Accept": "application/json" } } )
+            .then( function ( r ) { return r.ok ? r.json() : []; } )
+            .then( function ( offices ) {
+                var want = officeSelect.getAttribute( "data-selected" ) || "";
+                offices.forEach( function ( o ) {
+                    var opt = document.createElement( "option" );
+                    opt.value = o.id;
+                    opt.textContent = o.name;
+                    if ( o.id === want ) opt.selected = true;
+                    officeSelect.appendChild( opt );
+                } );
+            } )
+            .catch( function () {} );
+    }
+
+    orgSelect.addEventListener( "change", function () {
+        officeSelect.setAttribute( "data-selected", "" );
+        loadOffices( orgSelect.value );
+    } );
+
+    // On first paint, if the server did not already render offices but
+    // an org is preselected, fetch them.
+    if ( orgSelect.value && officeSelect.length <= 1 ) {
+        loadOffices( orgSelect.value );
+    }
+} )();
+</script>
 </bx:output>

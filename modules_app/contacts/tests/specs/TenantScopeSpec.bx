@@ -82,8 +82,8 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             name : "Tenant B " & createUUID(),
             slug : "tenant-b-" & lCase( replace( createUUID(), "-", "", "all" ) )
         } );
-        var officeA = variables.service.createOffice( orgA.getId(), "HQ-A" );
-        var officeB = variables.service.createOffice( orgB.getId(), "HQ-B" );
+        var officeA = variables.service.createOffice( orgA.getId(), { name : "HQ-A" } );
+        var officeB = variables.service.createOffice( orgB.getId(), { name : "HQ-B" } );
         var contactA = variables.service.provisionContact( {
             organizationId : orgA.getId(),
             email          : "a-" & createUUID() & "@example.com",

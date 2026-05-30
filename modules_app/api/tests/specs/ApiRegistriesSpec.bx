@@ -19,6 +19,28 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         variables.webhooks      = wb.getInstance( "WebhooksService@api" );
     }
 
+    /**
+     * Failure-safe backstop: the two createSubscription specs delete
+     * their row inline only on the success path, so a mid-test
+     * assertion failure would leak a webhook_subscriptions row. Sweep
+     * every spec-fixture subscription (and its deliveries) by name
+     * prefix here, which runs regardless of how the specs exit.
+     */
+    function afterAll(){
+        queryExecute(
+            "DELETE FROM webhook_deliveries
+             WHERE subscription_id IN (
+                 SELECT id FROM webhook_subscriptions
+                 WHERE name LIKE 'spec-validate-%' OR name LIKE 'spec-acceptance-%' OR name LIKE 'spec-reject-%'
+             )"
+        );
+        queryExecute(
+            "DELETE FROM webhook_subscriptions
+             WHERE name LIKE 'spec-validate-%' OR name LIKE 'spec-acceptance-%' OR name LIKE 'spec-reject-%'"
+        );
+        super.afterAll();
+    }
+
     function run(){
 
         describe( "ApiResourceRegistry", function(){

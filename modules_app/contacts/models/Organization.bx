@@ -21,9 +21,24 @@ class
     property name="name";
     property name="slug";
     property name="tier";
-    property name="isActive"   column="is_active";
-    property name="createdAt"  column="created_at" sqltype="timestamp";
-    property name="updatedAt"  column="updated_at" sqltype="timestamp";
+    property name="isActive"              column="is_active";
+    property name="accountNumber"         column="account_number";
+    property name="status";
+    property name="phone";
+    property name="website";
+    property name="industry";
+    property name="addressLine1"          column="address_line1";
+    property name="addressLine2"          column="address_line2";
+    property name="city";
+    property name="region";
+    property name="postalCode"            column="postal_code";
+    property name="country";
+    property name="timezone";
+    property name="notes";
+    property name="autoProvisionContacts" column="auto_provision_contacts";
+    property name="primaryContactId"      column="primary_contact_id";
+    property name="createdAt"             column="created_at" sqltype="timestamp";
+    property name="updatedAt"             column="updated_at" sqltype="timestamp";
 
     function offices(){
         return hasMany( "Office@contacts", "organization_id" );
@@ -35,6 +50,10 @@ class
 
     function domains(){
         return hasMany( "OrganizationDomain@contacts", "organization_id" );
+    }
+
+    function primaryContact(){
+        return belongsTo( "Contact@contacts", "primary_contact_id" );
     }
 
     // Custom-fields shortcut hook (follow-up A6).

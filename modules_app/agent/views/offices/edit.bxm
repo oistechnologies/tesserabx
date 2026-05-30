@@ -1,0 +1,64 @@
+<bx:output>
+<bx:set orgId   = encodeForHTMLAttribute( prc.organization.getId() ) >
+<bx:set baseUri = "/agent/organizations/" & orgId >
+<bx:set formAction = prc.isNew ? baseUri & "/offices" : baseUri & "/offices/" & encodeForHTMLAttribute( prc.office.getId() ) >
+<div class="row">
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-header"><strong>#prc.isNew ? "New office" : "Edit office"#</strong> <span class="text-body-secondary">for #encodeForHTML( prc.organization.getName() )#</span></div>
+            <div class="card-body">
+                <form method="post" action="#formAction#">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-8">
+                            <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="name" name="name" required value="#encodeForHTMLAttribute( prc.formData.name ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-4 d-flex align-items-end">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="isPrimary" name="isPrimary" value="true"<bx:if isBoolean( prc.formData.isPrimary ?: false ) and ( prc.formData.isPrimary ?: false )> checked</bx:if>>
+                                <label class="form-check-label" for="isPrimary">Primary / HQ</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="addressLine1">Address line 1</label>
+                            <input type="text" class="form-control" id="addressLine1" name="addressLine1" value="#encodeForHTMLAttribute( prc.formData.addressLine1 ?: "" )#">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="addressLine2">Address line 2</label>
+                            <input type="text" class="form-control" id="addressLine2" name="addressLine2" value="#encodeForHTMLAttribute( prc.formData.addressLine2 ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <label class="form-label" for="city">City</label>
+                            <input type="text" class="form-control" id="city" name="city" value="#encodeForHTMLAttribute( prc.formData.city ?: "" )#">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label" for="region">State / region</label>
+                            <input type="text" class="form-control" id="region" name="region" value="#encodeForHTMLAttribute( prc.formData.region ?: "" )#">
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label" for="postalCode">Postal code</label>
+                            <input type="text" class="form-control" id="postalCode" name="postalCode" value="#encodeForHTMLAttribute( prc.formData.postalCode ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-2">
+                            <label class="form-label" for="country">Country</label>
+                            <input type="text" class="form-control" id="country" name="country" maxlength="2" placeholder="US" value="#encodeForHTMLAttribute( prc.formData.country ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="phone">Phone</label>
+                            <input type="text" class="form-control" id="phone" name="phone" value="#encodeForHTMLAttribute( prc.formData.phone ?: "" )#">
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="timezone">Time zone</label>
+                            <input type="text" class="form-control" id="timezone" name="timezone" placeholder="e.g. America/New_York" value="#encodeForHTMLAttribute( prc.formData.timezone ?: "" )#">
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-end gap-2 mt-4">
+                        <a class="btn btn-outline-secondary" href="#baseUri#">Cancel</a>
+                        <button class="btn btn-primary" type="submit">#prc.isNew ? "Create office" : "Save changes"#</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+</bx:output>

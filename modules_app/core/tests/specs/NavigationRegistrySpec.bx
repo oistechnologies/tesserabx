@@ -53,6 +53,14 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( labelsForAdmin ).toInclude( "Admin" );
             } );
 
+            it( "shows Organizations to any signed-in agent (auth-gated, no permission)", function(){
+                var labelsForAnon = variables.nav.listForZone( "agent", "main", anonymousViewer() ).map( ( i ) => i.label );
+                expect( labelsForAnon ).notToInclude( "Organizations" );
+
+                var labelsForAgent = variables.nav.listForZone( "agent", "main", agentViewerNoAdmin() ).map( ( i ) => i.label );
+                expect( labelsForAgent ).toInclude( "Organizations" );
+            } );
+
             it( "hides Admin from agents who lack admin.access", function(){
                 var labels = variables.nav.listForZone( "agent", "main", agentViewerNoAdmin() ).map( ( i ) => i.label );
                 expect( labels ).notToInclude( "Admin" );

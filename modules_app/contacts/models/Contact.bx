@@ -26,6 +26,14 @@ class
     property name="firstName"       column="first_name";
     property name="lastName"        column="last_name";
     property name="isActive"        column="is_active";
+    property name="phone";
+    property name="mobilePhone"     column="mobile_phone";
+    property name="jobTitle"        column="job_title";
+    property name="timezone";
+    property name="locale";
+    property name="isVip"           column="is_vip";
+    property name="source";
+    property name="notes";
     property name="lastLoginAt"     column="last_login_at" sqltype="timestamp";
     property name="createdAt"       column="created_at"    sqltype="timestamp";
     property name="updatedAt"       column="updated_at"    sqltype="timestamp";

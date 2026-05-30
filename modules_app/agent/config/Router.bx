@@ -90,6 +90,38 @@ class {
             "POST" : "create"
         } );
 
+        // Organizations + offices + approved domains. Most-specific
+        // patterns first so the literal segments (new, edit, deactivate,
+        // offices, domains, offices.json) win over /organizations/:id.
+        route( "organizations/new" ).to( "Organizations.new" );
+        route( "organizations/:id/edit" ).to( "Organizations.edit" );
+        route( "organizations/:id/deactivate" ).withVerbs( "POST" ).to( "Organizations.deactivate" );
+        // Office options for the dependent dropdown on the contact form.
+        // Extensionless on purpose: a `.json` suffix is stripped by
+        // ColdBox's response-format detection before routing, which
+        // would collapse this onto the POST-only offices collection.
+        route( "organizations/:id/office-options" ).withVerbs( "GET" ).to( "Organizations.officesJson" );
+        // Offices are always nested under their organization.
+        route( "organizations/:orgId/offices/new" ).to( "Offices.new" );
+        route( "organizations/:orgId/offices/:id/delete" ).withVerbs( "POST" ).to( "Offices.delete" );
+        route( "organizations/:orgId/offices/:id" ).withHandler( "Offices" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "organizations/:orgId/offices" ).withVerbs( "POST" ).to( "Offices.create" );
+        // Approved-domain actions on the org.
+        route( "organizations/:id/domains/add" ).withVerbs( "POST" ).to( "Organizations.addDomain" );
+        route( "organizations/:id/domains/:domainId/verify" ).withVerbs( "POST" ).to( "Organizations.verifyDomain" );
+        route( "organizations/:id/domains/:domainId/remove" ).withVerbs( "POST" ).to( "Organizations.removeDomain" );
+        route( "organizations/:id" ).withHandler( "Organizations" ).toAction( {
+            "GET"  : "show",
+            "POST" : "update"
+        } );
+        route( "organizations" ).withHandler( "Organizations" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
+
         // Tickets workspace. The action routes (reply, internal-note,
         // status, assign, promote) are all POST-only; the UI uses
         // small forms per action to keep handlers focused.

@@ -47,11 +47,17 @@ class {
         variables.routes   = [];
         variables.interceptorSettings = { customInterceptionPoints : [
             "onOrganizationCreated",
+            "onOrganizationUpdated",
+            "onOrganizationDeactivated",
+            "onOfficeCreated",
+            "onOfficeUpdated",
+            "onOfficeDeleted",
             "onContactProvisioned",
             "onContactDeactivated",
             "onContactRoleGranted",
             "onContactRoleRevoked",
             "onOrganizationDomainMapped",
+            "onOrganizationDomainUnmapped",
             "onContactMerged"
         ] };
         variables.interceptors = [];

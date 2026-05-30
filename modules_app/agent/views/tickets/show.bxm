@@ -28,6 +28,9 @@
                     <dd class="col-sm-9">
                         <bx:if !isNull( prc.requester )>
                             #encodeForHTML( prc.requester.getEmail() )#
+                            <bx:if isBoolean( prc.requester.getIsVip() ) and prc.requester.getIsVip()>
+                                <span class="badge text-bg-warning text-dark ms-1"><i class="bi bi-star-fill"></i> VIP</span>
+                            </bx:if>
                         <bx:else>
                             <bx:if len( local.t.getOriginatingEmail() ?: "" )>#encodeForHTML( local.t.getOriginatingEmail() )# (unregistered)<bx:else>(none)</bx:if>
                         </bx:if>

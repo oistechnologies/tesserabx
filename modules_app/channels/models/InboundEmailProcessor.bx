@@ -168,7 +168,11 @@ class singleton=true {
             var t = ticketsService.getTicket( replyTicketId );
             if ( !isNull( t ) ) {
                 try {
-                    var contact = contactsService.getContactByEmail( sender );
+                    // Auto-provision a Contact when the sender is on a
+                    // verified approved domain of an auto-provision org;
+                    // otherwise this returns the existing contact, or
+                    // null (anonymous author on the reply).
+                    var contact = contactsService.resolveOrAutoProvisionContact( sender );
                     var msg = ticketsService.addMessage( {
                         ticketId        : t.getId(),
                         body            : arguments.message.body ?: "",
@@ -226,7 +230,14 @@ class singleton=true {
         //    than silently rolled back, because we want the
         //    audit trail.
         try {
-            var contact = contactsService.getContactByEmail( sender );
+            // Resolve the sender to a Contact, auto-provisioning one in
+            // the matching organization when the sender's domain is an
+            // approved + verified domain on an auto-provision-enabled
+            // org. Returns null otherwise, so the ticket stays
+            // accountless exactly as before. The tenant-assignment
+            // decision lives entirely in ContactsService (CLAUDE.md
+            // cross-module rule); channels just asks.
+            var contact = contactsService.resolveOrAutoProvisionContact( sender );
             var ticket  = "";
             if ( !isNull( contact ) ) {
                 ticket = ticketsService.createTicket( {

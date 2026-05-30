@@ -180,6 +180,183 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanupOrganization( org.getId() );
             } );
 
+            it( "updateOrganization changes attributes including the auto-provision flag", function(){
+                var org = makeOrg();
+                variables.service.updateOrganization( org.getId(), {
+                    phone                 : "+1-555-1000",
+                    website               : "https://updated.example.com",
+                    status                : "suspended",
+                    autoProvisionContacts : true
+                } );
+                var reloaded = variables.service.getOrganizationById( org.getId() );
+                expect( reloaded.getPhone() ).toBe( "+1-555-1000" );
+                expect( reloaded.getWebsite() ).toBe( "https://updated.example.com" );
+                expect( reloaded.getStatus() ).toBe( "suspended" );
+                expect( reloaded.getAutoProvisionContacts() ).toBeTrue();
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "deactivateOrganization clears the active flag and archives status", function(){
+                var org = makeOrg();
+                variables.service.deactivateOrganization( org.getId() );
+                var reloaded = variables.service.getOrganizationById( org.getId() );
+                expect( reloaded.getIsActive() ).toBeFalse();
+                expect( reloaded.getStatus() ).toBe( "archived" );
+
+                variables.service.setOrganizationActive( id : org.getId(), active : true );
+                var reactivated = variables.service.getOrganizationById( org.getId() );
+                expect( reactivated.getIsActive() ).toBeTrue();
+                expect( reactivated.getStatus() ).toBe( "active" );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "office CRUD round-trips and delete unassigns contacts", function(){
+                var org = makeOrg();
+                var office = variables.service.createOffice( org.getId(), {
+                    name      : "HQ",
+                    city      : "Austin",
+                    region    : "TX",
+                    isPrimary : true
+                } );
+                expect( office.getId() ).notToBeEmpty();
+                expect( office.getIsPrimary() ).toBeTrue();
+
+                var fetched = variables.service.getOfficeById( office.getId() );
+                expect( fetched.getCity() ).toBe( "Austin" );
+
+                variables.service.updateOffice( office.getId(), { name : "HQ West", phone : "+1-512-555-0100" } );
+                var updated = variables.service.getOfficeById( office.getId() );
+                expect( updated.getName() ).toBe( "HQ West" );
+                expect( updated.getPhone() ).toBe( "+1-512-555-0100" );
+
+                // A contact assigned to the office is unassigned (not
+                // deleted) when the office is deleted.
+                var contact = variables.service.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "office-" & createUUID() & "@example.com",
+                    password       : "spec-password",
+                    officeId       : office.getId()
+                } );
+                variables.service.deleteOffice( office.getId() );
+                expect( variables.service.getOfficeById( office.getId() ) ).toBeNull();
+                var reloadedContact = variables.service.getContactById( contact.getId() );
+                expect( reloadedContact ).notToBeNull();
+                expect( len( reloadedContact.getOfficeId() ?: "" ) ).toBe( 0 );
+
+                cleanupContact( contact.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "setDomainVerified and removeDomainMapping manage the approved-domain list", function(){
+                var org = makeOrg();
+                var domain = "spec-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+                var mapping = variables.service.addDomainMapping(
+                    organizationId : org.getId(),
+                    domain         : domain,
+                    isVerified     : false
+                );
+                expect( mapping.getIsVerified() ).toBeFalse();
+
+                variables.service.setDomainVerified( id : mapping.getId(), verified : true );
+                expect( variables.service.getDomainMapping( domain ).getIsVerified() ).toBeTrue();
+
+                variables.service.removeDomainMapping( mapping.getId() );
+                expect( variables.service.getDomainMapping( domain ) ).toBeNull();
+
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "vipContactIds returns only VIP contacts", function(){
+                var org = makeOrg();
+                var vip = variables.service.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "vipid-" & createUUID() & "@example.com",
+                    password       : "spec-password",
+                    isVip          : true
+                } );
+                var plain = makeContact( org.getId() );
+                var ids = variables.service.vipContactIds();
+                expect( ids ).toInclude( vip.getId() );
+                expect( ids ).notToInclude( plain.getId() );
+
+                cleanupContact( vip.getId() );
+                cleanupContact( plain.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "directoryFor includes the isVip flag and office name", function(){
+                var org    = makeOrg();
+                var office = variables.service.createOffice( org.getId(), { name : "HQ Dir" } );
+                var vip = variables.service.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "vip-" & createUUID() & "@example.com",
+                    password       : "spec-password",
+                    isVip          : true,
+                    officeId       : office.getId()
+                } );
+                var plain = makeContact( org.getId() );
+                var dir = variables.service.directoryFor( [ vip.getId(), plain.getId() ] );
+                expect( dir[ vip.getId() ].isVip ).toBeTrue();
+                expect( dir[ vip.getId() ].officeName ).toBe( "HQ Dir" );
+                expect( dir[ plain.getId() ].isVip ).toBeFalse();
+                expect( dir[ plain.getId() ].officeName ).toBe( "" );
+
+                cleanupContact( vip.getId() );
+                cleanupContact( plain.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            describe( "resolveOrAutoProvisionContact", function(){
+
+                it( "returns the existing contact when the email is already known", function(){
+                    var org = makeOrg();
+                    var contact = makeContact( org.getId(), "known-" & createUUID() & "@example.com" );
+                    var resolved = variables.service.resolveOrAutoProvisionContact( contact.getEmail() );
+                    expect( resolved ).notToBeNull();
+                    expect( resolved.getId() ).toBe( contact.getId() );
+                    cleanupContact( contact.getId() );
+                    cleanupOrganization( org.getId() );
+                } );
+
+                it( "returns null when the domain is mapped but not verified", function(){
+                    var org = autoProvisionOrg();
+                    var domain = specDomain();
+                    variables.service.addDomainMapping( organizationId : org.getId(), domain : domain, isVerified : false );
+                    // Inline the call into expect(): a `var x = <null>`
+                    // assignment is dropped by BoxLang's scope walker and
+                    // a later reference throws KeyNotFoundException.
+                    expect( variables.service.resolveOrAutoProvisionContact( "newperson@" & domain ) ).toBeNull();
+                    cleanupDomains( org.getId() );
+                    cleanupOrganization( org.getId() );
+                } );
+
+                it( "returns null when verified but the org has auto-provision off", function(){
+                    var org = makeOrg(); // auto_provision defaults to false
+                    var domain = specDomain();
+                    variables.service.addDomainMapping( organizationId : org.getId(), domain : domain, isVerified : true );
+                    expect( variables.service.resolveOrAutoProvisionContact( "newperson@" & domain ) ).toBeNull();
+                    cleanupDomains( org.getId() );
+                    cleanupOrganization( org.getId() );
+                } );
+
+                it( "auto-provisions a domain-auto contact when verified and enabled", function(){
+                    var org = autoProvisionOrg();
+                    var domain = specDomain();
+                    variables.service.addDomainMapping( organizationId : org.getId(), domain : domain, isVerified : true );
+                    var email = "newperson-" & createUUID() & "@" & domain;
+                    var resolved = variables.service.resolveOrAutoProvisionContact( email );
+                    expect( resolved ).notToBeNull();
+                    expect( resolved.getOrganizationId() ).toBe( org.getId() );
+                    expect( resolved.getSource() ).toBe( "domain-auto" );
+                    expect( resolved.getEmail() ).toBe( lCase( email ) );
+
+                    cleanupContact( resolved.getId() );
+                    cleanupDomains( org.getId() );
+                    cleanupOrganization( org.getId() );
+                } );
+
+            } );
+
         } );
     }
 
@@ -199,6 +376,23 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             email          : addr,
             password       : "spec-password"
         } );
+    }
+
+    private any function autoProvisionOrg(){
+        var org = makeOrg();
+        variables.service.updateOrganization( org.getId(), { autoProvisionContacts : true } );
+        return variables.service.getOrganizationById( org.getId() );
+    }
+
+    private string function specDomain(){
+        return "spec-" & lCase( replace( createUUID(), "-", "", "all" ) ) & ".test";
+    }
+
+    private void function cleanupDomains( required string organizationId ){
+        queryExecute(
+            "DELETE FROM organization_domains WHERE organization_id = :orgId",
+            { orgId : arguments.organizationId }
+        );
     }
 
     private void function cleanupContact( required string id ){
