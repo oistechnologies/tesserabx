@@ -14,7 +14,15 @@ class extends="coldbox.system.web.routing.Router" {
 
     function configure(){
 
-        setMultiDomainDiscovery( false );
+        // Derive the SES base URL per request from the incoming Host /
+        // X-Forwarded-Host + scheme, instead of caching it once from the
+        // first request. Required behind a reverse proxy: the first request
+        // at boot is the internal Docker health check (http://localhost:8080),
+        // which would otherwise freeze every generated absolute URL on the
+        // Router singleton, notably cbSecurity's ssl-forced login redirect,
+        // to http://localhost:8080. Also correct for multi-instance deploys
+        // served on different hostnames.
+        setMultiDomainDiscovery( true );
 
         // Health endpoints. The owning module (core) also exposes these,
         // but declaring them at the top level guarantees /health exists
