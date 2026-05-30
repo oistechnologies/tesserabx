@@ -43,6 +43,13 @@ COPY ./ ${APP_DIR}/
 
 WORKDIR ${APP_DIR}
 
+# Remove the CommandBox base image's default welcome page. TesseraBX's
+# front controller is index.bxm; the base image ships an index.cfm (the
+# "Is up and Running on Docker!" banner) plus its logo, and because the
+# COPY above never overwrites them (no same-named files in the repo) they
+# would otherwise leak into the served pages.
+RUN rm -f ${APP_DIR}/index.cfm ${APP_DIR}/CommandBoxLogo300.png
+
 # Install CommandBox-managed dependencies declared in box.json.
 #
 # BOX_INSTALL_FLAGS defaults to --production, which excludes the dev-only
