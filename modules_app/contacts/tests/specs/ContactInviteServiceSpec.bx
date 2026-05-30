@@ -1,0 +1,126 @@
+/**
+ * ContactInviteServiceSpec: the member-invite + set-password token flow.
+ *
+ * invite() provisions a pending (inactive) contact and returns a raw
+ * token; confirmSetPassword() must accept a valid token once (setting
+ * the password + activating the account) and reject replayed, expired,
+ * and too-short attempts. Email delivery is swallowed by the service,
+ * so these specs never touch Mailpit.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.invites  = getController().getWireBox().getInstance( "ContactInviteService@contacts" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.bcrypt   = getController().getWireBox().getInstance( "@BCrypt" );
+    }
+
+    function run(){
+        describe( "ContactInviteService", function(){
+
+            it( "invite provisions a pending contact, a token row, and an optional admin role", function(){
+                var org = makeOrg();
+                var result = variables.invites.invite( {
+                    organizationId : org.getId(),
+                    email          : "invitee-" & createUUID() & "@example.com",
+                    firstName      : "Ina",
+                    makeAdmin      : true
+                } );
+                expect( len( result.token ) ).toBeGTE( 32 );
+
+                var c = variables.contacts.getContactById( result.contact.getId() );
+                expect( c.getIsActive() ).toBeFalse();                 // pending until set-password
+                expect( c.isOrganizationAdmin() ).toBeTrue();           // makeAdmin honored
+                expect( tokenCount( c.getId() ) ).toBe( 1 );
+
+                cleanup( c.getId(), org.getId() );
+            } );
+
+            it( "confirmSetPassword sets the password, activates the account, and consumes the token", function(){
+                var org    = makeOrg();
+                var result = variables.invites.invite( {
+                    organizationId : org.getId(),
+                    email          : "invitee-" & createUUID() & "@example.com"
+                } );
+                var cid = result.contact.getId();
+
+                var confirm = variables.invites.confirmSetPassword( result.token, "fresh-secret-9" );
+                expect( confirm.ok ).toBeTrue();
+
+                var c = variables.contacts.getContactById( cid );
+                expect( c.getIsActive() ).toBeTrue();
+                expect( variables.bcrypt.checkPassword( "fresh-secret-9", c.getPasswordHash() ) ).toBeTrue();
+                expect( consumedCount( cid ) ).toBe( 1 );
+
+                cleanup( cid, org.getId() );
+            } );
+
+            it( "rejects a replayed (already-consumed) token", function(){
+                var org    = makeOrg();
+                var result = variables.invites.invite( { organizationId : org.getId(), email : "invitee-" & createUUID() & "@example.com" } );
+                variables.invites.confirmSetPassword( result.token, "fresh-secret-9" );
+
+                var replay = variables.invites.confirmSetPassword( result.token, "another-secret-9" );
+                expect( replay.ok ).toBeFalse();
+
+                cleanup( result.contact.getId(), org.getId() );
+            } );
+
+            it( "rejects an expired token", function(){
+                var org    = makeOrg();
+                var result = variables.invites.invite( { organizationId : org.getId(), email : "invitee-" & createUUID() & "@example.com" } );
+                // Force the token into the past.
+                queryExecute(
+                    "UPDATE contact_password_tokens SET expires_at = NOW() - INTERVAL '1 hour' WHERE contact_id = :id",
+                    { id : result.contact.getId() }
+                );
+                var expired = variables.invites.confirmSetPassword( result.token, "fresh-secret-9" );
+                expect( expired.ok ).toBeFalse();
+
+                cleanup( result.contact.getId(), org.getId() );
+            } );
+
+            it( "rejects a too-short password", function(){
+                var org    = makeOrg();
+                var result = variables.invites.invite( { organizationId : org.getId(), email : "invitee-" & createUUID() & "@example.com" } );
+                expect( variables.invites.confirmSetPassword( result.token, "short" ).ok ).toBeFalse();
+                cleanup( result.contact.getId(), org.getId() );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private any function makeOrg(){
+        return variables.contacts.createOrganization( {
+            name : "Invite Spec Org " & createUUID(),
+            slug : "inv-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+    }
+
+    private numeric function tokenCount( required string contactId ){
+        return queryExecute(
+            "SELECT COUNT(*) AS n FROM contact_password_tokens WHERE contact_id = :id",
+            { id : arguments.contactId }, { returntype : "array" }
+        )[ 1 ].n;
+    }
+
+    private numeric function consumedCount( required string contactId ){
+        return queryExecute(
+            "SELECT COUNT(*) AS n FROM contact_password_tokens WHERE contact_id = :id AND consumed_at IS NOT NULL",
+            { id : arguments.contactId }, { returntype : "array" }
+        )[ 1 ].n;
+    }
+
+    private void function cleanup( required string contactId, required string orgId ){
+        queryExecute( "DELETE FROM contact_password_tokens WHERE contact_id = :id", { id : arguments.contactId } );
+        queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.contactId } );
+        queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.contactId } );
+        queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.orgId } );
+        queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.orgId } );
+    }
+
+}

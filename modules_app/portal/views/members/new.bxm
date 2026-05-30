@@ -1,0 +1,54 @@
+<bx:output>
+<bx:set local.f = prc.formData >
+
+<div class="row">
+    <div class="col-12 col-lg-8">
+        <nav aria-label="breadcrumb" class="mb-2">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/account/members">Members</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Invite</li>
+            </ol>
+        </nav>
+
+        <div class="card card-primary card-outline">
+            <div class="card-header"><div class="card-title">Invite a new member</div></div>
+            <form method="post" action="/account/members">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label" for="email">Email address</label>
+                            <input type="email" class="form-control" id="email" name="email" value="#encodeForHTMLAttribute( local.f.email )#" required>
+                            <div class="form-text small">We'll email them a link to set their password and activate the account.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="officeId">Office</label>
+                            <select class="form-select" id="officeId" name="officeId">
+                                <option value="">No office</option>
+                                <bx:loop array="#prc.offices ?: []#" item="local.o">
+                                    <option value="#encodeForHTMLAttribute( local.o.getId() )#"<bx:if ( local.f.officeId ?: "" ) eq local.o.getId()> selected</bx:if>>#encodeForHTML( local.o.getName() )#</option>
+                                </bx:loop>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="firstName">First name</label>
+                            <input type="text" class="form-control" id="firstName" name="firstName" value="#encodeForHTMLAttribute( local.f.firstName )#">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="lastName">Last name</label>
+                            <input type="text" class="form-control" id="lastName" name="lastName" value="#encodeForHTMLAttribute( local.f.lastName )#">
+                        </div>
+                    </div>
+                    <div class="form-check form-switch mt-3">
+                        <input class="form-check-input" type="checkbox" role="switch" id="makeAdmin" name="makeAdmin" value="true"<bx:if local.f.makeAdmin ?: false> checked</bx:if>>
+                        <label class="form-check-label" for="makeAdmin">Make this member an Organization Admin</label>
+                    </div>
+                </div>
+                <div class="card-footer d-flex gap-2">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-send me-1"></i> Send invitation</button>
+                    <a href="/account/members" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+</bx:output>

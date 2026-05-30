@@ -182,6 +182,56 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( internal.getId() );
             } );
 
+            it( "topArticlesForViewer filters by visibility and shapes rows for the portal", function(){
+                var org = variables.contacts.createOrganization( {
+                    name : "Spec Top Org " & createUUID(),
+                    slug : "top-" & lCase( replace( createUUID(), "-", "", "all" ) )
+                } );
+
+                var pub = variables.kb.createArticle( { title : "Top Public " & createUUID(), body : ".", visibility : "public" } );
+                variables.kb.publishArticle( pub.getId() );
+
+                var orgScoped = variables.kb.createArticle( { title : "Top Org " & createUUID(), body : ".", visibility : "organization" } );
+                variables.kb.publishArticle( orgScoped.getId() );
+                variables.kb.setArticleOrganizations( orgScoped.getId(), [ org.getId() ] );
+
+                var internal = variables.kb.createArticle( { title : "Top Internal " & createUUID(), body : ".", visibility : "internal" } );
+                variables.kb.publishArticle( internal.getId() );
+
+                // Anonymous: only the public article is reachable; org and
+                // internal must be absent. Pull a generous limit so the
+                // ephemeral rows are in range regardless of seed volume.
+                var anon = variables.kb.topArticlesForViewer( { kind : "anonymous" }, 500 );
+                expect( anon ).toHaveKey( "rows" );
+                var anonIds = anon.rows.map( ( r ) => r.id );
+                expect( anonIds ).toInclude( pub.getId() );
+                expect( anonIds ).notToInclude( orgScoped.getId() );
+                expect( anonIds ).notToInclude( internal.getId() );
+
+                // The row shape the trending widget renders.
+                for ( var r in anon.rows ) {
+                    if ( r.id == pub.getId() ) {
+                        expect( r ).toHaveKey( "title" );
+                        expect( r ).toHaveKey( "viewCount" );
+                        expect( r.url ).toInclude( "/kb/" );
+                    }
+                }
+
+                // Contact in the mapped org also sees the org-scoped one,
+                // but never the internal article.
+                var contactView = variables.kb.topArticlesForViewer( { kind : "contact", contactOrganizationId : org.getId() }, 500 );
+                var contactIds = contactView.rows.map( ( r ) => r.id );
+                expect( contactIds ).toInclude( pub.getId() );
+                expect( contactIds ).toInclude( orgScoped.getId() );
+                expect( contactIds ).notToInclude( internal.getId() );
+
+                cleanup( pub.getId() );
+                cleanup( orgScoped.getId() );
+                cleanup( internal.getId() );
+                queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : org.getId() } );
+                queryExecute( "DELETE FROM organizations WHERE id = :id", { id : org.getId() } );
+            } );
+
             it( "submitFeedback + feedbackTotalsForArticle round trip", function(){
                 var a = variables.kb.createArticle( {
                     title      : "FB " & createUUID(),

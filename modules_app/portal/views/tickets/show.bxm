@@ -12,50 +12,73 @@
             </div>
         </div>
 
-        <h3 class="h6 mb-2">Conversation</h3>
-        <bx:if !arrayLen( prc.messages )>
-            <p class="text-body-secondary">No messages yet.</p>
-        </bx:if>
-        <bx:loop array="#prc.messages#" item="local.m">
-            <div class="card mb-2">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between small text-body-secondary mb-2">
-                        <span>
-                            <bx:if local.m.isFromAgent()>
-                                <strong>Support</strong>
-                            <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
-                                <strong>You / your team</strong>
-                            <bx:else>
-                                <strong>System</strong>
+        <div class="card mb-3">
+            <div class="card-header"><div class="card-title"><i class="bi bi-chat-left-text me-1"></i> Conversation</div></div>
+            <div class="card-body">
+                <bx:if !arrayLen( prc.messages )>
+                    <p class="text-body-secondary mb-0">No messages yet.</p>
+                <bx:else>
+                    <!--- AdminLTE timeline: messages grouped by day, newest icons
+                          colored by author (Support / You / System). --->
+                    <div class="timeline">
+                        <bx:set local.lastDate = "" >
+                        <bx:loop array="#prc.messages#" item="local.m">
+                            <bx:set local.msgDate = dateFormat( local.m.getCreatedAt(), "mmm d, yyyy" ) >
+                            <bx:if local.msgDate neq local.lastDate>
+                                <div class="time-label"><span class="text-bg-primary">#encodeForHTML( local.msgDate )#</span></div>
+                                <bx:set local.lastDate = local.msgDate >
                             </bx:if>
-                        </span>
-                        <span>#encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
-                    </div>
-                    <div style="white-space:pre-wrap">#encodeForHTML( local.m.getBody() )#</div>
+                            <bx:script>
+                                if ( local.m.isFromAgent() ) {
+                                    local.icon = "bi-headset"; local.iconBg = "text-bg-primary"; local.border = "border-primary"; local.who = "Support";
+                                } else if ( len( local.m.getAuthorContactId() ?: "" ) ) {
+                                    local.icon = "bi-person-fill"; local.iconBg = "text-bg-success"; local.border = "border-success"; local.who = "You / your team";
+                                } else {
+                                    local.icon = "bi-gear-fill"; local.iconBg = "text-bg-secondary"; local.border = "border-secondary"; local.who = "System";
+                                }
+                            </bx:script>
+                            <div>
+                                <i class="timeline-icon bi #local.icon# #local.iconBg#"></i>
+                                <div class="timeline-item border-top border-3 #local.border#">
+                                    <span class="time"><i class="bi bi-clock-fill"></i> #encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "HH:nn" ) )#</span>
+                                    <h3 class="timeline-header"><strong>#encodeForHTML( local.who )#</strong></h3>
+                                    <div class="timeline-body">
+                                        <bx:set local.bodyText = local.m.displayBody() >
+                                        <bx:if len( local.bodyText )>
+                                            <div style="white-space:pre-wrap">#encodeForHTML( local.bodyText )#</div>
+                                        <bx:else>
+                                            <div class="text-body-secondary fst-italic">(no message text)</div>
+                                        </bx:if>
 
-                    <bx:set local.msgAtts = ( prc.attachmentsByMessageId ?: {} )[ local.m.getId() ] ?: [] >
-                    <bx:if arrayLen( local.msgAtts )>
-                        <div class="d-flex flex-wrap gap-2 mt-2 pt-2 border-top">
-                            <bx:loop array="#local.msgAtts#" item="local.att">
-                                <bx:set local.attUrl   = "/tickets/" & encodeForHTMLAttribute( local.t.getId() ) & "/attachments/" & encodeForHTMLAttribute( local.att.getId() ) >
-                                <bx:set local.thumbUrl = local.attUrl & "/thumbnail" >
-                                <bx:if local.att.isImage() && local.att.getThumbnailStatus() == "ready">
-                                    <a href="#local.attUrl#" target="_blank" rel="noopener" title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
-                                        <img src="#local.thumbUrl#" alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
-                                             style="max-height:80px; border-radius:4px; border:1px solid var(--bs-border-color);">
-                                    </a>
-                                <bx:else>
-                                    <a href="#local.attUrl#" class="btn btn-sm btn-outline-secondary" title="Download #encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
-                                        <i class="bi bi-paperclip"></i> #encodeForHTML( local.att.getOriginalFilename() )#
-                                        <span class="small text-body-secondary">(#encodeForHTML( local.att.displaySize() )#)</span>
-                                    </a>
-                                </bx:if>
-                            </bx:loop>
-                        </div>
-                    </bx:if>
-                </div>
+                                        <bx:set local.msgAtts = ( prc.attachmentsByMessageId ?: {} )[ local.m.getId() ] ?: [] >
+                                        <bx:if arrayLen( local.msgAtts )>
+                                            <div class="d-flex flex-wrap gap-2 mt-2 pt-2 border-top">
+                                                <bx:loop array="#local.msgAtts#" item="local.att">
+                                                    <bx:set local.attUrl   = "/tickets/" & encodeForHTMLAttribute( local.t.getId() ) & "/attachments/" & encodeForHTMLAttribute( local.att.getId() ) >
+                                                    <bx:set local.thumbUrl = local.attUrl & "/thumbnail" >
+                                                    <bx:if local.att.isImage() && local.att.getThumbnailStatus() == "ready">
+                                                        <a href="#local.attUrl#" target="_blank" rel="noopener" title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
+                                                            <img src="#local.thumbUrl#" alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
+                                                                 style="max-height:80px; border-radius:4px; border:1px solid var(--bs-border-color);">
+                                                        </a>
+                                                    <bx:else>
+                                                        <a href="#local.attUrl#" class="btn btn-sm btn-outline-secondary" title="Download #encodeForHTMLAttribute( local.att.getOriginalFilename() )#">
+                                                            <i class="bi bi-paperclip"></i> #encodeForHTML( local.att.getOriginalFilename() )#
+                                                            <span class="small text-body-secondary">(#encodeForHTML( local.att.displaySize() )#)</span>
+                                                        </a>
+                                                    </bx:if>
+                                                </bx:loop>
+                                            </div>
+                                        </bx:if>
+                                    </div>
+                                </div>
+                            </div>
+                        </bx:loop>
+                        <div><i class="timeline-icon bi bi-check2-circle text-bg-secondary"></i></div>
+                    </div>
+                </bx:if>
             </div>
-        </bx:loop>
+        </div>
 
         <div class="card mt-3">
             <div class="card-header">Reply</div>

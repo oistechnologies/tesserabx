@@ -1,0 +1,139 @@
+/**
+ * TicketsServiceDashboardSpec: behavioral specs for the client-portal
+ * dashboard stat reads (ticketStatsForContact / ticketStatsForOrganization).
+ *
+ * Each spec builds an isolated org + contact + agent fixture so the
+ * counts are deterministic regardless of seed / CI database state, then
+ * cleans up. The category mapping under test is the project convention:
+ * "new"/"open" => open, "pending" => paused (awaiting the client),
+ * "resolved" => resolved.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.tickets  = getController().getWireBox().getInstance( "TicketsService@tickets" );
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+    }
+
+    function run(){
+        describe( "TicketsService client dashboard stats", function(){
+
+            it( "ticketStatsForContact returns the documented zero-safe shape for an empty id", function(){
+                var s = variables.tickets.ticketStatsForContact( "" );
+                expect( s ).toHaveKey( "open" );
+                expect( s ).toHaveKey( "awaitingReply" );
+                expect( s ).toHaveKey( "resolvedRecent" );
+                expect( s ).toHaveKey( "total" );
+                expect( s.open ).toBe( 0 );
+                expect( s.total ).toBe( 0 );
+            } );
+
+            it( "ticketStatsForOrganization returns zeros for an empty id", function(){
+                var s = variables.tickets.ticketStatsForOrganization( "" );
+                expect( s.open ).toBe( 0 );
+                expect( s.awaitingReply ).toBe( 0 );
+                expect( s.resolvedRecent ).toBe( 0 );
+                expect( s.total ).toBe( 0 );
+            } );
+
+            it( "counts a contact's tickets by workflow category", function(){
+                var f  = makeFixture();
+                var ids = seedThreeTickets( f );
+
+                var s = variables.tickets.ticketStatsForContact( f.contact.getId() );
+                expect( s.total ).toBe( 3 );
+                expect( s.open ).toBe( 1 );            // the "new" ticket
+                expect( s.awaitingReply ).toBe( 1 );   // the "pending" ticket
+                expect( s.resolvedRecent ).toBe( 1 );  // the "resolved" ticket
+
+                cleanupFixture( f, ids );
+            } );
+
+            it( "counts every ticket in an organization for the admin view", function(){
+                var f  = makeFixture();
+                var ids = seedThreeTickets( f );
+
+                var s = variables.tickets.ticketStatsForOrganization( f.org.getId() );
+                expect( s.total ).toBe( 3 );
+                expect( s.open ).toBe( 1 );
+                expect( s.awaitingReply ).toBe( 1 );
+                expect( s.resolvedRecent ).toBe( 1 );
+
+                cleanupFixture( f, ids );
+            } );
+
+            it( "is scoped: a contact with no tickets counts zero", function(){
+                var s = variables.tickets.ticketStatsForContact( createUUID() );
+                expect( s.total ).toBe( 0 );
+            } );
+
+        } );
+    }
+
+    // ---------------- fixtures ----------------
+
+    /**
+     * Create 3 tickets for the fixture contact and leave each in a
+     * distinct workflow category: t1 "new" (open), t2 "pending"
+     * (paused), t3 "resolved". Returns the ticket id array.
+     */
+    private array function seedThreeTickets( required struct f ){
+        var t1 = variables.tickets.createTicket( { requesterContactId : arguments.f.contact.getId(), subject : "open one" } );
+
+        var t2 = variables.tickets.createTicket( { requesterContactId : arguments.f.contact.getId(), subject : "awaiting one" } );
+        variables.tickets.changeStatus( { ticketId : t2.getId(), status : "open",    actorId : arguments.f.agentId } );
+        variables.tickets.changeStatus( { ticketId : t2.getId(), status : "pending", actorId : arguments.f.agentId } );
+
+        var t3 = variables.tickets.createTicket( { requesterContactId : arguments.f.contact.getId(), subject : "resolved one" } );
+        variables.tickets.changeStatus( { ticketId : t3.getId(), status : "open",     actorId : arguments.f.agentId } );
+        variables.tickets.changeStatus( { ticketId : t3.getId(), status : "pending",  actorId : arguments.f.agentId } );
+        variables.tickets.changeStatus( { ticketId : t3.getId(), status : "resolved", actorId : arguments.f.agentId } );
+
+        return [ t1.getId(), t2.getId(), t3.getId() ];
+    }
+
+    private struct function makeFixture(){
+        var org = variables.contacts.createOrganization( {
+            name : "Dashboard Spec Org " & createUUID(),
+            slug : "dash-spec-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+        var contact = variables.contacts.provisionContact( {
+            organizationId : org.getId(),
+            email          : "dash-" & createUUID() & "@example.com",
+            password       : "spec-password"
+        } );
+        var agentId = createObject( "java", "java.util.UUID" ).randomUUID().toString();
+        queryExecute(
+            "INSERT INTO agents ( id, email, password_hash, is_admin, is_active )
+             VALUES ( :id, :email, :hash, false, true )",
+            {
+                id    : agentId,
+                email : "dash-agent-" & createUUID() & "@example.com",
+                hash  : "$2a$12$G7WvY1Y4gl0sGJCWBiuWSemOi.dlpUXywSgk6JpT0QJ2AnP70mP8C"
+            }
+        );
+        return { org : org, contact : contact, agentId : agentId };
+    }
+
+    private void function cleanupFixture( required any fixture, array ticketIds = [] ){
+        for ( var tid in arguments.ticketIds ) {
+            queryExecute( "DELETE FROM notifications    WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM ticket_approvals WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM ticket_events    WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM ticket_messages  WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM attachments       WHERE ticket_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM audit_events       WHERE entity_id = :id", { id : tid } );
+            queryExecute( "DELETE FROM tickets            WHERE id = :id", { id : tid } );
+        }
+        if ( !structIsEmpty( arguments.fixture ) ) {
+            queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM contacts WHERE id = :id", { id : arguments.fixture.contact.getId() } );
+            queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : arguments.fixture.org.getId() } );
+            queryExecute( "DELETE FROM organizations WHERE id = :id", { id : arguments.fixture.org.getId() } );
+            queryExecute( "DELETE FROM agents WHERE id = :id", { id : arguments.fixture.agentId } );
+        }
+    }
+
+}

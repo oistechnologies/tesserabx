@@ -1,0 +1,30 @@
+<bx:output>
+<div class="row">
+    <div class="col-12 col-lg-9 mx-auto">
+        <nav aria-label="breadcrumb" class="mb-2">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/kb">Knowledge Base</a></li>
+                <li class="breadcrumb-item active" aria-current="page">#encodeForHTML( prc.article.getTitle() )#</li>
+            </ol>
+        </nav>
+        <article class="card">
+            <div class="card-body">
+                <h1 class="h3 mb-3">#encodeForHTML( prc.article.getTitle() )#</h1>
+                <!--- Body is agent-authored markdown, rendered to HTML in the handler. --->
+                <div class="kb-article-body">#prc.bodyHtml#</div>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center text-body-secondary small">
+                <span><i class="bi bi-eye me-1"></i> #encodeForHTML( prc.article.getViewCount() )# views</span>
+                <span>
+                    <i class="bi bi-hand-thumbs-up me-1"></i> #encodeForHTML( prc.feedback.helpful ?: 0 )#
+                    <i class="bi bi-hand-thumbs-down ms-2 me-1"></i> #encodeForHTML( prc.feedback.notHelpful ?: 0 )#
+                </span>
+            </div>
+        </article>
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            <a href="/kb" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i> Back to knowledge base</a>
+            <a href="/contact" class="btn btn-outline-primary btn-sm">Still need help? Contact support</a>
+        </div>
+    </div>
+</div>
+</bx:output>

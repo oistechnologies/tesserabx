@@ -52,6 +52,16 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 } ).toThrow( "TicketsService.MissingEmail" );
             } );
 
+            it( "cleanInlineImagePlaceholders strips inline-image tokens (placeholder-only -> empty)", function(){
+                // An inbound email that was only an inline image leaves a
+                // "[image: <cid>]" placeholder; it should collapse to "".
+                expect( variables.tickets.cleanInlineImagePlaceholders( "[image: 1779825293079xNLe38ER]" & char( 10 ) ) ).toBe( "" );
+                // Real text is preserved (only the token is removed).
+                expect( variables.tickets.cleanInlineImagePlaceholders( "See [image: x] the logo" ) ).toBe( "See  the logo" );
+                expect( variables.tickets.cleanInlineImagePlaceholders( "plain reply" ) ).toBe( "plain reply" );
+                expect( variables.tickets.cleanInlineImagePlaceholders( "" ) ).toBe( "" );
+            } );
+
             it( "moves through a valid status workflow", function(){
                 var f = makeFixture();
                 var t = variables.tickets.createTicket( {

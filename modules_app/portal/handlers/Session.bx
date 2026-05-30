@@ -3,9 +3,10 @@
  */
 class {
 
-    property name="auth"        inject="AuthenticationService@cbauth";
-    property name="contactAuth" inject="ContactAuthService@contacts";
-    property name="messagebox"  inject="messagebox@cbmessagebox";
+    property name="auth"          inject="AuthenticationService@cbauth";
+    property name="contactAuth"   inject="ContactAuthService@contacts";
+    property name="inviteService" inject="ContactInviteService@contacts";
+    property name="messagebox"    inject="messagebox@cbmessagebox";
 
     function new( event, rc, prc ){
         prc.pageTitle = "Sign in";
@@ -43,6 +44,40 @@ class {
     function delete( event, rc, prc ){
         auth.logout();
         relocate( uri = "/" );
+    }
+
+    /**
+     * Public set-password page for a member invite link
+     * (/set-password?token=...). Whitelisted in PortalSecurityRules.
+     * The form posts the token back in a hidden field.
+     */
+    function setPasswordForm( event, rc, prc ){
+        param rc.token = "";
+        prc.pageTitle = "Set your password";
+        event.setLayout( name = "Auth", module = "core" );
+        prc.token = trim( rc.token );
+        event.setView( "session/set-password" );
+    }
+
+    function setPasswordSubmit( event, rc, prc ){
+        param rc.token              = "";
+        param rc.newPassword        = "";
+        param rc.newPasswordConfirm = "";
+        event.setLayout( name = "Auth", module = "core" );
+
+        if ( rc.newPassword != rc.newPasswordConfirm ) {
+            messagebox.error( "The passwords do not match." );
+            relocate( uri = "/set-password?token=" & urlEncodedFormat( rc.token ) );
+            return;
+        }
+        var result = inviteService.confirmSetPassword( trim( rc.token ), rc.newPassword );
+        if ( result.ok ) {
+            messagebox.info( "Your password is set. You can now sign in." );
+            relocate( uri = "/login" );
+            return;
+        }
+        messagebox.error( result.error );
+        relocate( uri = "/set-password?token=" & urlEncodedFormat( rc.token ) );
     }
 
 }

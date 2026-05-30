@@ -1,0 +1,146 @@
+/**
+ * ContactInviteService: Organization-Admin member invites.
+ *
+ * invite() provisions a PENDING (inactive) Contact in the inviting
+ * admin's organization, optionally grants the organization-admin role,
+ * writes a hashed single-use set-password token to
+ * contact_password_tokens, and emails a /set-password link.
+ * confirmSetPassword() validates the token (not expired, not consumed),
+ * sets the chosen password, activates the account, and consumes the
+ * token.
+ *
+ * Mirrors PendingTicketsService: only the SHA-256 hash of the raw token
+ * is stored, so a database read alone cannot hijack an invite.
+ */
+class singleton=true {
+
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="mailComposer"    inject="MailComposerService@core";
+
+    // A set-password invite link is good for a configurable number of
+    // hours (longer than a guest-ticket verification because a new
+    // member may not act immediately).
+    variables.defaultTtlHours = 72;
+
+    /**
+     * Provision + token + email. Returns { contact, token }. The
+     * caller mails nothing; the email is sent here. The raw token is
+     * returned mostly so specs can confirm without parsing Mailpit.
+     */
+    public struct function invite( required struct data ){
+        var email = lCase( trim( arguments.data.email ?: "" ) );
+
+        var contact = contactsService.provisionContact( {
+            organizationId : arguments.data.organizationId,
+            email          : email,
+            firstName      : arguments.data.firstName ?: "",
+            lastName       : arguments.data.lastName  ?: "",
+            officeId       : arguments.data.officeId  ?: "",
+            source         : "invite"
+        } );
+
+        // Pending until they set a password through the emailed link.
+        contactsService.deactivateContact( contact.getId() );
+
+        if ( arguments.data.makeAdmin ?: false ) {
+            contactsService.assignRole(
+                contactId        : contact.getId(),
+                roleKey          : "organization-admin",
+                grantedByAgentId : arguments.data.invitedByContactId ?: ""
+            );
+        }
+
+        var rawToken = issueToken( contact.getId() );
+        sendInviteEmail( email, rawToken );
+        return { contact : contact, token : rawToken };
+    }
+
+    /**
+     * Write a fresh set-password token for a contact and return the
+     * raw value. Reusable by a future "resend invite" / password-reset.
+     */
+    public string function issueToken( required string contactId ){
+        var rawToken  = generateToken();
+        var tokenHash = hash( rawToken, "SHA-256" );
+        var ttlHours  = int( getSystemSetting( "CONTACT_INVITE_TTL_HOURS", variables.defaultTtlHours ) );
+        queryExecute(
+            "INSERT INTO contact_password_tokens
+                ( id, contact_id, token_hash, purpose, expires_at, created_at )
+             VALUES
+                ( :id, :cid, :h, 'invite', NOW() + cast( :ttl as interval ), NOW() )",
+            { id : createUUID(), cid : arguments.contactId, h : tokenHash, ttl : ttlHours & " hours" }
+        );
+        return rawToken;
+    }
+
+    /**
+     * Consume a token: set the password, activate the account, stamp
+     * consumed_at. Returns { ok, error, contactId }. Never throws on a
+     * bad token so the public page can show one friendly message.
+     */
+    public struct function confirmSetPassword( required string token, required string newPassword ){
+        if ( !len( arguments.token ) ) return { ok : false, error : "This link is invalid." };
+        if ( len( arguments.newPassword ) < 8 ) return { ok : false, error : "Password must be at least 8 characters." };
+
+        var tokenHash = hash( arguments.token, "SHA-256" );
+        var rows = queryExecute(
+            "SELECT id, contact_id
+             FROM   contact_password_tokens
+             WHERE  token_hash  = :h
+               AND  consumed_at IS NULL
+               AND  expires_at  > NOW()",
+            { h : tokenHash }
+        );
+        if ( !rows.recordCount ) {
+            return { ok : false, error : "This link is invalid, expired, or already used." };
+        }
+
+        var tokenId   = rows.id[ 1 ];
+        var contactId = rows.contact_id[ 1 ];
+        contactsService.setPassword( contactId, arguments.newPassword );
+        contactsService.reactivateContact( contactId );
+        queryExecute(
+            "UPDATE contact_password_tokens SET consumed_at = NOW() WHERE id = :id",
+            { id : tokenId }
+        );
+        return { ok : true, error : "", contactId : contactId };
+    }
+
+    // ---------------- helpers ----------------
+
+    private string function generateToken(){
+        return replace( createUUID(), "-", "", "all" )
+             & replace( createUUID(), "-", "", "all" );
+    }
+
+    private void function sendInviteEmail( required string toEmail, required string rawToken ){
+        try {
+            var rawBase = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var base    = isSimpleValue( rawBase ) ? rawBase : "http://localhost:8080";
+            var link    = base & "/set-password?token=" & arguments.rawToken;
+            var nl      = char( 10 );
+            var body = "Hello," & nl & nl
+                & "You've been invited to the support portal. Click the link below to" & nl
+                & "set your password and activate your account:" & nl & nl
+                & link & nl & nl
+                & "If you were not expecting this invitation you can safely ignore this message." & nl;
+            var mail = mailComposer.compose(
+                to            = arguments.toEmail,
+                subject       = "Set up your support portal account",
+                body          = body,
+                bodyFormat    = "text",
+                recipientType = "raw",
+                eventKey      = "portal.member_invite.set_password",
+                preheader     = "Set your password to activate your support portal account."
+            );
+            mailComposer.send( mail );
+        } catch ( any e ) {
+            writeLog(
+                text : "ContactInviteService email send failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+}

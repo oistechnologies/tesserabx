@@ -1,0 +1,29 @@
+<bx:output>
+<bx:set local.s = prc.ticketStats ?: { "open" : 0, "awaitingReply" : 0, "resolvedRecent" : 0, "total" : 0 } >
+<div class="row g-3">
+    <div class="col-6 col-xl-3 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "primary", metric : encodeForHTML( local.s.open ), label : "Open",
+            icon  : "bi bi-folder2-open", link : "/tickets", linkLabel : "View tickets"
+        } )#
+    </div>
+    <div class="col-6 col-xl-3 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "warning", metric : encodeForHTML( local.s.awaitingReply ), label : "Awaiting your reply",
+            icon  : "bi bi-reply", link : "/tickets", linkLabel : "Respond"
+        } )#
+    </div>
+    <div class="col-6 col-xl-3 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "success", metric : encodeForHTML( local.s.resolvedRecent ), label : "Resolved",
+            caption : "last 30 days", icon : "bi bi-check2-circle"
+        } )#
+    </div>
+    <div class="col-6 col-xl-3 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "secondary", metric : encodeForHTML( local.s.total ), label : "Total",
+            icon  : "bi bi-card-list", link : "/tickets", linkLabel : "View all"
+        } )#
+    </div>
+</div>
+</bx:output>

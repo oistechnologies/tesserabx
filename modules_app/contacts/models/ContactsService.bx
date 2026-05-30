@@ -665,6 +665,110 @@ class singleton=true {
         return contact;
     }
 
+    /**
+     * Re-enable a previously deactivated contact. Targeted UPDATE for
+     * the same mfa_recovery_codes (PGobject) reason as deactivateContact.
+     */
+    public any function reactivateContact( required string id ){
+        var contact = getContactById( arguments.id );
+        if ( isNull( contact ) ) return javaCast( "null", "" );
+        queryExecute(
+            "UPDATE contacts SET is_active = TRUE, updated_at = NOW() WHERE id = :id",
+            { id : arguments.id }
+        );
+        contact.setIsActive( true );
+        recordAudit(
+            eventType      : "contact.reactivated",
+            entityType     : "Contact",
+            entityId       : contact.getId(),
+            organizationId : contact.getOrganizationId()
+        );
+        return contact;
+    }
+
+    // ---------------- Profile image ----------------
+
+    /**
+     * Persist uploaded profile-image metadata. The bytes live on the
+     * public CBFS disk under contacts/<id>/profile/ (written by
+     * ImageProcessingService); only the original path + MIME + an
+     * upload timestamp (the avatar URL cache-buster) are stored here.
+     * Targeted UPDATE to avoid Quick rebinding mfa_recovery_codes.
+     */
+    public void function setProfileImage(
+        required string contactId,
+        required string originalPath,
+        required string contentType
+    ){
+        queryExecute(
+            "UPDATE contacts
+             SET    profile_image_original_path = :path,
+                    profile_image_content_type  = :ctype,
+                    profile_image_uploaded_at   = NOW(),
+                    updated_at                  = NOW()
+             WHERE  id = :id",
+            { id : arguments.contactId, path : arguments.originalPath, ctype : arguments.contentType }
+        );
+    }
+
+    /**
+     * Clear profile-image metadata (the caller deletes the bytes via
+     * ImageProcessingService.deleteProfileImages first).
+     */
+    public void function clearProfileImage( required string contactId ){
+        queryExecute(
+            "UPDATE contacts
+             SET    profile_image_original_path = NULL,
+                    profile_image_content_type  = NULL,
+                    profile_image_uploaded_at   = NULL,
+                    updated_at                  = NOW()
+             WHERE  id = :id",
+            { id : arguments.contactId }
+        );
+    }
+
+    // ---------------- Passwords ----------------
+
+    /**
+     * Self-service password change. Verifies the current password
+     * against the stored bcrypt hash, then writes the new hash.
+     * Returns { ok : boolean, error : string }; does not throw so the
+     * portal handler can surface a friendly message.
+     */
+    public struct function changePassword(
+        required string contactId,
+        required string currentPassword,
+        required string newPassword
+    ){
+        var contact = getContactById( arguments.contactId );
+        if ( isNull( contact ) ) return { ok : false, error : "Account not found." };
+        if ( !bcrypt.checkPassword( arguments.currentPassword, contact.getPasswordHash() ) ) {
+            return { ok : false, error : "Your current password is incorrect." };
+        }
+        if ( len( arguments.newPassword ) < 8 ) {
+            return { ok : false, error : "New password must be at least 8 characters." };
+        }
+        setPassword( arguments.contactId, arguments.newPassword );
+        return { ok : true, error : "" };
+    }
+
+    /**
+     * Set (overwrite) a contact's password with no current-password
+     * check. Backs the invite / set-password token flow. Targeted
+     * UPDATE; bcrypt-hashes the raw input.
+     */
+    public void function setPassword( required string contactId, required string newPassword ){
+        queryExecute(
+            "UPDATE contacts SET password_hash = :hash, updated_at = NOW() WHERE id = :id",
+            { id : arguments.contactId, hash : bcrypt.hashPassword( arguments.newPassword ) }
+        );
+        recordAudit(
+            eventType  : "contact.password_changed",
+            entityType : "Contact",
+            entityId   : arguments.contactId
+        );
+    }
+
     // ---------------- Roles ----------------
 
     public array function listRolesForContact( required string contactId ){
@@ -746,6 +850,25 @@ class singleton=true {
             ),
             true
         );
+    }
+
+    /**
+     * Count active contacts in an organization holding the
+     * organization-admin role. The portal member-management guard uses
+     * this to refuse the operation (role revoke or deactivate) that
+     * would leave the organization with zero admins.
+     */
+    public numeric function countActiveOrgAdmins( required string organizationId ){
+        var rows = queryExecute(
+            "SELECT COUNT(*) AS n
+             FROM   contacts c
+             JOIN   contact_roles r ON r.contact_id = c.id
+             WHERE  c.organization_id = :orgId
+             AND    c.is_active = TRUE
+             AND    r.role_key = 'organization-admin'",
+            { orgId : arguments.organizationId }
+        );
+        return val( rows.n[ 1 ] );
     }
 
     // ---------------- Domain mapping ----------------

@@ -61,4 +61,16 @@ class
         return len( id ) > 0;
     }
 
+    /**
+     * The body with inline-image placeholder tokens stripped, for
+     * display. Returns "" when the message has no real text (e.g. an
+     * inbound email that was only an inline image); the conversation UI
+     * renders a "no message text" note in that case. Delegates to
+     * TicketsService so the strip rule lives in one place.
+     */
+    public string function displayBody(){
+        return variables._wirebox.getInstance( "TicketsService@tickets" )
+            .cleanInlineImagePlaceholders( getBody() ?: "" );
+    }
+
 }

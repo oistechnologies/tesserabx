@@ -1,0 +1,67 @@
+/**
+ * NotificationsFeed: the client dashboard's in-app notification list.
+ *
+ * Shows the signed-in Contact's most recent in-app notifications with
+ * an unread badge, per-item and bulk "mark read" actions, and
+ * wire:poll auto-refresh. All reads/writes go through
+ * NotificationsService scoped to recipientType="contact" + the
+ * contact's id, so a contact only ever sees their own notifications.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="notificationsService" inject="NotificationsService@notifications";
+    property name="auth"                 inject="AuthenticationService@cbauth";
+
+    data = {};
+
+    // ---------- per-render helpers ----------
+
+    function items(){
+        var id = currentContactId();
+        if ( !len( id ) ) return [];
+        var entities = notificationsService.listForRecipient(
+            recipientType : "contact",
+            recipientId   : id,
+            limit         : 8
+        );
+        var out = [];
+        for ( var n in entities ) {
+            out.append( {
+                "id"        : n.getId(),
+                "title"     : n.getTitle() ?: "",
+                "url"       : len( n.getLink() ?: "" ) ? n.getLink() : "/tickets",
+                "unread"    : ( ( n.getStatus() ?: "" ) == "sent" ),
+                "createdAt" : dateTimeFormat( n.getCreatedAt(), "yyyy-mm-dd HH:nn" )
+            } );
+        }
+        return out;
+    }
+
+    function unread(){
+        var id = currentContactId();
+        return len( id ) ? notificationsService.unreadCount( "contact", id ) : 0;
+    }
+
+    // ---------- actions ----------
+
+    function markRead( id ){
+        var cid = currentContactId();
+        if ( !len( cid ) ) return;
+        notificationsService.markRead( arguments.id, "contact", cid );
+    }
+
+    function markAllRead(){
+        var cid = currentContactId();
+        if ( !len( cid ) ) return;
+        notificationsService.markAllRead( "contact", cid );
+    }
+
+    // ---------- internals ----------
+
+    private string function currentContactId(){
+        if ( !auth.isLoggedIn() ) return "";
+        var u = auth.getUser();
+        return isNull( u ) ? "" : u.getId();
+    }
+
+}

@@ -175,7 +175,7 @@ class singleton=true {
                     var contact = contactsService.resolveOrAutoProvisionContact( sender );
                     var msg = ticketsService.addMessage( {
                         ticketId        : t.getId(),
-                        body            : arguments.message.body ?: "",
+                        body            : ticketsService.cleanInlineImagePlaceholders( arguments.message.body ?: "" ),
                         authorContactId : isNull( contact ) ? "" : contact.getId(),
                         authorEmail     : sender,
                         isInternal      : false,
@@ -257,7 +257,7 @@ class singleton=true {
             }
             var msg = ticketsService.addMessage( {
                 ticketId        : ticket.getId(),
-                body            : arguments.message.body ?: "",
+                body            : ticketsService.cleanInlineImagePlaceholders( arguments.message.body ?: "" ),
                 authorContactId : isNull( contact ) ? "" : contact.getId(),
                 authorEmail     : sender,
                 isInternal      : false,

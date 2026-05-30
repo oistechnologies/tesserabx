@@ -1,11 +1,83 @@
 /**
- * portal Home handler. Renders the portal landing on `/`.
+ * portal Home handler. Renders the persona-aware client portal home on
+ * `/`:
+ *   - anonymous visitor  -> a self-service guest landing (search,
+ *                           popular articles, browse, contact channels)
+ *   - signed-in Contact  -> a personal help-desk dashboard (ticket
+ *                           stat tiles, KB for you, security nudge;
+ *                           Organization Admins also get an org-wide
+ *                           analytics section added in a later phase)
+ *
+ * Persona detection rides on tbxViewer(), which keys off
+ * prc.oCurrentContact, so the preHandler populates it for signed-in
+ * contacts the same way the Tickets/Account handlers do.
  */
 class {
 
-    function index( event, rc, prc ){
-        prc.pageTitle = "TesseraBX Help Desk";
+    property name="ticketsService"   inject="TicketsService@tickets";
+    property name="kbService"         inject="KnowledgebaseService@knowledgebase";
+    property name="contactsService"   inject="ContactsService@contacts";
+    property name="reportingService"  inject="ReportingService@reporting";
+    property name="auth"              inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Portal", module = "core" );
+        // tbxViewer() and every UI registry key off prc.oCurrentContact.
+        var me = currentContact();
+        if ( !isNull( me ) ) {
+            prc.oCurrentContact = me;
+            prc.currentContact  = me;
+        }
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle = "Help Center";
+        prc.viewer    = tbxViewer();
+
+        // Knowledge-base widgets shared by both personas, visibility
+        // filtered to what the viewer is allowed to see.
+        prc.popularArticles = kbService.topArticlesForViewer( tbxKbViewer(), 5 ).rows;
+        prc.kbCategories    = kbService.listCategories();
+
+        prc.showDashboard = ( prc.viewer.signedIn && structKeyExists( prc, "oCurrentContact" ) );
+        if ( prc.showDashboard ) {
+            buildContactDashboard( prc, prc.oCurrentContact );
+        }
+        event.setView( "home/index" );
+    }
+
+    // ---------- internals ----------
+
+    private void function buildContactDashboard( required struct prc, required any me ){
+        arguments.prc.isOrgAdmin = arguments.me.isOrganizationAdmin();
+        arguments.prc.firstName  = arguments.me.getFirstName() ?: "";
+        arguments.prc.mfaEnabled = !!arguments.me.getMfaEnabled();
+
+        var oid = arguments.me.getOrganizationId() ?: "";
+
+        arguments.prc.ticketStats = arguments.prc.isOrgAdmin
+            ? ticketsService.ticketStatsForOrganization( oid )
+            : ticketsService.ticketStatsForContact( arguments.me.getId() );
+
+        var org = contactsService.getOrganizationById( oid );
+        arguments.prc.orgName = isNull( org ) ? "" : org.getName();
+
+        // Organization Admins get an org-wide analytics section. The
+        // org-scoped reporting reads carry no client-side org leak: oid
+        // is the admin's own organization.
+        if ( arguments.prc.isOrgAdmin && len( oid ) ) {
+            arguments.prc.orgOverview     = reportingService.overviewTilesForOrganization( oid );
+            arguments.prc.orgStatusCounts = reportingService.ticketCountsByColumnForOrganization( oid, "status" );
+            arguments.prc.orgVolume       = reportingService.ticketVolumePerDayForOrganization( oid, 30 );
+            arguments.prc.orgRoster       = reportingService.contactOpenLoadForOrganization( oid );
+        }
+    }
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        if ( isNull( u ) ) return javaCast( "null", "" );
+        return u;
     }
 
 }

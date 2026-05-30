@@ -528,6 +528,46 @@ class singleton=true {
     }
 
     /**
+     * Top N published articles by cumulative view_count, filtered to
+     * what the supplied viewer is allowed to see. The visibility
+     * filter reuses visibilityClauseForViewer so this stays in lockstep
+     * with listVisibleArticles / searchByEmbedding: anonymous gets
+     * public only; a contact gets public + their org's org-scoped
+     * articles; an agent gets everything.
+     *
+     * `viewer` is the knowledgebase viewer struct
+     * ({ kind, contactOrganizationId }), NOT the tbxViewer() shape;
+     * the portal maps between them.
+     *
+     * Returns { rows : [ { id, slug, title, viewCount, url }, ... ] }
+     * with a portal-facing /kb/<slug> url, ready for the trending
+     * widget on the client dashboard.
+     */
+    public struct function topArticlesForViewer( required struct viewer, numeric limit = 5 ){
+        var visClauses = visibilityClauseForViewer( arguments.viewer );
+        var sql = "
+            SELECT a.id, a.slug, a.title, a.view_count, a.published_at
+            FROM   kb_articles a
+            WHERE  a.status = 'published'
+            " & visClauses.sqlFragment & "
+            ORDER  BY a.view_count DESC, a.published_at DESC NULLS LAST
+            LIMIT  " & int( arguments.limit );
+        var rows = queryExecute( sql, visClauses.params );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var slug = rows.slug[ i ] ?: "";
+            out.append( {
+                "id"        : rows.id[ i ],
+                "slug"      : slug,
+                "title"     : rows.title[ i ] ?: "",
+                "viewCount" : rows.view_count[ i ] ?: 0,
+                "url"       : "/kb/" & ( len( slug ) ? slug : rows.id[ i ] )
+            } );
+        }
+        return { "rows" : out };
+    }
+
+    /**
      * Draft articles the current agent authored, newest first. Helps
      * agents resume in-progress writing. Returns an empty rows array
      * for an anonymous viewer.

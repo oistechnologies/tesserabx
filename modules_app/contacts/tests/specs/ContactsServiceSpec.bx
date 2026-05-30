@@ -358,6 +358,92 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
             } );
 
         } );
+
+        describe( "ContactsService account self-service + admin", function(){
+
+            it( "changePassword rejects a wrong current password and a too-short new one", function(){
+                var org = makeOrg();
+                var c = variables.service.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : "pw-" & createUUID() & "@example.com",
+                    password       : "current-secret-1"
+                } );
+                expect( variables.service.changePassword( c.getId(), "wrong", "new-secret-12" ).ok ).toBeFalse();
+                expect( variables.service.changePassword( c.getId(), "current-secret-1", "short" ).ok ).toBeFalse();
+                cleanupContact( c.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "changePassword swaps the hash when current + length are valid", function(){
+                var org   = makeOrg();
+                var email = "pw2-" & createUUID() & "@example.com";
+                var c = variables.service.provisionContact( {
+                    organizationId : org.getId(),
+                    email          : email,
+                    password       : "current-secret-1"
+                } );
+                expect( variables.service.changePassword( c.getId(), "current-secret-1", "rotated-secret-9" ).ok ).toBeTrue();
+                // Assert against the stored hash directly (the same bcrypt
+                // instance the service uses); ContactAuthService applies
+                // the tenant scope, which has no current user in a spec.
+                var bcrypt = getController().getWireBox().getInstance( "@BCrypt" );
+                var loaded = variables.service.getContactById( c.getId() );
+                expect( bcrypt.checkPassword( "rotated-secret-9", loaded.getPasswordHash() ) ).toBeTrue();
+                expect( bcrypt.checkPassword( "current-secret-1", loaded.getPasswordHash() ) ).toBeFalse();
+                cleanupContact( c.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "setProfileImage + clearProfileImage round-trip the metadata", function(){
+                var org = makeOrg();
+                var c = makeContact( org.getId() );
+                variables.service.setProfileImage( c.getId(), "contacts/" & c.getId() & "/profile/original.jpg", "image/jpeg" );
+                var loaded = variables.service.getContactById( c.getId() );
+                expect( loaded.getProfileImageOriginalPath() ).toInclude( "/profile/original.jpg" );
+                expect( loaded.getProfileImageContentType() ).toBe( "image/jpeg" );
+                expect( isNull( loaded.getProfileImageUploadedAt() ) ).toBeFalse();
+
+                variables.service.clearProfileImage( c.getId() );
+                var cleared = variables.service.getContactById( c.getId() );
+                expect( len( cleared.getProfileImageOriginalPath() ?: "" ) ).toBe( 0 );
+
+                cleanupContact( c.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "reactivateContact flips a deactivated contact back to active", function(){
+                var org = makeOrg();
+                var c = makeContact( org.getId() );
+                variables.service.deactivateContact( c.getId() );
+                expect( variables.service.getContactById( c.getId() ).getIsActive() ).toBeFalse();
+                variables.service.reactivateContact( c.getId() );
+                expect( variables.service.getContactById( c.getId() ).getIsActive() ).toBeTrue();
+                cleanupContact( c.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+            it( "countActiveOrgAdmins tracks active admins for the last-admin guard", function(){
+                var org = makeOrg();
+                var a = makeContact( org.getId() );
+                var b = makeContact( org.getId() );
+                variables.service.assignRole( a.getId(), "organization-admin" );
+                variables.service.assignRole( b.getId(), "organization-admin" );
+                expect( variables.service.countActiveOrgAdmins( org.getId() ) ).toBe( 2 );
+
+                variables.service.deactivateContact( b.getId() );   // inactive admin not counted
+                expect( variables.service.countActiveOrgAdmins( org.getId() ) ).toBe( 1 );
+
+                variables.service.revokeRole( a.getId(), "organization-admin" );  // last admin gone
+                expect( variables.service.countActiveOrgAdmins( org.getId() ) ).toBe( 0 );
+
+                cleanupContactRoles( a.getId() );
+                cleanupContactRoles( b.getId() );
+                cleanupContact( a.getId() );
+                cleanupContact( b.getId() );
+                cleanupOrganization( org.getId() );
+            } );
+
+        } );
     }
 
     // ---------------- helpers ----------------

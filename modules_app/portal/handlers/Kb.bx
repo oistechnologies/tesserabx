@@ -1,0 +1,96 @@
+/**
+ * portal Kb handler: the public knowledge-base reading surface at /kb.
+ *
+ * Visibility is enforced through KnowledgebaseService using the viewer
+ * mapped from tbxViewer() via tbxKbViewer(): an anonymous visitor sees
+ * only published public articles; a signed-in Contact also sees their
+ * organization's org-scoped articles. Internal articles never reach
+ * this surface. The route is whitelisted in PortalSecurityRules, so
+ * the firewall lets anonymous visitors in and the service does the
+ * per-article gating.
+ *
+ * Article bodies are authored in markdown by provider agents and
+ * rendered with the markdown() BIF, the same trust model the in-app
+ * help module uses.
+ */
+class {
+
+    property name="kbService"  inject="KnowledgebaseService@knowledgebase";
+    property name="auth"        inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        var me = currentContact();
+        if ( !isNull( me ) ) {
+            prc.oCurrentContact = me;
+            prc.currentContact  = me;
+        }
+        prc.viewer = tbxViewer();
+    }
+
+    /**
+     * /kb — browse landing: categories plus the visible article list,
+     * with optional ?q= full-text search.
+     */
+    function index( event, rc, prc ){
+        prc.pageTitle  = "Knowledge Base";
+        prc.q          = trim( rc.q ?: "" );
+        prc.categories = kbService.listCategories();
+        prc.articles   = kbService.listVisibleArticles(
+            viewer = tbxKbViewer(),
+            search = prc.q
+        );
+        prc.activeCategorySlug = "";
+        event.setView( "kb/index" );
+    }
+
+    /**
+     * /kb/category/:slug — articles within one category.
+     */
+    function category( event, rc, prc ){
+        var cat = kbService.getCategoryBySlug( rc.slug ?: "" );
+        if ( isNull( cat ) ) {
+            prc.pageTitle = "Category not found";
+            event.setView( "kb/not_found" );
+            return;
+        }
+        prc.activeCategorySlug = cat.getSlug();
+        prc.pageTitle          = cat.getName();
+        prc.q                  = "";
+        prc.categories         = kbService.listCategories();
+        prc.articles           = kbService.listVisibleArticles(
+            viewer     = tbxKbViewer(),
+            categoryId = cat.getId()
+        );
+        event.setView( "kb/index" );
+    }
+
+    /**
+     * /kb/:slug — a single article. Renders the "not available" view
+     * when the slug is unknown OR the viewer may not read it; the two
+     * are intentionally indistinguishable so the existence of a
+     * restricted article is not leaked.
+     */
+    function show( event, rc, prc ){
+        var a = kbService.getArticleBySlug( rc.slug ?: "" );
+        if ( isNull( a ) || !kbService.canRead( tbxKbViewer(), a ) ) {
+            prc.pageTitle = "Article not available";
+            event.setView( "kb/not_found" );
+            return;
+        }
+        kbService.recordView( a.getId() );
+        prc.article   = a;
+        prc.pageTitle = a.getTitle();
+        prc.bodyHtml  = markdown( a.getBody() ?: "" );
+        prc.feedback  = kbService.feedbackTotalsForArticle( a.getId() );
+        event.setView( "kb/show" );
+    }
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        if ( isNull( u ) ) return javaCast( "null", "" );
+        return u;
+    }
+
+}

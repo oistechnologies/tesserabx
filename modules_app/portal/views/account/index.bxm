@@ -1,26 +1,86 @@
 <bx:output>
 <bx:set local.me = prc.currentContact >
+<bx:set local.fullName = trim( ( local.me.getFirstName() ?: "" ) & " " & ( local.me.getLastName() ?: "" ) ) >
+<bx:if !len( local.fullName )><bx:set local.fullName = local.me.getEmail() ></bx:if>
 
 <div class="row g-3">
     <div class="col-12 col-lg-8">
 
-        <div class="card mb-3">
-            <div class="card-header">Profile</div>
+        <!--- Profile header (AdminLTE user-header style) --->
+        <div class="card card-primary card-outline mb-4">
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    <div>#view( view = "_partials/avatar", module = "core", args = { agent : prc.avatar, size : 128, prefix : "contacts" } )#</div>
+                    <div class="flex-grow-1">
+                        <h2 class="h4 mb-1">#encodeForHTML( local.fullName )#</h2>
+                        <div class="text-body-secondary">#encodeForHTML( local.me.getEmail() )#</div>
+                        <div class="mt-2 d-flex flex-wrap gap-2">
+                            <bx:if ( prc.isOrgAdmin ?: false )>
+                                <span class="badge text-bg-info"><i class="bi bi-shield-check me-1"></i>Organization Admin</span>
+                            </bx:if>
+                            <bx:if prc.mfaEnabled>
+                                <span class="badge text-bg-success"><i class="bi bi-shield-lock me-1"></i>Two-factor on</span>
+                            <bx:else>
+                                <span class="badge text-bg-light text-black"><i class="bi bi-shield me-1"></i>Two-factor off</span>
+                            </bx:if>
+                            <bx:if !isNull( local.me.getCreatedAt() )>
+                                <span class="badge text-bg-light text-black">Member since #encodeForHTML( dateFormat( local.me.getCreatedAt(), "mmm yyyy" ) )#</span>
+                            </bx:if>
+                        </div>
+                    </div>
+                    <div class="ms-auto d-flex flex-column gap-2">
+                        <a href="/account/edit" class="btn btn-primary"><i class="bi bi-pencil-square me-1"></i> Edit account</a>
+                        <bx:if ( prc.isOrgAdmin ?: false )>
+                            <a href="/account/members" class="btn btn-outline-info"><i class="bi bi-people me-1"></i> Manage members</a>
+                        </bx:if>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!--- Profile details (read-only) --->
+        <div class="card card-secondary card-outline mb-4">
+            <div class="card-header"><div class="card-title">Profile details</div></div>
             <div class="card-body">
                 <dl class="row mb-0">
-                    <dt class="col-sm-3">Email</dt>
-                    <dd class="col-sm-9">#encodeForHTML( local.me.getEmail() )#</dd>
-                    <bx:if len( local.me.getFirstName() ?: "" ) || len( local.me.getLastName() ?: "" )>
-                        <dt class="col-sm-3">Name</dt>
-                        <dd class="col-sm-9">#encodeForHTML( trim( ( local.me.getFirstName() ?: "" ) & " " & ( local.me.getLastName() ?: "" ) ) )#</dd>
-                    </bx:if>
+                    <dt class="col-sm-4">Job title</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( local.me.getJobTitle() ?: "" ) ? local.me.getJobTitle() : "—" )#</dd>
+                    <dt class="col-sm-4">Phone</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( local.me.getPhone() ?: "" ) ? local.me.getPhone() : "—" )#</dd>
+                    <dt class="col-sm-4">Mobile</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( local.me.getMobilePhone() ?: "" ) ? local.me.getMobilePhone() : "—" )#</dd>
+                    <dt class="col-sm-4">Time zone</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( local.me.getTimezone() ?: "" ) ? local.me.getTimezone() : "—" )#</dd>
+                    <dt class="col-sm-4">Locale</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( local.me.getLocale() ?: "" ) ? local.me.getLocale() : "—" )#</dd>
                 </dl>
             </div>
         </div>
 
-        <div class="card">
+        <!--- Organization (managed by the provider / org admin) --->
+        <div class="card card-secondary card-outline mb-4">
+            <div class="card-header"><div class="card-title">Organization</div></div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Organization</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( prc.orgName ?: "" ) ? prc.orgName : "—" )#</dd>
+                    <bx:if len( prc.orgTier ?: "" )>
+                        <dt class="col-sm-4">Tier</dt>
+                        <dd class="col-sm-8"><span class="badge text-bg-light text-black">#encodeForHTML( prc.orgTier )#</span></dd>
+                    </bx:if>
+                    <dt class="col-sm-4">Office</dt>
+                    <dd class="col-sm-8">#encodeForHTML( len( prc.officeName ?: "" ) ? prc.officeName : "—" )#</dd>
+                </dl>
+                <div class="callout callout-info mb-0 mt-3">
+                    <i class="bi bi-info-circle me-1"></i> Your organization, office, and tier are managed for you. Contact your organization admin to change your office assignment.
+                </div>
+            </div>
+        </div>
+
+        <!--- Two-factor authentication --->
+        <div class="card card-warning card-outline">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span>Two-factor authentication</span>
+                <div class="card-title">Two-factor authentication</div>
                 <bx:if prc.mfaEnabled>
                     <span class="badge text-bg-success">Enabled</span>
                 <bx:else>
@@ -30,22 +90,16 @@
             <div class="card-body">
                 <bx:if prc.mfaEnabled>
                     <p class="text-body-secondary small mb-3">
-                        Two-factor authentication is on for this account. You'll be asked for a 6-digit code
-                        from your authenticator app every time you sign in.
+                        Two-factor authentication is on. You'll be asked for a 6-digit code from your authenticator app every time you sign in.
                     </p>
                     <form method="post" action="/account/mfa/disable" onsubmit="return confirm('Turn off two-factor authentication? Your account will only require your password to sign in.');">
-                        <button type="submit" class="btn btn-outline-danger btn-sm">
-                            <i class="bi bi-shield-slash"></i> Turn off two-factor
-                        </button>
+                        <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-shield-slash me-1"></i> Turn off two-factor</button>
                     </form>
                 <bx:else>
                     <p class="text-body-secondary small mb-3">
-                        Add a one-time code from an authenticator app to your sign-in so a stolen password
-                        alone isn't enough. We'll show you a QR code and walk you through enrollment.
+                        Add a one-time code from an authenticator app to your sign-in so a stolen password alone isn't enough.
                     </p>
-                    <a href="/mfa/setup" class="btn btn-primary btn-sm">
-                        <i class="bi bi-shield-lock"></i> Enable two-factor authentication
-                    </a>
+                    <a href="/mfa/setup" class="btn btn-primary btn-sm"><i class="bi bi-shield-lock me-1"></i> Enable two-factor authentication</a>
                 </bx:if>
             </div>
         </div>

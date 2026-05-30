@@ -46,6 +46,13 @@ class
     property name="mfaEnrolledAt"    column="mfa_enrolled_at"  sqltype="timestamp";
     property name="mfaRecoveryCodes" column="mfa_recovery_codes";
 
+    // Profile image. Mirror of the agent-side avatar columns; the
+    // contact avatar pipeline reuses ImageProcessingService /
+    // AvatarHelper under the "contacts" prefix on the public CBFS disk.
+    property name="profileImageOriginalPath" column="profile_image_original_path";
+    property name="profileImageContentType"  column="profile_image_content_type";
+    property name="profileImageUploadedAt"    column="profile_image_uploaded_at" sqltype="timestamp";
+
     function applyGlobalScopes( builder ){
         variables._wirebox.getInstance( "TenantScope@contacts" ).apply( arguments.builder );
         return this;

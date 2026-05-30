@@ -728,16 +728,18 @@ settings.tesserabx.dashboardWidgets = [
 
 ### Zones
 
-Each widget belongs to a `zone`. Two zones are supported:
+Each widget belongs to a `zone`. Four zones are supported:
 
-| Zone         | Surface          | Audience                                                                                                                                                  |
-|--------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `reports`    | `/agent/reports` | The org-wide aggregate dashboard. Widgets here typically show counts across all organizations and agents. This is the default when `zone` is omitted.     |
-| `agent-home` | `/agent`         | The agent's personal landing page. Widgets here are scoped to the logged-in agent (their tickets, their mentions, their activity, etc.).                  |
+| Zone           | Surface          | Audience                                                                                                                                              |
+|----------------|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `reports`      | `/agent/reports` | The org-wide aggregate dashboard. Widgets here typically show counts across all organizations and agents. This is the default when `zone` is omitted. |
+| `agent-home`   | `/agent`         | The agent's personal landing page. Widgets here are scoped to the logged-in agent (their tickets, their mentions, their activity, etc.).              |
+| `portal-home`  | `/`              | The signed-in client (Contact) dashboard. Client-facing, so widgets must not depend on agent-only permissions; honor `requiresAi` for any AI surface. |
+| `portal-guest` | `/`              | The anonymous client landing. Widgets here are seen by unauthenticated visitors, so they must assume no organization scope and no AI UI.              |
 
-An add-on opts into a surface by declaring `zone` on each widget entry. Omit `zone` (or set it to `"reports"`) to contribute to `/agent/reports`. Set `zone : "agent-home"` to contribute to the agent's personal home page. Add-ons can declare widgets in both zones by registering one entry per zone.
+An add-on opts into a surface by declaring `zone` on each widget entry. Omit `zone` (or set it to `"reports"`) to contribute to `/agent/reports`. Set `zone : "agent-home"` for the agent home page, `zone : "portal-home"` for the signed-in client dashboard, or `zone : "portal-guest"` for the anonymous client landing. Add-ons can declare widgets in several zones by registering one entry per zone.
 
-The host loops `#tbxDashboardWidgets( "reports" )#` (or `tbxDashboardWidgets( "agent-home" )`), invokes each widget's data provider (when declared), and renders the named partial wrapped in the declared grid size. The same deferral applies on the `reports` zone: core's existing six dashboard widgets (overview tiles, ticket-volume line chart, three doughnut charts, backlog table, agent-load table) remain rendered inline and are not yet migrated to the registry.
+The host loops `#tbxDashboardWidgets( "reports" )#` (or `"agent-home"` / `"portal-home"` / `"portal-guest"`), invokes each widget's data provider (when declared), and renders the named partial wrapped in the declared grid size. On `reports`, core's existing six dashboard widgets (overview tiles, ticket-volume line chart, three doughnut charts, backlog table, agent-load table) remain rendered inline and are not yet migrated to the registry; on the portal zones, the core persona widgets are likewise handler-computed and add-on widgets stack after them. Note `fetchWidgetData()` calls the declared data provider with no arguments, so portal add-on widgets that need per-viewer scope should read it from their own provider rather than expecting it to be passed in.
 
 ### Reusable `.small-box` partial
 

@@ -1,0 +1,66 @@
+/**
+ * KbSearch: live "search as you type" against the knowledge base,
+ * shared by the guest landing and the signed-in dashboard.
+ *
+ * The viewer is resolved from cbauth so visibility adapts automatically:
+ * an anonymous visitor searches public articles only; a signed-in
+ * Contact also matches their organization's org-scoped articles.
+ * Internal articles never surface here.
+ *
+ * This is deliberately keyword (Postgres full-text) search, not
+ * semantic: a type-ahead box wants fast, precise term matching, and
+ * per-keystroke embedding calls would add latency and cost while
+ * returning tangential nearest-neighbours for partial queries. The AI
+ * value for clients is delivered through RecommendedArticles (semantic
+ * suggestions from open-ticket context) and the /contact deflection
+ * hints instead. KbSearch carries no AI-branded UI, so it renders the
+ * same whether AI is on or off and the AI-off invariant holds trivially.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="kbService" inject="KnowledgebaseService@knowledgebase";
+    property name="auth"       inject="AuthenticationService@cbauth";
+
+    variables.MAX_RESULTS = 6;
+
+    data = {
+        "q" : ""
+    };
+
+    // ---------- per-render helpers ----------
+
+    /**
+     * Keyword results for the current query. Returns [] until the query
+     * is at least 2 characters so we don't search on the first
+     * keystroke. Each row is { title, url }.
+     */
+    function results(){
+        var query = trim( data.q ?: "" );
+        if ( len( query ) < 2 ) return [];
+        var list = kbService.listVisibleArticles( viewer = kbViewer(), search = query );
+        var out = [];
+        var n = 0;
+        for ( var a in list ) {
+            out.append( { "title" : a.getTitle() ?: "", "url" : "/kb/" & a.getSlug() } );
+            n++;
+            if ( n >= variables.MAX_RESULTS ) break;
+        }
+        return out;
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Map the signed-in user (or anonymous visitor) into the
+     * knowledgebase viewer shape. Mirrors tbxKbViewer(), but resolves
+     * from cbauth directly so it works on the /cbwire/update request
+     * where the request-scoped UDF helpers are not in scope.
+     */
+    private struct function kbViewer(){
+        if ( !auth.isLoggedIn() ) return { "kind" : "anonymous", "contactOrganizationId" : "" };
+        var u = auth.getUser();
+        if ( isNull( u ) ) return { "kind" : "anonymous", "contactOrganizationId" : "" };
+        return { "kind" : "contact", "contactOrganizationId" : u.getOrganizationId() ?: "" };
+    }
+
+}

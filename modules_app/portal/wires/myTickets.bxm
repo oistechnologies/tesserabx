@@ -1,0 +1,59 @@
+<bx:output>
+<bx:script>
+    local.rows     = rows();
+    local.statuses = statuses();
+
+    // SLA status -> badge. Pale "On track" uses text-black per the
+    // project's badge-contrast rule (never text-muted on text-bg-light).
+    public string function slaBadge( required string st ){
+        switch ( arguments.st ) {
+            case "breached":    return "<span class='badge text-bg-danger'>SLA breached</span>";
+            case "approaching": return "<span class='badge text-bg-warning'>Due soon</span>";
+            case "met":         return "<span class='badge text-bg-success'>SLA met</span>";
+            case "paused":      return "<span class='badge text-bg-secondary'>Paused</span>";
+            default:            return "";
+        }
+    }
+</bx:script>
+<div class="card h-100 w-100" wire:poll.30s>
+    <div class="card-header bg-body-secondary d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><i class="bi bi-card-list text-primary me-1"></i> <strong>Recent tickets</strong></span>
+        <div class="d-flex gap-2">
+            <bx:if showScopeToggle()>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Ticket scope">
+                    <button type="button" class="btn btn-outline-secondary#scope eq 'mine' ? ' active' : ''#" wire:click="setScope('mine')">Mine</button>
+                    <button type="button" class="btn btn-outline-secondary#scope eq 'org' ? ' active' : ''#" wire:click="setScope('org')">All org</button>
+                </div>
+            </bx:if>
+            <select class="form-select form-select-sm w-auto text-capitalize" wire:model.live="statusFilter">
+                <option value="">All statuses</option>
+                <bx:loop array="#local.statuses#" item="local.s">
+                    <option value="#encodeForHTMLAttribute( local.s )#">#encodeForHTML( local.s )#</option>
+                </bx:loop>
+            </select>
+        </div>
+    </div>
+    <bx:if arrayLen( local.rows )>
+        <div class="list-group list-group-flush">
+            <bx:loop array="#local.rows#" item="local.t">
+                <a href="#encodeForHTMLAttribute( local.t.url )#" class="list-group-item list-group-item-action">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="me-2 text-truncate">
+                            <div class="fw-semibold text-truncate">#encodeForHTML( local.t.subject )#</div>
+                            <div class="small text-body-secondary">###encodeForHTML( local.t.number )# &middot; updated #encodeForHTML( local.t.updatedAt )#</div>
+                        </div>
+                        <div class="text-end flex-shrink-0">
+                            <span class="badge text-bg-light text-black text-capitalize">#encodeForHTML( local.t.status )#</span>
+                            #slaBadge( local.t.sla )#
+                        </div>
+                    </div>
+                </a>
+            </bx:loop>
+        </div>
+    <bx:else>
+        <div class="card-body text-body-secondary">
+            No tickets to show. <a href="/tickets/new">Submit a request</a>.
+        </div>
+    </bx:if>
+</div>
+</bx:output>

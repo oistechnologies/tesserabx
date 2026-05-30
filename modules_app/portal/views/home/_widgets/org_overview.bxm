@@ -1,0 +1,23 @@
+<bx:output>
+<bx:set local.o = prc.orgOverview ?: { "openTickets" : 0, "createdToday" : 0, "slaCompliancePct" : 0 } >
+<div class="row g-3">
+    <div class="col-12 col-md-4 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "primary", metric : encodeForHTML( local.o.openTickets ), label : "Open (org-wide)",
+            icon  : "bi bi-folder2-open"
+        } )#
+    </div>
+    <div class="col-12 col-md-4 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "info", metric : encodeForHTML( local.o.createdToday ), label : "Created today",
+            icon  : "bi bi-calendar-plus"
+        } )#
+    </div>
+    <div class="col-12 col-md-4 d-flex">
+        #view( view = "_partials/small_box", module = "core", args = {
+            color : "success", metric : encodeForHTML( local.o.slaCompliancePct ) & "<small>%</small>",
+            label : "SLA compliance", caption : "first response, last 30 days", icon : "bi bi-speedometer2"
+        } )#
+    </div>
+</div>
+</bx:output>

@@ -35,6 +35,16 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 expect( labels ).notToInclude( "Submit a ticket" );
             } );
 
+            it( "hides Manage members from a contact without the organization-admin role", function(){
+                var labels = variables.nav.listForZone( "portal", "main", contactViewer() ).map( ( i ) => i.label );
+                expect( labels ).notToInclude( "Manage members" );
+            } );
+
+            it( "shows Manage members to an organization-admin contact (requiredRole)", function(){
+                var labels = variables.nav.listForZone( "portal", "main", orgAdminContactViewer() ).map( ( i ) => i.label );
+                expect( labels ).toInclude( "Manage members" );
+            } );
+
             it( "shows auth-gated portal entries to a signed-in contact", function(){
                 var viewer = contactViewer();
                 var items = variables.nav.listForZone( "portal", "main", viewer );
@@ -124,6 +134,9 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
     }
     private struct function contactViewer(){
         return { signedIn : true, userType : "contact", userId : "c-1", roles : [ "contact" ], permissions : [], organizationId : "" };
+    }
+    private struct function orgAdminContactViewer(){
+        return { signedIn : true, userType : "contact", userId : "c-2", roles : [ "contact", "organization-admin" ], permissions : [], organizationId : "" };
     }
     private struct function agentAdminViewer(){
         return {

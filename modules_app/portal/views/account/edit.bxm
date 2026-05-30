@@ -1,0 +1,105 @@
+<bx:output>
+<bx:set local.f = prc.formData >
+
+<div class="row g-3">
+    <div class="col-12 col-lg-8">
+
+        <!--- Profile fields (self-editable) --->
+        <div class="card card-primary card-outline mb-4">
+            <div class="card-header"><div class="card-title">Edit profile</div></div>
+            <form method="post" action="/account/edit">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="firstName">First name</label>
+                            <input type="text" class="form-control" id="firstName" name="firstName" value="#encodeForHTMLAttribute( local.f.firstName )#">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="lastName">Last name</label>
+                            <input type="text" class="form-control" id="lastName" name="lastName" value="#encodeForHTMLAttribute( local.f.lastName )#">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="jobTitle">Job title</label>
+                            <input type="text" class="form-control" id="jobTitle" name="jobTitle" value="#encodeForHTMLAttribute( local.f.jobTitle )#">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="phone">Phone</label>
+                            <input type="text" class="form-control" id="phone" name="phone" value="#encodeForHTMLAttribute( local.f.phone )#">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="mobilePhone">Mobile</label>
+                            <input type="text" class="form-control" id="mobilePhone" name="mobilePhone" value="#encodeForHTMLAttribute( local.f.mobilePhone )#">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="timezone">Time zone</label>
+                            <input type="text" class="form-control" id="timezone" name="timezone" value="#encodeForHTMLAttribute( local.f.timezone )#" placeholder="America/New_York">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="locale">Locale</label>
+                            <input type="text" class="form-control" id="locale" name="locale" value="#encodeForHTMLAttribute( local.f.locale )#" placeholder="en_US">
+                        </div>
+                    </div>
+                    <div class="callout callout-info mb-0 mt-3">
+                        <i class="bi bi-info-circle me-1"></i> Your email, organization, and office assignment are managed for you and can't be changed here.
+                    </div>
+                </div>
+                <div class="card-footer d-flex gap-2">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Save changes</button>
+                    <a href="/account" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+
+        <!--- Profile picture (multipart, outside any wire) --->
+        <div class="card card-secondary card-outline mb-4">
+            <div class="card-header"><div class="card-title">Profile picture</div></div>
+            <div class="card-body d-flex flex-wrap align-items-center gap-4">
+                <div>#view( view = "_partials/avatar", module = "core", args = { agent : prc.avatar, size : 128, prefix : "contacts" } )#</div>
+                <div class="flex-grow-1" style="min-width:240px;">
+                    <form method="post" action="/account/avatar" enctype="multipart/form-data" class="mb-2">
+                        <label class="form-label small text-body-secondary">Upload a new picture</label>
+                        <div class="input-group input-group-sm">
+                            <input type="file" name="profileImage" class="form-control" accept="image/jpeg,image/png,image/gif,image/webp" required>
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-cloud-upload me-1"></i> Upload</button>
+                        </div>
+                        <div class="form-text small">JPG, PNG, GIF, or WebP. Cropped square; resized to 32/64/128/256 px.</div>
+                    </form>
+                    <bx:if ( prc.hasAvatar ?: false )>
+                        <form method="post" action="/account/avatar/clear" onsubmit="return confirm('Remove your profile picture?');">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i> Clear picture</button>
+                        </form>
+                    </bx:if>
+                </div>
+            </div>
+        </div>
+
+        <!--- Change password --->
+        <div class="card card-warning card-outline">
+            <div class="card-header"><div class="card-title">Change password</div></div>
+            <form method="post" action="/account/password">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="form-label" for="currentPassword">Current password</label>
+                            <input type="password" class="form-control" id="currentPassword" name="currentPassword" autocomplete="current-password" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="newPassword">New password</label>
+                            <input type="password" class="form-control" id="newPassword" name="newPassword" autocomplete="new-password" required>
+                            <div class="form-text small">At least 8 characters.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="newPasswordConfirm">Confirm new password</label>
+                            <input type="password" class="form-control" id="newPasswordConfirm" name="newPasswordConfirm" autocomplete="new-password" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-warning"><i class="bi bi-key me-1"></i> Update password</button>
+                </div>
+            </form>
+        </div>
+
+    </div>
+</div>
+</bx:output>

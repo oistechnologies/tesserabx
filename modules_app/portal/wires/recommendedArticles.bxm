@@ -1,0 +1,28 @@
+<bx:output>
+<bx:script> local.recs = suggestions(); </bx:script>
+<!--- A CBWire view must always have a single root element, so the
+      outer div is unconditional. The AI-off invariant is enforced by
+      the dashboard's isAiEnabled() gate (the wire is not emitted at
+      all when AI is off); here we additionally render no visible
+      content unless AI is on AND there are suggestions. --->
+<div>
+<bx:if aiOn() && arrayLen( local.recs )>
+    <div class="card mb-3 border-info-subtle">
+        <div class="card-header bg-info-subtle">
+            <i class="bi bi-stars text-info me-1"></i> <strong>Recommended for you</strong>
+            <span class="text-body-secondary small ms-1">based on your open tickets</span>
+        </div>
+        <div class="list-group list-group-flush">
+            <bx:loop array="#local.recs#" item="local.r">
+                <a href="#encodeForHTMLAttribute( local.r.url )#" class="list-group-item list-group-item-action">
+                    <div class="fw-semibold">#encodeForHTML( local.r.title )#</div>
+                    <bx:if len( local.r.snippet )>
+                        <div class="small text-body-secondary">#encodeForHTML( local.r.snippet )#</div>
+                    </bx:if>
+                </a>
+            </bx:loop>
+        </div>
+    </div>
+</bx:if>
+</div>
+</bx:output>

@@ -1,0 +1,121 @@
+/**
+ * MembersHandlerSpec: authorization + last-admin coverage for the
+ * Organization-Admin member-management handler.
+ *
+ * The handler resolves the acting contact from cbauth, so each spec
+ * logs a Contact in (the combined UserService resolves contacts) and
+ * dispatches with renderResults=true (the OrganizationsHandlerSpec
+ * pattern). Assertions are on side effects: a blocked or cross-org
+ * request must leave the target unchanged; the last-admin guard must
+ * refuse a demotion that would empty the org of admins.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.contacts = getController().getWireBox().getInstance( "ContactsService@contacts" );
+        variables.auth     = getController().getWireBox().getInstance( "AuthenticationService@cbauth" );
+    }
+
+    function run(){
+        describe( "portal Members handler", function(){
+
+            it( "blocks a non-admin from updating a member", function(){
+                var org      = makeOrg();
+                var target   = provision( org.getId(), "Original" );
+                var nonAdmin = provision( org.getId(), "Plain" );
+
+                updateAs( nonAdmin, target.getId(), { firstName : "Hacked", organizationAdmin : "false", isActive : "true" } );
+
+                expect( variables.contacts.getContactById( target.getId() ).getFirstName() ).toBe( "Original" );
+                cleanup( [ target, nonAdmin ], [ org ] );
+            } );
+
+            it( "rejects editing a member from another organization", function(){
+                var orgA   = makeOrg();
+                var orgB   = makeOrg();
+                var admin  = makeAdmin( orgA.getId() );
+                var foreign = provision( orgB.getId(), "KeepB" );
+
+                updateAs( admin, foreign.getId(), { firstName : "Stolen", organizationAdmin : "false", isActive : "true" } );
+
+                expect( variables.contacts.getContactById( foreign.getId() ).getFirstName() ).toBe( "KeepB" );
+                cleanup( [ admin, foreign ], [ orgA, orgB ] );
+            } );
+
+            it( "refuses to demote the organization's last admin", function(){
+                var org   = makeOrg();
+                var admin = makeAdmin( org.getId() );   // sole admin
+
+                updateAs( admin, admin.getId(), { firstName : "Solo", organizationAdmin : "false", isActive : "true" } );
+
+                expect( variables.contacts.getContactById( admin.getId() ).isOrganizationAdmin() ).toBeTrue();
+                cleanup( [ admin ], [ org ] );
+            } );
+
+            it( "promotes a member, edits the profile + office, then demotes once a second admin exists", function(){
+                var org    = makeOrg();
+                var admin  = makeAdmin( org.getId() );
+                var member = provision( org.getId(), "Mem" );
+
+                updateAs( admin, member.getId(), { firstName : "Promoted", organizationAdmin : "true", isActive : "true" } );
+                var promoted = variables.contacts.getContactById( member.getId() );
+                expect( promoted.getFirstName() ).toBe( "Promoted" );
+                expect( promoted.isOrganizationAdmin() ).toBeTrue();
+
+                // Two admins now exist, so demoting the member is allowed.
+                updateAs( admin, member.getId(), { firstName : "Promoted", organizationAdmin : "false", isActive : "true" } );
+                expect( variables.contacts.getContactById( member.getId() ).isOrganizationAdmin() ).toBeFalse();
+
+                cleanup( [ admin, member ], [ org ] );
+            } );
+
+        } );
+    }
+
+    // ---------------- helpers ----------------
+
+    private void function updateAs( required any actor, required string memberId, required struct fields ){
+        variables.auth.login( arguments.actor );
+        var rc = getRequestContext();
+        rc.setValue( "id", arguments.memberId );
+        for ( var k in arguments.fields ) rc.setValue( k, arguments.fields[ k ] );
+        execute( event : "portal:Members.update", renderResults : true );
+        variables.auth.logout();
+    }
+
+    private any function makeOrg(){
+        return variables.contacts.createOrganization( {
+            name : "Members Spec Org " & createUUID(),
+            slug : "mem-" & lCase( replace( createUUID(), "-", "", "all" ) )
+        } );
+    }
+
+    private any function provision( required string organizationId, string firstName = "Member" ){
+        return variables.contacts.provisionContact( {
+            organizationId : arguments.organizationId,
+            email          : "mem-" & createUUID() & "@example.com",
+            password       : "spec-password",
+            firstName      : arguments.firstName
+        } );
+    }
+
+    private any function makeAdmin( required string organizationId ){
+        var c = provision( arguments.organizationId, "Admin" );
+        variables.contacts.assignRole( c.getId(), "organization-admin" );
+        return variables.contacts.getContactById( c.getId() );
+    }
+
+    private void function cleanup( required array contactsList, required array orgs ){
+        for ( var c in arguments.contactsList ) {
+            queryExecute( "DELETE FROM contact_roles WHERE contact_id = :id", { id : c.getId() } );
+            queryExecute( "DELETE FROM contacts WHERE id = :id", { id : c.getId() } );
+        }
+        for ( var o in arguments.orgs ) {
+            queryExecute( "DELETE FROM audit_events WHERE organization_id = :id", { id : o.getId() } );
+            queryExecute( "DELETE FROM organizations WHERE id = :id", { id : o.getId() } );
+        }
+    }
+
+}

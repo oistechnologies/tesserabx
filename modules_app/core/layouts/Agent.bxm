@@ -167,19 +167,37 @@
                             local.meDisplayName = trim( local.meAgentMini.firstName & " " & local.meAgentMini.lastName );
                             if ( !len( local.meDisplayName ) ) local.meDisplayName = local.meAgentMini.email;
                         </bx:script>
-                        <li class="nav-item dropdown">
-                            <a class="nav-link p-1" href="##" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Account menu">
+                        <!--- AdminLTE user-menu: avatar toggle + card dropdown. --->
+                        <li class="nav-item dropdown user-menu">
+                            <a href="##" class="nav-link dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" aria-expanded="false" title="Account menu">
                                 #view( view = "_partials/avatar", module = "core", args = { agent : local.meAgentMini, size : 32 } )#
+                                <span class="d-none d-md-inline">#encodeForHTML( local.meDisplayName )#</span>
                             </a>
-                            <ul class="dropdown-menu dropdown-menu-end">
-                                <li class="dropdown-item-text">
-                                    <div class="fw-semibold">#encodeForHTML( local.meDisplayName )#</div>
-                                    <div class="small text-body-secondary">#encodeForHTML( local.meAgentMini.email )#</div>
+                            <ul class="dropdown-menu dropdown-menu-lg dropdown-menu-end">
+                                <li class="user-header text-bg-primary">
+                                    #view( view = "_partials/avatar", module = "core", args = { agent : local.meAgentMini, size : 64 } )#
+                                    <p>
+                                        #encodeForHTML( local.meDisplayName )#
+                                        <small><bx:if local.meDisplayName neq local.meAgentMini.email>#encodeForHTML( local.meAgentMini.email )#<bx:else>Agent</bx:if></small>
+                                    </p>
                                 </li>
-                                <li><hr class="dropdown-divider"></li>
-                                <bx:loop array="#tbxNavigation( "agent", "account" )#" item="item">
-                                    <li><a class="dropdown-item" href="#encodeForHTMLAttribute( item.route )#"><bx:if len( item.icon )><i class="#encodeForHTMLAttribute( item.icon )#"></i> </bx:if>#encodeForHTML( item.label )#</a></li>
-                                </bx:loop>
+                                <li class="user-body">
+                                    <div class="row">
+                                        <!--- Account-menu registry entries (My Account, Sign out,
+                                              plus any add-on contributions), as full-width rows
+                                              above the quick-link shortcuts. --->
+                                        <bx:loop array="#tbxNavigation( "agent", "account" )#" item="local.acct">
+                                            <div class="col-12 text-start border-bottom">
+                                                <a href="#encodeForHTMLAttribute( local.acct.route )#" class="d-block py-1">
+                                                    <bx:if len( local.acct.icon )><i class="#encodeForHTMLAttribute( local.acct.icon )#"></i> </bx:if>#encodeForHTML( local.acct.label )#
+                                                </a>
+                                            </div>
+                                        </bx:loop>
+                                        <div class="col-4 text-center"><a href="/agent">Dashboard</a></div>
+                                        <div class="col-4 text-center"><a href="/agent/tickets">Tickets</a></div>
+                                        <div class="col-4 text-center"><a href="/agent/notifications">Alerts</a></div>
+                                    </div>
+                                </li>
                             </ul>
                         </li>
                     <bx:else>

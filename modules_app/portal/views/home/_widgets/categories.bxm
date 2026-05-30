@@ -1,0 +1,22 @@
+<bx:output>
+<div class="card h-100 w-100">
+    <div class="card-header bg-body-secondary">
+        <i class="bi bi-collection text-primary me-1"></i> <strong>Browse by category</strong>
+    </div>
+    <bx:if arrayLen( prc.kbCategories ?: [] )>
+        <div class="card-body">
+            <div class="row g-2">
+                <bx:loop array="#prc.kbCategories#" item="local.c">
+                    <div class="col-12 col-sm-6">
+                        <a href="/kb/category/#encodeForHTMLAttribute( local.c.getSlug() )#" class="btn btn-outline-secondary w-100 text-start text-truncate">
+                            <i class="bi bi-folder me-1"></i> #encodeForHTML( local.c.getName() )#
+                        </a>
+                    </div>
+                </bx:loop>
+            </div>
+        </div>
+    <bx:else>
+        <div class="card-body text-body-secondary">No categories yet. <a href="/kb">Browse all articles</a>.</div>
+    </bx:if>
+</div>
+</bx:output>

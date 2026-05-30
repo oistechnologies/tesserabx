@@ -1,0 +1,80 @@
+/**
+ * RecommendedArticles: AI-powered "based on your open tickets" article
+ * suggestions for the signed-in client dashboard.
+ *
+ * This is an AI-specific surface, so it obeys the AI-off invariant: it
+ * renders nothing whenever AI is disabled. The guard is enforced three
+ * ways for defense in depth:
+ *   1. The dashboard view only emits this wire inside isAiEnabled().
+ *   2. aiOn() (capability.isEnabled) gates suggestions() to [].
+ *   3. The view renders nothing when suggestions() is empty.
+ *
+ * It is also contact-only: an anonymous viewer (no signed-in contact)
+ * gets no suggestions, so it never appears on the guest landing.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="kbSuggestionService" inject="KbSuggestionService@ai";
+    property name="ticketsService"       inject="TicketsService@tickets";
+    property name="capability"           inject="AiCapability@ai";
+    property name="auth"                 inject="AuthenticationService@cbauth";
+
+    variables.LIMIT = 4;
+
+    data = {};
+
+    // ---------- per-render helpers ----------
+
+    function aiOn(){ return capability.isEnabled(); }
+
+    /**
+     * Up to LIMIT KB articles semantically related to the subjects of
+     * the contact's open tickets. Returns [] when AI is off, when no
+     * contact is signed in, or when there is no open-ticket context to
+     * search on. Each row is { title, url, snippet }.
+     */
+    function suggestions(){
+        if ( !capability.isEnabled() ) return [];
+        var me = currentContact();
+        if ( isNull( me ) ) return [];
+
+        var text = openTicketContext( me );
+        if ( !len( trim( text ) ) ) return [];
+
+        var hits = kbSuggestionService.suggestForText(
+            text        : text,
+            viewer      : { "kind" : "contact", "contactOrganizationId" : me.getOrganizationId() ?: "" },
+            limit       : variables.LIMIT,
+            useSemantic : true
+        );
+        var out = [];
+        for ( var h in hits ) {
+            out.append( {
+                "title"   : h.title   ?: "",
+                "url"     : "/kb/" & ( h.slug ?: "" ),
+                "snippet" : h.snippet ?: ""
+            } );
+        }
+        return out;
+    }
+
+    // ---------- internals ----------
+
+    private string function openTicketContext( required any me ){
+        var subjects = [];
+        for ( var t in ticketsService.listTicketsForContact( arguments.me.getId() ) ) {
+            var st = t.getStatus() ?: "";
+            if ( st == "resolved" || st == "closed" ) continue;
+            subjects.append( t.getSubject() ?: "" );
+            if ( subjects.len() >= 5 ) break;
+        }
+        return arrayToList( subjects, " " );
+    }
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        return isNull( u ) ? javaCast( "null", "" ) : u;
+    }
+
+}

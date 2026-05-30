@@ -40,9 +40,10 @@ class singleton=true {
     // Allowed source extensions (case-insensitive).
     variables.ALLOWED_EXTENSIONS = [ "jpg", "jpeg", "png", "gif", "webp" ];
 
-    // CBFS path components are computed deterministically from the
-    // agent id so the avatar handler can reconstruct them without a
-    // database hit.
+    // Default CBFS path prefix. Callers pass an explicit `prefix`
+    // ("agents" or "contacts") so the same pipeline serves both
+    // account families; the path stays deterministic from the id so a
+    // serving layer can reconstruct it without a database hit.
     variables.PREFIX = "agents";
 
     // -------------------------------------------------------------
@@ -104,18 +105,19 @@ class singleton=true {
     public struct function processProfileImage(
         required string agentId,
         required string sourcePath,
-        required string contentType
+        required string contentType,
+        string prefix = variables.PREFIX
     ){
         var ext   = lCase( listLast( arguments.sourcePath, "." ) );
         // Avatars target the PUBLIC disk so AvatarHelper can build
         // direct browser URLs (no /agent/avatars/... round-trip).
         var disk  = cbfs.get( variables.publicDiskName );
-        var base  = variables.PREFIX & "/" & arguments.agentId & "/profile";
+        var base  = arguments.prefix & "/" & arguments.agentId & "/profile";
         var paths = { original : base & "/original." & ext };
 
         // Wipe any previously cached thumbnails so an upload with a
         // different aspect ratio doesn't leave stale crops behind.
-        deleteProfileImages( arguments.agentId );
+        deleteProfileImages( arguments.agentId, arguments.prefix );
 
         // Persist the original first; the resize path consumes the
         // same bytes from memory rather than re-reading from CBFS.
@@ -168,9 +170,9 @@ class singleton=true {
      * Silent on failure: if a file is already gone, the next caller
      * shouldn't fail.
      */
-    public void function deleteProfileImages( required string agentId ){
+    public void function deleteProfileImages( required string agentId, string prefix = variables.PREFIX ){
         var disk = cbfs.get( variables.publicDiskName );
-        var base = variables.PREFIX & "/" & arguments.agentId & "/profile";
+        var base = arguments.prefix & "/" & arguments.agentId & "/profile";
 
         // Try every known extension for the original; thumbnails are
         // always .jpg.

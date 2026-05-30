@@ -1,45 +1,173 @@
 /**
  * portal:Account handler — the signed-in Contact's self-service
- * surface. Phase 9.1 ships only the two-factor authentication
- * controls; future hardening can layer email change / password
- * change / profile fields on top.
+ * surface: a read-only profile view (`/account`), a self-edit page
+ * (`/account/edit`) for the fields a client may change themselves, a
+ * profile-image upload (reusing the agent avatar pipeline under the
+ * "contacts" prefix), and a password change. Two-factor controls stay
+ * on the existing `/mfa/*` + `/account/mfa/disable` paths.
  *
- * Authentication is enforced upstream by PortalSecurityRules
- * (the secureList covers /account/*).
+ * Office assignment, the organization-admin role, VIP, and active
+ * status are NOT self-editable; an Organization Admin manages those
+ * for members via portal:Members.
+ *
+ * Authentication is enforced upstream by PortalSecurityRules (the
+ * secureList covers /account/*).
  */
 class {
 
-    property name="auth"       inject="AuthenticationService@cbauth";
-    property name="messagebox" inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="imageProcessing" inject="ImageProcessingService@core";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+
+    // Contact avatars live under this prefix on the public CBFS disk.
+    variables.AVATAR_PREFIX = "contacts";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Portal", module = "core" );
-        prc.currentContact = currentContact();
+        var me = currentContact();
+        if ( !isNull( me ) ) {
+            prc.currentContact  = me;
+            // tbxViewer()/nav registries key off oCurrentContact.
+            prc.oCurrentContact = me;
+        }
     }
 
     function index( event, rc, prc ){
-        var me = prc.currentContact;
-        if ( isNull( me ) ) {
-            relocate( uri = "/login" );
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
+
+        prc.pageTitle  = "My account";
+        prc.isOrgAdmin = me.isOrganizationAdmin();
+        prc.mfaEnabled = !!me.getMfaEnabled();
+        loadProfileContext( prc, me );
+        event.setView( "account/index" );
+    }
+
+    function edit( event, rc, prc ){
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
+
+        prc.pageTitle = "Edit account";
+        prc.hasAvatar = hasAvatar( me );
+        prc.avatar    = avatarStruct( me );
+        prc.uploadVersion = avatarVersion( me );
+        loadProfileContext( prc, me );
+        prc.formData = {
+            firstName   : me.getFirstName()   ?: "",
+            lastName    : me.getLastName()    ?: "",
+            phone       : me.getPhone()       ?: "",
+            mobilePhone : me.getMobilePhone() ?: "",
+            jobTitle    : me.getJobTitle()    ?: "",
+            timezone    : me.getTimezone()    ?: "",
+            locale      : me.getLocale()      ?: ""
+        };
+        event.setView( "account/edit" );
+    }
+
+    function update( event, rc, prc ){
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
+
+        // Only the self-editable fields; office / role / VIP / active
+        // are intentionally absent so a hand-crafted POST cannot set them.
+        contactsService.updateContactProfile( me.getId(), {
+            firstName   : trim( rc.firstName   ?: "" ),
+            lastName    : trim( rc.lastName    ?: "" ),
+            phone       : trim( rc.phone       ?: "" ),
+            mobilePhone : trim( rc.mobilePhone ?: "" ),
+            jobTitle    : trim( rc.jobTitle    ?: "" ),
+            timezone    : trim( rc.timezone    ?: "" ),
+            locale      : trim( rc.locale      ?: "" )
+        } );
+        messagebox.info( "Your profile has been updated." );
+        relocate( uri = "/account" );
+    }
+
+    /**
+     * Multipart avatar upload. Mirrors agent:Account.uploadAvatar but
+     * targets the signed-in contact under the "contacts" prefix.
+     */
+    function uploadAvatar( event, rc, prc ){
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
+
+        if ( !structKeyExists( form, "profileImage" ) || !len( form.profileImage ?: "" ) ) {
+            messagebox.error( "Pick a file before submitting." );
+            relocate( uri = "/account/edit" );
             return;
         }
-        prc.pageTitle  = "My account";
-        prc.mfaEnabled = !!me.getMfaEnabled();
-        event.setView( "account/index" );
+        try {
+            var dest = getTempDirectory() & "/contact-avatar-" & createUUID() & "/";
+            directoryCreate( dest );
+            var result = fileUpload(
+                destination  = dest,
+                fileField    = "profileImage",
+                accept       = "image/jpeg,image/png,image/gif,image/webp",
+                nameConflict = "makeUnique"
+            );
+            var srcPath     = dest & result.serverFile;
+            var contentType = result.contentType & "/" & result.contentSubType;
+
+            var v = imageProcessing.validateUpload( srcPath, contentType );
+            if ( !v.ok ) {
+                messagebox.error( v.error );
+                directoryDelete( dest, true );
+                relocate( uri = "/account/edit" );
+                return;
+            }
+
+            var paths = imageProcessing.processProfileImage( me.getId(), srcPath, contentType, variables.AVATAR_PREFIX );
+            contactsService.setProfileImage( me.getId(), paths.original, contentType );
+            directoryDelete( dest, true );
+            messagebox.info( "Profile picture updated." );
+        } catch ( any e ) {
+            messagebox.error( "Profile picture upload failed: " & e.message );
+        }
+        relocate( uri = "/account/edit" );
+    }
+
+    function clearAvatar( event, rc, prc ){
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
+        try {
+            imageProcessing.deleteProfileImages( me.getId(), variables.AVATAR_PREFIX );
+            contactsService.clearProfileImage( me.getId() );
+            messagebox.info( "Profile picture removed." );
+        } catch ( any e ) {
+            messagebox.error( "Could not remove the picture: " & e.message );
+        }
+        relocate( uri = "/account/edit" );
+    }
+
+    function changePassword( event, rc, prc ){
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
+
+        param rc.currentPassword    = "";
+        param rc.newPassword        = "";
+        param rc.newPasswordConfirm = "";
+
+        if ( rc.newPassword != rc.newPasswordConfirm ) {
+            messagebox.error( "The new password and its confirmation do not match." );
+            relocate( uri = "/account/edit" );
+            return;
+        }
+        var result = contactsService.changePassword( me.getId(), rc.currentPassword, rc.newPassword );
+        if ( result.ok ) {
+            messagebox.info( "Your password has been changed." );
+        } else {
+            messagebox.error( result.error );
+        }
+        relocate( uri = "/account/edit" );
     }
 
     /**
      * Disable two-factor authentication on the signed-in contact.
-     * Clears the secret + flag + enrollment-time + recovery-code
-     * blob so a future re-enable starts from scratch with a fresh
-     * QR code. The contact stays signed in.
      */
     function disableMfa( event, rc, prc ){
-        var me = prc.currentContact;
-        if ( isNull( me ) ) {
-            relocate( uri = "/login" );
-            return;
-        }
+        var me = prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) { relocate( uri = "/login" ); return; }
         if ( !me.getMfaEnabled() ) {
             messagebox.info( "Two-factor authentication is not currently enabled." );
             relocate( uri = "/account" );
@@ -60,6 +188,49 @@ class {
     }
 
     // ---------- internals ----------
+
+    /**
+     * Load the organization + office display context (read-only on the
+     * client surface) plus avatar render data onto prc.
+     */
+    private void function loadProfileContext( required struct prc, required any me ){
+        arguments.prc.hasAvatar     = hasAvatar( arguments.me );
+        arguments.prc.avatar        = avatarStruct( arguments.me );
+        arguments.prc.uploadVersion = avatarVersion( arguments.me );
+
+        var org = contactsService.getOrganizationById( arguments.me.getOrganizationId() ?: "" );
+        arguments.prc.orgName = isNull( org ) ? "" : ( org.getName() ?: "" );
+        arguments.prc.orgTier = isNull( org ) ? "" : ( org.getTier() ?: "" );
+
+        arguments.prc.officeName = "";
+        var officeId = arguments.me.getOfficeId() ?: "";
+        if ( len( officeId ) ) {
+            var office = contactsService.getOfficeById( officeId );
+            if ( !isNull( office ) ) arguments.prc.officeName = office.getName() ?: "";
+        }
+    }
+
+    private boolean function hasAvatar( required any me ){
+        return len( arguments.me.getProfileImageOriginalPath() ?: "" ) > 0;
+    }
+
+    private numeric function avatarVersion( required any me ){
+        if ( hasAvatar( arguments.me ) && !isNull( arguments.me.getProfileImageUploadedAt() ) ) {
+            try { return arguments.me.getProfileImageUploadedAt().getTime(); } catch ( any e ) {}
+        }
+        return 0;
+    }
+
+    private struct function avatarStruct( required any me ){
+        return {
+            id         : arguments.me.getId(),
+            firstName  : arguments.me.getFirstName() ?: "",
+            lastName   : arguments.me.getLastName()  ?: "",
+            email      : arguments.me.getEmail()     ?: "",
+            hasAvatar  : hasAvatar( arguments.me ),
+            uploadedAt : arguments.me.getProfileImageUploadedAt()
+        };
+    }
 
     private any function currentContact(){
         if ( !auth.isLoggedIn() ) return javaCast( "null", "" );

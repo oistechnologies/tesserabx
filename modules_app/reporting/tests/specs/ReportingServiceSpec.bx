@@ -67,6 +67,44 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 }
             } );
 
+            it( "overviewTilesForOrganization returns the tile shape and zeros for an empty org", function(){
+                var t = variables.svc.overviewTilesForOrganization( "" );
+                expect( t ).toHaveKey( "openTickets" );
+                expect( t ).toHaveKey( "slaCompliancePct" );
+                expect( t.openTickets ).toBe( 0 );
+                expect( t.slaTotal ).toBe( 0 );
+
+                // An org with no tickets still returns the numeric shape.
+                var unknown = variables.svc.overviewTilesForOrganization( createUUID() );
+                expect( isNumeric( unknown.openTickets ) ).toBeTrue();
+                expect( unknown.openTickets ).toBe( 0 );
+            } );
+
+            it( "ticketCountsByColumnForOrganization rejects non-whitelisted columns and empty orgs", function(){
+                expect( variables.svc.ticketCountsByColumnForOrganization( createUUID(), "subject" ).len() ).toBe( 0 );
+                expect( variables.svc.ticketCountsByColumnForOrganization( "", "status" ).len() ).toBe( 0 );
+            } );
+
+            it( "ticketVolumePerDayForOrganization returns one zero-filled entry per day", function(){
+                var rows = variables.svc.ticketVolumePerDayForOrganization( createUUID(), 7 );
+                expect( rows ).toBeArray();
+                expect( rows.len() ).toBe( 7 );
+                expect( rows[ 1 ] ).toHaveKey( "day" );
+                expect( rows[ 1 ] ).toHaveKey( "count" );
+                expect( rows[ 1 ].count ).toBe( 0 );
+
+                // Empty org short-circuits to an empty array.
+                expect( variables.svc.ticketVolumePerDayForOrganization( "", 7 ).len() ).toBe( 0 );
+            } );
+
+            it( "contactOpenLoadForOrganization is org-shaped and empty-safe", function(){
+                expect( variables.svc.contactOpenLoadForOrganization( "" ).len() ).toBe( 0 );
+                var rows = variables.svc.contactOpenLoadForOrganization( createUUID() );
+                expect( rows ).toBeArray();
+                // Unknown org -> no contacts -> empty array.
+                expect( rows.len() ).toBe( 0 );
+            } );
+
             it( "exportTicketsCsv produces a header row with the documented column set", function(){
                 var csv  = variables.svc.exportTicketsCsv( {} );
                 var head = listFirst( csv, char( 10 ) );

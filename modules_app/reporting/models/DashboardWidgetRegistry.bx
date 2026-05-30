@@ -22,7 +22,7 @@
  *       sortWeight         : 500,
  *       requiredPermission : "exampleJira.view",
  *       capabilityFlag     : "",
- *       zone               : "reports"                    // "reports" | "agent-home"
+ *       zone               : "reports"                    // "reports" | "agent-home" | "portal-home" | "portal-guest"
  *   }
  *
  * Add-ons declare in manifest:
@@ -33,10 +33,18 @@
  *
  * --- Zones ---
  *
- * Each widget belongs to a `zone`. Two zones are supported:
- *   - "reports"    : the org-wide aggregate dashboard at /agent/reports (default
- *                    when no zone is declared, for backwards compatibility).
- *   - "agent-home" : the agent's personal landing page at /agent.
+ * Each widget belongs to a `zone`. Four zones are supported:
+ *   - "reports"      : the org-wide aggregate dashboard at /agent/reports
+ *                      (default when no zone is declared, for backwards
+ *                      compatibility).
+ *   - "agent-home"   : the agent's personal landing page at /agent.
+ *   - "portal-home"  : the signed-in client (Contact) dashboard at / .
+ *   - "portal-guest" : the anonymous client landing at / .
+ *
+ * The portal zones surface to client-side viewers (Contacts and
+ * anonymous visitors), so add-on widgets there must not rely on
+ * agent-only permissions. As elsewhere, `requiresAi : true` keeps an
+ * AI widget hidden when AI is disabled.
  *
  * Add-ons opt into a surface by declaring the zone on each widget entry.
  * Callers ask for one zone at a time via `listForViewer( viewer, zone )`.

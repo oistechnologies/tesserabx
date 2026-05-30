@@ -1,0 +1,30 @@
+<bx:output>
+<!--- Add-on contributed dashboard widgets for a portal zone. Mirrors
+      the agent /reports loop: the DashboardWidgetRegistry sorts by
+      sortWeight, applies the viewer's permission + capability +
+      requiresAi gates, and wraps each widget in its declared grid
+      size. A widget that declares a dataProvider has its data
+      pre-fetched into prc.widgetData; widgets that read prc.* directly
+      leave dataProvider blank.
+
+      args.zone is "portal-home" (signed-in dashboard) or
+      "portal-guest" (anonymous landing). --->
+<bx:set local.zone = args.zone ?: "portal-home" >
+<bx:set local.addonWidgets = tbxDashboardWidgets( local.zone ) >
+<bx:if arrayLen( local.addonWidgets )>
+    <div class="row g-3 align-items-stretch mt-1">
+        <bx:loop array="#local.addonWidgets#" item="local.w">
+            <bx:if len( local.w.partial )>
+                <bx:if len( local.w.dataProvider ?: "" ) && len( local.w.dataMethod ?: "" )>
+                    <bx:set prc.widgetData = application.wirebox
+                        .getInstance( "DashboardWidgetRegistry@reporting" )
+                        .fetchWidgetData( local.w ) >
+                </bx:if>
+                <div class="#encodeForHTMLAttribute( local.w.defaultGridSize )#">
+                    #view( view = local.w.partial, module = local.w.module )#
+                </div>
+            </bx:if>
+        </bx:loop>
+    </div>
+</bx:if>
+</bx:output>

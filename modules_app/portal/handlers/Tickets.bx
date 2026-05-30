@@ -29,11 +29,39 @@ class {
             relocate( uri = "/login" );
             return;
         }
-        prc.pageTitle = "My tickets";
+        prc.pageTitle  = "My tickets";
         prc.isOrgAdmin = me.isOrganizationAdmin();
-        prc.tickets = prc.isOrgAdmin
-            ? ticketsService.listTicketsForOrganization( me.getOrganizationId() )
-            : ticketsService.listTicketsForContact( me.getId() );
+        prc.statuses   = ticketsService.listStatuses();
+
+        param rc.status = "";
+        param rc.q      = "";
+        param rc.page   = "1";
+        prc.statusFilter = trim( rc.status ?: "" );
+        prc.q            = trim( rc.q ?: "" );
+
+        // Build the viewer-scoped filter once, then reuse for the count
+        // (pagination) and the page slice. Org admins see the whole org;
+        // regular contacts see only the tickets they raised (requester
+        // scope also excludes accountless tickets).
+        var filter = { "search" : prc.q };
+        if ( len( prc.statusFilter ) ) filter[ "status" ] = prc.statusFilter;
+        if ( prc.isOrgAdmin ) {
+            filter[ "organizationId" ] = me.getOrganizationId();
+        } else {
+            filter[ "requesterContactIds" ] = [ me.getId() ];
+        }
+
+        var pageSize     = 15;
+        prc.total        = ticketsService.countTickets( argumentCollection = filter );
+        prc.pageSize     = pageSize;
+        prc.totalPages   = max( 1, ceiling( prc.total / pageSize ) );
+        prc.page         = min( max( 1, int( val( rc.page ) ) ), prc.totalPages );
+
+        var listArgs    = duplicate( filter );
+        listArgs.limit  = pageSize;
+        listArgs.offset = ( prc.page - 1 ) * pageSize;
+        prc.tickets     = ticketsService.listTickets( argumentCollection = listArgs );
+
         event.setView( "tickets/index" );
     }
 

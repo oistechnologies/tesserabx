@@ -102,6 +102,32 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
             } );
 
+            describe( "prefix parameter (agents vs contacts)", function(){
+
+                it( "defaults to the agents prefix", function(){
+                    var id   = "spec-pfx-" & replace( createUUID(), "-", "", "all" );
+                    var path = writeTempJpeg( 100, 100 );
+                    var paths = variables.svc.processProfileImage( id, path, "image/jpeg" );
+                    expect( paths.original ).toInclude( "agents/" & id & "/profile" );
+                    variables.svc.deleteProfileImages( id );
+                    fileDelete( path );
+                } );
+
+                it( "writes + deletes under the contacts prefix when requested", function(){
+                    var id   = "spec-pfx-" & replace( createUUID(), "-", "", "all" );
+                    var path = writeTempJpeg( 100, 100 );
+                    var paths = variables.svc.processProfileImage( id, path, "image/jpeg", "contacts" );
+                    expect( paths.original ).toInclude( "contacts/" & id & "/profile" );
+
+                    var disk = avatarDisk();
+                    expect( disk.exists( paths[ "128" ] ) ).toBeTrue();
+                    variables.svc.deleteProfileImages( id, "contacts" );
+                    expect( disk.exists( paths[ "128" ] ) ).toBeFalse();
+                    fileDelete( path );
+                } );
+
+            } );
+
             describe( "deleteProfileImages", function(){
 
                 it( "removes every file under the agent's profile prefix", function(){

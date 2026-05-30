@@ -43,6 +43,21 @@ class singleton=true {
         return workflowService.isValidTransition( arguments.from, arguments.to );
     }
 
+    /**
+     * Strip inline-image placeholder tokens (e.g. "[image: <cid>]" that
+     * mail clients leave when an email body is only an inline image)
+     * and trim. An inbound email with no real text collapses to "" so
+     * the conversation UI can render a "no message text" note instead
+     * of a dangling placeholder. Used by the channels inbound parser on
+     * the way in, and by TicketMessage.displayBody() on the way out so
+     * tokens already stored on older messages are cleaned at display
+     * time too.
+     */
+    public string function cleanInlineImagePlaceholders( required string body ){
+        if ( !len( arguments.body ?: "" ) ) return "";
+        return trim( reReplaceNoCase( arguments.body, "\[image:[^\]]*\]", "", "all" ) );
+    }
+
     // ---------- Reads ----------
 
     /**
@@ -114,6 +129,43 @@ class singleton=true {
             q = q.orderBy( "created_at", "desc" );
         }
         return q.limit( arguments.limit ).offset( arguments.offset ).get();
+    }
+
+    /**
+     * Count tickets matching the same filters listTickets accepts
+     * (status, priority, organizationId, search, requesterContactIds,
+     * accountlessOnly). Backs portal/agent pagination: the caller pairs
+     * this with listTickets( limit, offset ) to compute total pages.
+     * Bypasses the tenant scope like listTickets; callers scope by
+     * organizationId / requesterContactIds.
+     */
+    public numeric function countTickets(
+        any status,
+        string priority,
+        string organizationId,
+        string search,
+        boolean accountlessOnly = false,
+        array requesterContactIds
+    ){
+        var q = wirebox.getInstance( "Ticket@tickets" ).withoutGlobalScope();
+        if ( structKeyExists( arguments, "requesterContactIds" ) ) {
+            if ( !arrayLen( arguments.requesterContactIds ) ) return 0;
+            q = q.whereIn( "requester_contact_id", arguments.requesterContactIds );
+        }
+        if ( structKeyExists( arguments, "status" ) ) {
+            var statusArr = isArray( arguments.status )
+                ? arguments.status
+                : listToArray( toString( arguments.status ?: "" ), "," );
+            statusArr = statusArr.filter( s => len( trim( toString( s ) ) ) );
+            if ( statusArr.len() ) q = q.whereIn( "status", statusArr );
+        }
+        if ( structKeyExists( arguments, "priority" ) && len( arguments.priority ?: "" ) ) q = q.where( "priority", arguments.priority );
+        if ( structKeyExists( arguments, "organizationId" ) && len( arguments.organizationId ?: "" ) ) q = q.where( "organization_id", arguments.organizationId );
+        if ( arguments.accountlessOnly ) q = q.whereNull( "organization_id" );
+        if ( structKeyExists( arguments, "search" ) && len( trim( arguments.search ?: "" ) ) ) {
+            q = q.whereRaw( "search_vector @@ plainto_tsquery( 'english', ? )", [ trim( arguments.search ) ] );
+        }
+        return q.count();
     }
 
     /**
@@ -1794,6 +1846,125 @@ class singleton=true {
             binds
         );
         return rows.recordCount ? rows.c[ 1 ] : 0;
+    }
+
+    // =====================================================================
+    // Client / portal dashboard reads.
+    //
+    // Stat tiles for the client portal home (`/`). The contact variant
+    // scopes to a single requester's own org-backed tickets; the
+    // organization variant scopes to every ticket in one organization
+    // (the Organization Admin view). Both return the same zero-safe
+    // shape so the widget partial can render a tile per key without
+    // null guards.
+    //
+    // "awaitingReply" maps to the workflow `paused` category — the
+    // project convention that a paused status (pending / on-hold) means
+    // "waiting on the client to reply". The portal copy frames it as
+    // "awaiting your reply".
+    // =====================================================================
+
+    /**
+     * Ticket stat tiles for one Contact's portal dashboard. Scoped to
+     * tickets the contact raised (requester_contact_id) that belong to
+     * an organization (accountless rows excluded). Returns the zero
+     * shape for an empty / unknown contact id.
+     *
+     * Shape: { open, awaitingReply, resolvedRecent, total }.
+     */
+    public struct function ticketStatsForContact(
+        required string contactId,
+        numeric resolvedWindowDays = 30
+    ){
+        if ( !len( arguments.contactId ) ) return zeroTicketStatShape();
+        return ticketStats( "requester_contact_id", arguments.contactId, arguments.resolvedWindowDays );
+    }
+
+    /**
+     * Ticket stat tiles across one organization, for the Organization
+     * Admin view of the portal dashboard. Scoped by organization_id, so
+     * accountless tickets are naturally excluded. Returns the zero
+     * shape for an empty / unknown organization id.
+     *
+     * Shape: { open, awaitingReply, resolvedRecent, total }.
+     */
+    public struct function ticketStatsForOrganization(
+        required string organizationId,
+        numeric resolvedWindowDays = 30
+    ){
+        if ( !len( arguments.organizationId ) ) return zeroTicketStatShape();
+        return ticketStats( "organization_id", arguments.organizationId, arguments.resolvedWindowDays );
+    }
+
+    // ---------- client-dashboard internals ----------
+
+    private struct function zeroTicketStatShape(){
+        return { "open" : 0, "awaitingReply" : 0, "resolvedRecent" : 0, "total" : 0 };
+    }
+
+    /**
+     * Single-query stat aggregation. scopeColumn is supplied only by
+     * our own public methods and whitelisted defensively. Counts are
+     * computed with FILTER clauses against the workflow category key
+     * sets so admin-edited status catalogs stay in sync automatically.
+     */
+    private struct function ticketStats(
+        required string scopeColumn,
+        required string scopeValue,
+        numeric resolvedWindowDays = 30
+    ){
+        var allowedCols = [ "requester_contact_id", "organization_id" ];
+        if ( !arrayContains( allowedCols, arguments.scopeColumn ) ) return zeroTicketStatShape();
+
+        var binds = { scope : arguments.scopeValue, d : int( arguments.resolvedWindowDays ) };
+        var openClause     = statusInClause( workflowService.keysByCategory( [ "open" ] ),     "o", binds );
+        var pausedClause   = statusInClause( workflowService.keysByCategory( [ "paused" ] ),   "p", binds );
+        var resolvedClause = statusInClause( workflowService.keysByCategory( [ "resolved" ] ), "r", binds );
+
+        // Contact scope: restrict to org-backed rows so an accountless
+        // ticket that shares an edge-case requester id never counts.
+        // Organization scope already excludes accountless (its column
+        // is the scope), so no extra guard is needed there.
+        var scopeWhere = arguments.scopeColumn & " = :scope";
+        if ( arguments.scopeColumn == "requester_contact_id" ) {
+            scopeWhere &= " AND organization_id IS NOT NULL";
+        }
+
+        var sql = "
+            SELECT
+                COUNT(*) FILTER ( WHERE " & openClause & " )   AS open_count,
+                COUNT(*) FILTER ( WHERE " & pausedClause & " )  AS awaiting_count,
+                COUNT(*) FILTER ( WHERE " & resolvedClause
+                    & " AND resolved_at >= NOW() - make_interval( days => cast( :d as integer ) ) ) AS resolved_recent,
+                COUNT(*)                                        AS total_count
+            FROM   tickets
+            WHERE  " & scopeWhere;
+        var rows = queryExecute( sql, binds );
+        return {
+            "open"           : rows.recordCount ? rows.open_count[ 1 ]      : 0,
+            "awaitingReply"  : rows.recordCount ? rows.awaiting_count[ 1 ]  : 0,
+            "resolvedRecent" : rows.recordCount ? rows.resolved_recent[ 1 ] : 0,
+            "total"          : rows.recordCount ? rows.total_count[ 1 ]     : 0
+        };
+    }
+
+    /**
+     * Build a `status IN ( :p1, :p2, ... )` fragment, registering one
+     * uniquely-named bind per key in the supplied binds struct. An
+     * empty key list yields `FALSE` so the surrounding FILTER counts
+     * nothing rather than every row.
+     */
+    private string function statusInClause( required array keys, required string prefix, required struct binds ){
+        if ( !arrayLen( arguments.keys ) ) return "FALSE";
+        var placeholders = [];
+        var i = 0;
+        for ( var k in arguments.keys ) {
+            i++;
+            var name = arguments.prefix & i;
+            placeholders.append( ":" & name );
+            arguments.binds[ name ] = k;
+        }
+        return "status IN ( " & placeholders.toList( "," ) & " )";
     }
 
 }

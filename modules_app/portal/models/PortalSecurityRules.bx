@@ -15,7 +15,7 @@ class singleton=true {
                 // gated by an in-handler isLoggedIn check rather
                 // than the firewall so the flash message on direct
                 // hits is friendlier than a bare redirect.
-                whitelist   : "^(login|logout|register|kb|health|widget|api|mfa|help)(/|$)|^$",
+                whitelist   : "^(login|logout|register|set-password|kb|health|widget|api|mfa|help)(/|$)|^$",
                 secureList  : "^(account|tickets|profile)(/|$)",
                 match       : "url",
                 roles       : "",

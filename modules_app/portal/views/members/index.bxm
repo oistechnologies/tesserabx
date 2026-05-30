@@ -1,0 +1,73 @@
+<bx:output>
+<div class="row">
+    <div class="col-12 col-lg-10">
+        <div class="card card-primary card-outline">
+            <div class="card-header d-flex align-items-center">
+                <div class="card-title"><i class="bi bi-people me-1"></i> Organization members</div>
+                <a href="/account/members/new" class="btn btn-sm btn-primary ms-auto"><i class="bi bi-person-plus me-1"></i> Invite member</a>
+            </div>
+            <bx:if arrayLen( prc.members ?: [] )>
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Member</th>
+                                <th>Office</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <bx:loop array="#prc.members#" item="local.m">
+                                <bx:set local.avatar = {
+                                    id         : local.m.getId(),
+                                    firstName  : local.m.getFirstName() ?: "",
+                                    lastName   : local.m.getLastName()  ?: "",
+                                    email      : local.m.getEmail()     ?: "",
+                                    hasAvatar  : len( local.m.getProfileImageOriginalPath() ?: "" ) > 0,
+                                    uploadedAt : local.m.getProfileImageUploadedAt()
+                                } >
+                                <bx:set local.name = trim( ( local.m.getFirstName() ?: "" ) & " " & ( local.m.getLastName() ?: "" ) ) >
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            #view( view = "_partials/avatar", module = "core", args = { agent : local.avatar, size : 32, prefix : "contacts" } )#
+                                            <div>
+                                                <div class="fw-semibold">#encodeForHTML( len( local.name ) ? local.name : local.m.getEmail() )#<bx:if local.m.getId() eq ( prc.myId ?: "" )> <span class="badge text-bg-light text-black">You</span></bx:if></div>
+                                                <div class="small text-body-secondary">#encodeForHTML( local.m.getEmail() )#</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>#encodeForHTML( prc.officesById[ local.m.getOfficeId() ?: "" ] ?: "—" )#</td>
+                                    <td>
+                                        <bx:if local.m.isOrganizationAdmin()>
+                                            <span class="badge text-bg-info">Org Admin</span>
+                                        <bx:else>
+                                            <span class="badge text-bg-light text-black">Member</span>
+                                        </bx:if>
+                                    </td>
+                                    <td>
+                                        <bx:if local.m.getIsActive()>
+                                            <span class="badge text-bg-success">Active</span>
+                                        <bx:else>
+                                            <span class="badge text-bg-secondary">Inactive</span>
+                                        </bx:if>
+                                    </td>
+                                    <td class="text-end">
+                                        <a href="/account/members/#encodeForHTMLAttribute( local.m.getId() )#/edit" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-pencil"></i> Edit
+                                        </a>
+                                    </td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            <bx:else>
+                <div class="card-body text-body-secondary">No members found.</div>
+            </bx:if>
+        </div>
+    </div>
+</div>
+</bx:output>

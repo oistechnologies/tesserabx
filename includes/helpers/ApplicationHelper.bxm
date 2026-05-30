@@ -107,6 +107,24 @@ struct function tbxViewer(){
 }
 
 /**
+ * Map the current viewer (tbxViewer) into the knowledgebase viewer
+ * shape that KnowledgebaseService.canRead / listVisibleArticles /
+ * topArticlesForViewer / searchByEmbedding expect:
+ *   { kind : "agent" | "contact" | "anonymous", contactOrganizationId : "" }
+ *
+ * Anonymous visitors get kind "anonymous"; a signed-in Contact gets
+ * "contact" plus their organization scope. Shared by the portal Home,
+ * Kb, and the client-dashboard CBWire components so the mapping lives
+ * in one place.
+ */
+struct function tbxKbViewer(){
+    var v = tbxViewer();
+    if ( v.userType == "agent" )   return { kind : "agent",     contactOrganizationId : "" };
+    if ( v.userType == "contact" ) return { kind : "contact",   contactOrganizationId : v.organizationId ?: "" };
+    return { kind : "anonymous", contactOrganizationId : "" };
+}
+
+/**
  * Return the navigation entries the current viewer is allowed to
  * see in one (surface, menu) zone. Use in a layout:
  *
@@ -201,10 +219,12 @@ array function tbxTicketPanels( required string position ){
 
 /**
  * Dashboard widgets the viewer is allowed to see in a given zone.
- * Two zones are supported:
- *   - "reports"    (default): the org-wide aggregate dashboard at
- *                  /agent/reports.
- *   - "agent-home": the agent's personal landing page at /agent.
+ * Four zones are supported:
+ *   - "reports"      (default): the org-wide aggregate dashboard at
+ *                    /agent/reports.
+ *   - "agent-home"   : the agent's personal landing page at /agent.
+ *   - "portal-home"  : the signed-in client (Contact) dashboard at / .
+ *   - "portal-guest" : the anonymous client landing at / .
  *
  * Loop the result in the relevant view to render add-on widgets after
  * (or alongside) the inline core widgets.

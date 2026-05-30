@@ -41,6 +41,14 @@ class extends="coldbox.system.web.routing.Router" {
         } );
         route( "/logout" ).to( "portal:Session.delete" );
 
+        // Public set-password landing for a member invite link.
+        // Whitelisted in PortalSecurityRules (the contact has no usable
+        // password yet, so it must be reachable while signed out).
+        route( "/set-password" ).withHandler( "portal:Session" ).toAction( {
+            "GET"  : "setPasswordForm",
+            "POST" : "setPasswordSubmit"
+        } );
+
         // MFA enrollment + recovery-codes display. Enrollment lives
         // behind /account so the contact has to be already logged
         // in (with password) to start it.
@@ -50,8 +58,27 @@ class extends="coldbox.system.web.routing.Router" {
         } );
         route( "/mfa/recovery-codes" ).to( "portal:Mfa.recoveryCodes" );
 
-        // My Account: self-service for signed-in contacts.
+        // My Account: self-service for signed-in contacts. Most-
+        // specific patterns first; /account is the read-only view.
+        route( "/account/edit" ).withHandler( "portal:Account" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "/account/avatar/clear" ).withVerbs( "POST" ).to( "portal:Account.clearAvatar" );
+        route( "/account/avatar" ).withVerbs( "POST" ).to( "portal:Account.uploadAvatar" );
+        route( "/account/password" ).withVerbs( "POST" ).to( "portal:Account.changePassword" );
         route( "/account/mfa/disable" ).withVerbs( "POST" ).to( "portal:Account.disableMfa" );
+
+        // Organization-Admin member management (gated in-handler by
+        // isOrganizationAdmin + same-org checks). Most-specific first.
+        route( "/account/members/new" ).withVerbs( "GET" ).to( "portal:Members.new" );
+        route( "/account/members/:id/edit" ).withVerbs( "GET" ).to( "portal:Members.edit" );
+        route( "/account/members/:id" ).withVerbs( "POST" ).to( "portal:Members.update" );
+        route( "/account/members" ).withHandler( "portal:Members" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
+
         route( "/account" ).to( "portal:Account.index" );
 
         // Client-side tickets workspace. Most-specific patterns first.
@@ -81,6 +108,16 @@ class extends="coldbox.system.web.routing.Router" {
             "GET"  : "index",
             "POST" : "create"
         } );
+
+        // Public knowledge base. Whitelisted in PortalSecurityRules so
+        // anonymous visitors can read; KnowledgebaseService enforces
+        // per-article visibility (public for everyone, organization-
+        // scoped for the matching contact's org, internal never here).
+        // Declare the specific routes before the single-segment :slug
+        // catch so /kb/category/<slug> is not swallowed by /kb/:slug.
+        route( "/kb/category/:slug" ).withVerbs( "GET" ).to( "portal:Kb.category" );
+        route( "/kb/:slug" ).withVerbs( "GET" ).to( "portal:Kb.show" );
+        route( "/kb" ).withVerbs( "GET" ).to( "portal:Kb.index" );
 
         // Email-footer unsubscribe link. Token-authenticated; the
         // POST resubscribe sits behind the same token so a single

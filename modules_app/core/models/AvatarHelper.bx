@@ -59,7 +59,7 @@ class singleton=true {
      *   - hasAvatar   (boolean)
      *   - uploadedAt  (timestamp or null/empty when hasAvatar is false)
      */
-    public string function renderFromStruct( required struct agent, numeric size = 32 ){
+    public string function renderFromStruct( required struct agent, numeric size = 32, string prefix = "agents" ){
         var resolvedSize = resolveSize( arguments.size );
 
         if ( arguments.agent.hasAvatar ?: false ) {
@@ -75,12 +75,12 @@ class singleton=true {
                 }
             }
             // The thumbnail layout on the public disk is
-            //   agents/<agentId>/profile/<size>.jpg
+            //   <prefix>/<id>/profile/<size>.jpg
             // produced by ImageProcessingService.processProfileImage.
-            // publicBaseUrl is the configured URL prefix; in dev it
-            // resolves to "/public-files".
+            // prefix is "agents" or "contacts"; publicBaseUrl is the
+            // configured URL prefix, "/public-files" in dev.
             var src = variables.publicBaseUrl
-                & "/agents/" & encodeForURL( arguments.agent.id )
+                & "/" & arguments.prefix & "/" & encodeForURL( arguments.agent.id )
                 & "/profile/" & resolvedSize & ".jpg" & bust;
             var alt = initialsOf( arguments.agent );
             return "<img src=""" & src & """ width=""" & resolvedSize & """ height=""" & resolvedSize

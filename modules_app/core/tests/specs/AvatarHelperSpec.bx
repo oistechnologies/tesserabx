@@ -1,0 +1,50 @@
+/**
+ * AvatarHelperSpec: the render-from-struct logic, covering the prefix
+ * parameter (agents vs contacts) and the initials fallback. Pure
+ * rendering — no DB or disk.
+ */
+class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
+
+    function beforeAll(){
+        super.beforeAll();
+        super.setup();
+        variables.helper = getController().getWireBox().getInstance( "AvatarHelper@core" );
+    }
+
+    function run(){
+        describe( "AvatarHelper.renderFromStruct", function(){
+
+            it( "renders an img under the agents prefix by default", function(){
+                var html = variables.helper.renderFromStruct(
+                    { id : "abc", firstName : "A", lastName : "B", email : "", hasAvatar : true, uploadedAt : now() },
+                    128
+                );
+                expect( html ).toInclude( "<img" );
+                expect( html ).toInclude( "/agents/abc/profile/128.jpg" );
+            } );
+
+            it( "renders under the contacts prefix when passed", function(){
+                var html = variables.helper.renderFromStruct(
+                    { id : "xyz", firstName : "C", lastName : "D", email : "", hasAvatar : true, uploadedAt : now() },
+                    64,
+                    "contacts"
+                );
+                expect( html ).toInclude( "<img" );
+                expect( html ).toInclude( "/contacts/xyz/profile/64.jpg" );
+            } );
+
+            it( "falls back to an initials badge when there is no avatar", function(){
+                var html = variables.helper.renderFromStruct(
+                    { id : "n1", firstName : "Jane", lastName : "Doe", email : "", hasAvatar : false },
+                    32,
+                    "contacts"
+                );
+                expect( html ).notToInclude( "<img" );
+                expect( html ).toInclude( "avatar-initials" );
+                expect( html ).toInclude( "JD" );
+            } );
+
+        } );
+    }
+
+}

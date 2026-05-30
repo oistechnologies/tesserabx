@@ -171,6 +171,7 @@ class singleton=true {
             requiresAuth       : !!( arguments.raw.requiresAuth      ?: false ),
             requiresAnonymous  : !!( arguments.raw.requiresAnonymous ?: false ),
             requiredPermission : arguments.raw.requiredPermission    ?: "",
+            requiredRole       : arguments.raw.requiredRole          ?: "",
             capabilityFlag     : arguments.raw.capabilityFlag        ?: "",
             requiresAi         : !!( arguments.raw.requiresAi        ?: false ),
             source             : arguments.source
@@ -208,6 +209,12 @@ class singleton=true {
         if ( arguments.entry.requiresAi && !isCapabilityOn( "aiEnabled" ) ) return false;
         if ( len( arguments.entry.requiredPermission ) ) {
             if ( !arrayContains( arguments.viewer.permissions ?: [], arguments.entry.requiredPermission ) ) return false;
+        }
+        // requiredRole gates on the viewer's role set (tbxViewer().roles).
+        // Used for client-side roles like "organization-admin" that the
+        // permission model does not resolve into viewer.permissions.
+        if ( len( arguments.entry.requiredRole ) ) {
+            if ( !arrayContains( arguments.viewer.roles ?: [], arguments.entry.requiredRole ) ) return false;
         }
         return true;
     }
@@ -278,13 +285,15 @@ class singleton=true {
         register( { id : "portal.main.knowledgebase",     surface : "portal", menu : "main",    label : "Knowledge Base",   route : "/kb",          icon : "bi bi-book",        sortWeight : 20  } );
         register( { id : "portal.main.tickets",           surface : "portal", menu : "main",    label : "My tickets",       route : "/tickets",     icon : "bi bi-card-list",   sortWeight : 30, requiresAuth : true } );
         register( { id : "portal.main.new-ticket",        surface : "portal", menu : "main",    label : "Submit a ticket",  route : "/tickets/new", icon : "bi bi-plus-square", sortWeight : 40, requiresAuth : true } );
-        register( { id : "portal.main.account",           surface : "portal", menu : "main",    label : "My account",       route : "/account",     icon : "bi bi-person-gear", sortWeight : 50, requiresAuth : true } );
+        register( { id : "portal.main.account",           surface : "portal", menu : "main",    label : "My account",       route : "/account",         icon : "bi bi-person-gear", sortWeight : 50, requiresAuth : true } );
+        register( { id : "portal.main.members",           surface : "portal", menu : "main",    label : "Manage members",   route : "/account/members", icon : "bi bi-people",      sortWeight : 60, requiresAuth : true, requiredRole : "organization-admin" } );
 
         // Portal account dropdown. The actual logged-in email goes in
         // a header line that the layout renders directly; this
         // registry covers the navigable items.
-        register( { id : "portal.account.profile",        surface : "portal", menu : "account", label : "My account",       route : "/account",     icon : "bi bi-person",          sortWeight : 10,  requiresAuth      : true } );
-        register( { id : "portal.account.signout",        surface : "portal", menu : "account", label : "Sign out",         route : "/logout",      icon : "bi bi-box-arrow-right", sortWeight : 90,  requiresAuth      : true } );
+        register( { id : "portal.account.profile",        surface : "portal", menu : "account", label : "My account",       route : "/account",         icon : "bi bi-person",          sortWeight : 10,  requiresAuth      : true } );
+        register( { id : "portal.account.members",        surface : "portal", menu : "account", label : "Manage members",   route : "/account/members", icon : "bi bi-people",          sortWeight : 20,  requiresAuth      : true, requiredRole : "organization-admin" } );
+        register( { id : "portal.account.signout",        surface : "portal", menu : "account", label : "Sign out",         route : "/logout",          icon : "bi bi-box-arrow-right", sortWeight : 90,  requiresAuth      : true } );
         register( { id : "portal.account.signin",         surface : "portal", menu : "account", label : "Sign in",          route : "/login",       icon : "bi bi-box-arrow-in-right", sortWeight : 10, requiresAnonymous : true } );
 
         // Agent main menu (left sidebar on /agent).

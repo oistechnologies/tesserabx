@@ -78,84 +78,123 @@
             </bx:if>
         </bx:loop>
 
-        <h3 class="h6 mt-4 mb-2">Conversation
-            <small class="text-body-secondary">(#local.publicCount# public, #local.internalCount# internal)</small>
-        </h3>
-
-        <bx:if !arrayLen( prc.messages )>
-            <p class="text-body-secondary">No messages yet.</p>
-        </bx:if>
-        <bx:loop array="#prc.messages#" item="local.m">
-            <div class="card mb-2 #local.m.getIsInternal() ? 'border-warning' : ''#">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between small text-body-secondary mb-2">
-                        <span>
-                            <bx:if local.m.isFromAgent()>
-                                <bx:set local.msgAgent = prc.agentDirectory[ local.m.getAuthorAgentId() ?: "" ] ?: {} >
-                                <bx:if structKeyExists( local.msgAgent, "id" )>
-                                    <bx:set local.msgAgent.hasAvatar = len( local.msgAgent.profileImageOriginalPath ?: "" ) gt 0 >
-                                    <bx:set local.msgAgent.uploadedAt = local.msgAgent.profileImageUploadedAt >
-                                    <span class="d-inline-flex align-items-center gap-2">
-                                        #view( view = "_partials/avatar", module = "core", args = { agent : local.msgAgent, size : 20 } )#
-                                        <strong>#encodeForHTML( trim( local.msgAgent.firstName & " " & local.msgAgent.lastName ) )#</strong>
-                                    </span>
-                                <bx:else>
-                                    <strong>Agent</strong> #encodeForHTML( local.m.getAuthorAgentId() ?: "" )#
-                                </bx:if>
-                            <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
-                                <bx:set local.msgContact = prc.contactDirectory[ local.m.getAuthorContactId() ?: "" ] ?: {} >
-                                <bx:if structKeyExists( local.msgContact, "id" )>
-                                    <bx:set local.contactDisplayName = trim( ( local.msgContact.firstName ?: "" ) & " " & ( local.msgContact.lastName ?: "" ) ) >
-                                    <bx:if !len( local.contactDisplayName )>
-                                        <bx:set local.contactDisplayName = local.msgContact.email >
-                                    </bx:if>
-                                    <strong>#encodeForHTML( local.contactDisplayName )#</strong><bx:if len( local.msgContact.email ?: "" ) and local.contactDisplayName neq local.msgContact.email>
-                                        <span class="text-body-secondary">&lt;#encodeForHTML( local.msgContact.email )#&gt;</span>
-                                    </bx:if>
-                                <bx:else>
-                                    <strong>Contact</strong> #encodeForHTML( local.m.getAuthorContactId() )#
-                                </bx:if>
-                            <bx:else>
-                                <strong>Email</strong> #encodeForHTML( local.m.getAuthorEmail() ?: "" )#
-                            </bx:if>
-                            <bx:if local.m.getIsInternal()>
-                                &middot; <span class="badge text-bg-warning">Internal</span>
-                            </bx:if>
-                        </span>
-                        <span>#encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
-                    </div>
-                    <div style="white-space:pre-wrap">#encodeForHTML( local.m.getBody() )#</div>
-                    <bx:set local.msgAttachments = prc.attachmentsByMessageId[ local.m.getId() ] ?: [] >
-                    <bx:if arrayLen( local.msgAttachments )>
-                        <div class="mt-2 d-flex flex-wrap gap-2">
-                            <bx:loop array="#local.msgAttachments#" item="local.att">
-                                <bx:if local.att.isDeleted()>
-                                    <span class="text-body-secondary small fst-italic">
-                                        <i class="bi bi-trash"></i> #encodeForHTML( local.att.getOriginalFilename() )# (deleted)
-                                    </span>
-                                <bx:elseif local.att.isImage() && local.att.getThumbnailStatus() == "ready">
-                                    <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
-                                       target="_blank"
-                                       title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )# (#local.att.displaySize()#)">
-                                        <img src="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#/thumbnail"
-                                             alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
-                                             style="max-height:80px; border-radius:4px; border:1px solid var(--bs-border-color);">
-                                    </a>
-                                <bx:else>
-                                    <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
-                                       target="_blank"
-                                       class="btn btn-sm btn-outline-secondary">
-                                        <i class="bi bi-paperclip"></i>
-                                        #encodeForHTML( local.att.getOriginalFilename() )#
-                                        <small class="text-body-secondary">#local.att.displaySize()#</small>
-                                    </a>
-                                </bx:if>
-                            </bx:loop>
-                        </div>
-                    </bx:if>
+        <div class="card mb-3 mt-4">
+            <div class="card-header">
+                <div class="card-title">
+                    <i class="bi bi-chat-left-text me-1"></i> Conversation
+                    <small class="text-body-secondary fw-normal">(#local.publicCount# public, #local.internalCount# internal)</small>
                 </div>
             </div>
-        </bx:loop>
+            <div class="card-body">
+                <bx:if !arrayLen( prc.messages )>
+                    <p class="text-body-secondary mb-0">No messages yet.</p>
+                <bx:else>
+                    <!--- AdminLTE timeline: messages grouped by day; the icon +
+                          top-border color marks the author (internal notes are
+                          warning-colored, agent replies primary, contacts
+                          success, raw email info, system secondary). --->
+                    <div class="timeline">
+                        <bx:set local.lastDate = "" >
+                        <bx:loop array="#prc.messages#" item="local.m">
+                            <bx:set local.msgDate = dateFormat( local.m.getCreatedAt(), "mmm d, yyyy" ) >
+                            <bx:if local.msgDate neq local.lastDate>
+                                <div class="time-label"><span class="text-bg-primary">#encodeForHTML( local.msgDate )#</span></div>
+                                <bx:set local.lastDate = local.msgDate >
+                            </bx:if>
+                            <bx:script>
+                                if ( local.m.getIsInternal() ) {
+                                    local.tlIcon = "bi-lock-fill"; local.tlBg = "text-bg-warning"; local.tlBorder = "border-warning";
+                                } else if ( local.m.isFromAgent() ) {
+                                    local.tlIcon = "bi-headset"; local.tlBg = "text-bg-primary"; local.tlBorder = "border-primary";
+                                } else if ( len( local.m.getAuthorContactId() ?: "" ) ) {
+                                    local.tlIcon = "bi-person-fill"; local.tlBg = "text-bg-success"; local.tlBorder = "border-success";
+                                } else if ( len( local.m.getAuthorEmail() ?: "" ) ) {
+                                    local.tlIcon = "bi-envelope"; local.tlBg = "text-bg-info"; local.tlBorder = "border-info";
+                                } else {
+                                    local.tlIcon = "bi-gear-fill"; local.tlBg = "text-bg-secondary"; local.tlBorder = "border-secondary";
+                                }
+                            </bx:script>
+                            <div>
+                                <i class="timeline-icon bi #local.tlIcon# #local.tlBg#"></i>
+                                <div class="timeline-item border-top border-3 #local.tlBorder#">
+                                    <span class="time"><i class="bi bi-clock-fill"></i> #encodeForHTML( dateTimeFormat( local.m.getCreatedAt(), "HH:nn" ) )#</span>
+                                    <h3 class="timeline-header">
+                                        <bx:if local.m.isFromAgent()>
+                                            <bx:set local.msgAgent = prc.agentDirectory[ local.m.getAuthorAgentId() ?: "" ] ?: {} >
+                                            <bx:if structKeyExists( local.msgAgent, "id" )>
+                                                <bx:set local.msgAgent.hasAvatar = len( local.msgAgent.profileImageOriginalPath ?: "" ) gt 0 >
+                                                <bx:set local.msgAgent.uploadedAt = local.msgAgent.profileImageUploadedAt >
+                                                <span class="d-inline-flex align-items-center gap-2">
+                                                    #view( view = "_partials/avatar", module = "core", args = { agent : local.msgAgent, size : 20 } )#
+                                                    <strong>#encodeForHTML( trim( local.msgAgent.firstName & " " & local.msgAgent.lastName ) )#</strong>
+                                                </span>
+                                            <bx:else>
+                                                <strong>Agent</strong> #encodeForHTML( local.m.getAuthorAgentId() ?: "" )#
+                                            </bx:if>
+                                        <bx:elseif len( local.m.getAuthorContactId() ?: "" )>
+                                            <bx:set local.msgContact = prc.contactDirectory[ local.m.getAuthorContactId() ?: "" ] ?: {} >
+                                            <bx:if structKeyExists( local.msgContact, "id" )>
+                                                <bx:set local.contactDisplayName = trim( ( local.msgContact.firstName ?: "" ) & " " & ( local.msgContact.lastName ?: "" ) ) >
+                                                <bx:if !len( local.contactDisplayName )>
+                                                    <bx:set local.contactDisplayName = local.msgContact.email >
+                                                </bx:if>
+                                                <strong>#encodeForHTML( local.contactDisplayName )#</strong><bx:if len( local.msgContact.email ?: "" ) and local.contactDisplayName neq local.msgContact.email>
+                                                    <span class="text-body-secondary">&lt;#encodeForHTML( local.msgContact.email )#&gt;</span>
+                                                </bx:if>
+                                            <bx:else>
+                                                <strong>Contact</strong> #encodeForHTML( local.m.getAuthorContactId() )#
+                                            </bx:if>
+                                        <bx:else>
+                                            <strong>Email</strong> #encodeForHTML( local.m.getAuthorEmail() ?: "" )#
+                                        </bx:if>
+                                        <bx:if local.m.getIsInternal()>
+                                            &middot; <span class="badge text-bg-warning">Internal</span>
+                                        </bx:if>
+                                    </h3>
+                                    <div class="timeline-body">
+                                        <bx:set local.bodyText = local.m.displayBody() >
+                                        <bx:if len( local.bodyText )>
+                                            <div style="white-space:pre-wrap">#encodeForHTML( local.bodyText )#</div>
+                                        <bx:else>
+                                            <div class="text-body-secondary fst-italic">(no message text)</div>
+                                        </bx:if>
+                                        <bx:set local.msgAttachments = prc.attachmentsByMessageId[ local.m.getId() ] ?: [] >
+                                        <bx:if arrayLen( local.msgAttachments )>
+                                            <div class="mt-2 d-flex flex-wrap gap-2">
+                                                <bx:loop array="#local.msgAttachments#" item="local.att">
+                                                    <bx:if local.att.isDeleted()>
+                                                        <span class="text-body-secondary small fst-italic">
+                                                            <i class="bi bi-trash"></i> #encodeForHTML( local.att.getOriginalFilename() )# (deleted)
+                                                        </span>
+                                                    <bx:elseif local.att.isImage() && local.att.getThumbnailStatus() == "ready">
+                                                        <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
+                                                           target="_blank"
+                                                           title="#encodeForHTMLAttribute( local.att.getOriginalFilename() )# (#local.att.displaySize()#)">
+                                                            <img src="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#/thumbnail"
+                                                                 alt="#encodeForHTMLAttribute( local.att.getOriginalFilename() )#"
+                                                                 style="max-height:80px; border-radius:4px; border:1px solid var(--bs-border-color);">
+                                                        </a>
+                                                    <bx:else>
+                                                        <a href="/agent/attachments/#encodeForHTMLAttribute( local.att.getId() )#"
+                                                           target="_blank"
+                                                           class="btn btn-sm btn-outline-secondary">
+                                                            <i class="bi bi-paperclip"></i>
+                                                            #encodeForHTML( local.att.getOriginalFilename() )#
+                                                            <small class="text-body-secondary">#local.att.displaySize()#</small>
+                                                        </a>
+                                                    </bx:if>
+                                                </bx:loop>
+                                            </div>
+                                        </bx:if>
+                                    </div>
+                                </div>
+                            </div>
+                        </bx:loop>
+                        <div><i class="timeline-icon bi bi-check2-circle text-bg-secondary"></i></div>
+                    </div>
+                </bx:if>
+            </div>
+        </div>
 
         <div class="card mt-3">
             <div class="card-header">Reply</div>

@@ -38,15 +38,59 @@
                         </a>
                     </li>
                     <bx:if local.signedIn>
-                        <li class="nav-item"><span class="nav-link text-body-secondary">#encodeForHTML( local.auth.getUser().getEmail() )#</span></li>
-                    </bx:if>
-                    <bx:loop array="#tbxNavigation( "portal", "account" )#" item="item">
-                        <li class="nav-item">
-                            <a href="#encodeForHTMLAttribute( item.route )#" class="nav-link">
-                                <bx:if len( item.icon )><i class="#encodeForHTMLAttribute( item.icon )#"></i> </bx:if>#encodeForHTML( item.label )#
+                        <bx:set local.me = local.auth.getUser() >
+                        <bx:set local.avatar = {
+                            id         : local.me.getId(),
+                            firstName  : local.me.getFirstName() ?: "",
+                            lastName   : local.me.getLastName()  ?: "",
+                            email      : local.me.getEmail()     ?: "",
+                            hasAvatar  : len( local.me.getProfileImageOriginalPath() ?: "" ) > 0,
+                            uploadedAt : local.me.getProfileImageUploadedAt()
+                        } >
+                        <bx:set local.displayName = trim( ( local.me.getFirstName() ?: "" ) & " " & ( local.me.getLastName() ?: "" ) ) >
+                        <bx:if !len( local.displayName )><bx:set local.displayName = local.me.getEmail() ></bx:if>
+                        <bx:set local.isOrgAdmin = local.me.isOrganizationAdmin() >
+
+                        <!--- AdminLTE user-menu: avatar toggle + card dropdown. --->
+                        <li class="nav-item dropdown user-menu">
+                            <a href="##" class="nav-link dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" aria-expanded="false">
+                                #view( view = "_partials/avatar", module = "core", args = { agent : local.avatar, size : 32, prefix : "contacts" } )#
+                                <span class="d-none d-md-inline">#encodeForHTML( local.displayName )#</span>
                             </a>
+                            <ul class="dropdown-menu dropdown-menu-lg dropdown-menu-end">
+                                <li class="user-header text-bg-primary">
+                                    #view( view = "_partials/avatar", module = "core", args = { agent : local.avatar, size : 64, prefix : "contacts" } )#
+                                    <p>
+                                        #encodeForHTML( local.displayName )#
+                                        <small>
+                                            <bx:if local.isOrgAdmin>Organization Admin<bx:else>Client</bx:if><bx:if !isNull( local.me.getCreatedAt() )> &middot; since #encodeForHTML( dateFormat( local.me.getCreatedAt(), "mmm yyyy" ) )#</bx:if>
+                                        </small>
+                                    </p>
+                                </li>
+                                <li class="user-body">
+                                    <div class="row">
+                                        <!--- Account-menu registry entries (My account, Manage members
+                                              for org admins, Sign out, plus any add-on contributions),
+                                              as full-width rows above the quick-link shortcuts. --->
+                                        <bx:loop array="#tbxNavigation( "portal", "account" )#" item="local.acct">
+                                            <div class="col-12 text-start border-bottom">
+                                                <a href="#encodeForHTMLAttribute( local.acct.route )#" class="d-block py-1">
+                                                    <bx:if len( local.acct.icon )><i class="#encodeForHTMLAttribute( local.acct.icon )#"></i> </bx:if>#encodeForHTML( local.acct.label )#
+                                                </a>
+                                            </div>
+                                        </bx:loop>
+                                        <div class="col-4 text-center"><a href="/tickets">Tickets</a></div>
+                                        <div class="col-4 text-center"><a href="/tickets/new">New</a></div>
+                                        <div class="col-4 text-center"><a href="/kb">Help</a></div>
+                                    </div>
+                                </li>
+                            </ul>
                         </li>
-                    </bx:loop>
+                    <bx:else>
+                        <li class="nav-item">
+                            <a href="/login" class="nav-link"><i class="bi bi-box-arrow-in-right"></i> Sign in</a>
+                        </li>
+                    </bx:if>
                 </ul>
             </div>
         </nav>

@@ -1,0 +1,36 @@
+<bx:output>
+<bx:script>
+    local.items  = items();
+    local.unread = unread();
+</bx:script>
+<div class="card h-100 w-100" wire:poll.45s>
+    <div class="card-header bg-body-secondary d-flex justify-content-between align-items-center">
+        <span>
+            <i class="bi bi-bell text-primary me-1"></i> <strong>Notifications</strong>
+            <bx:if local.unread gt 0><span class="badge text-bg-danger rounded-pill ms-1">#encodeForHTML( local.unread )#</span></bx:if>
+        </span>
+        <bx:if local.unread gt 0>
+            <button type="button" class="btn btn-sm btn-link text-decoration-none p-0" wire:click="markAllRead">Mark all read</button>
+        </bx:if>
+    </div>
+    <bx:if arrayLen( local.items )>
+        <div class="list-group list-group-flush">
+            <bx:loop array="#local.items#" item="local.n">
+                <div class="list-group-item d-flex justify-content-between align-items-start#local.n.unread ? ' bg-body-tertiary' : ''#">
+                    <a href="#encodeForHTMLAttribute( local.n.url )#" class="flex-grow-1 me-2 text-decoration-none text-truncate">
+                        <div class="#local.n.unread ? 'fw-semibold' : 'text-body-secondary'# text-truncate">#encodeForHTML( local.n.title )#</div>
+                        <div class="small text-body-secondary">#encodeForHTML( local.n.createdAt )#</div>
+                    </a>
+                    <bx:if local.n.unread>
+                        <button type="button" class="btn btn-sm btn-light flex-shrink-0" title="Mark read" wire:click="markRead('#encodeForHTMLAttribute( local.n.id )#')">
+                            <i class="bi bi-check2"></i>
+                        </button>
+                    </bx:if>
+                </div>
+            </bx:loop>
+        </div>
+    <bx:else>
+        <div class="card-body text-body-secondary">You're all caught up.</div>
+    </bx:if>
+</div>
+</bx:output>

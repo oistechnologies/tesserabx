@@ -1,0 +1,14 @@
+<bx:output>
+<!--- Show only when MFA is off. Default true when the flag is absent so
+      we never nag without knowing the real state. --->
+<bx:if !( prc.mfaEnabled ?: true )>
+    <div class="alert alert-info d-flex align-items-center justify-content-between flex-wrap gap-2" role="alert">
+        <div>
+            <i class="bi bi-shield-lock me-1"></i>
+            <strong>Add an extra layer of security.</strong>
+            Protect your account with two-factor authentication.
+        </div>
+        <a href="/mfa/setup" class="btn btn-sm btn-info">Enable two-factor</a>
+    </div>
+</bx:if>
+</bx:output>

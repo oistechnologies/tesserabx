@@ -1,0 +1,235 @@
+/**
+ * portal:Members handler — Organization-Admin member management.
+ *
+ * Lets an Organization Admin manage the OTHER Contact accounts in
+ * their own organization: edit profile fields, assign/change office,
+ * grant/revoke the organization-admin role, and activate/deactivate.
+ * Member invites (new accounts) are added in Phase 4.
+ *
+ * Security: /account/* is behind the portal secureList (auth required);
+ * the portal firewall does not gate the client role, so EVERY action
+ * here enforces isOrganizationAdmin() AND that the target member shares
+ * the admin's organization. A last-admin guard refuses any change that
+ * would leave the organization with zero active admins.
+ *
+ * All data access goes through ContactsService; this handler never
+ * touches a contacts entity's persistence directly.
+ */
+class {
+
+    property name="contactsService" inject="ContactsService@contacts";
+    property name="inviteService"   inject="ContactInviteService@contacts";
+    property name="messagebox"      inject="messagebox@cbmessagebox";
+    property name="auth"            inject="AuthenticationService@cbauth";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Portal", module = "core" );
+        var me = currentContact();
+        if ( !isNull( me ) ) {
+            prc.currentContact  = me;
+            prc.oCurrentContact = me;
+        }
+    }
+
+    function index( event, rc, prc ){
+        var me = requireOrgAdmin( prc );
+        if ( isNull( me ) ) return;
+
+        prc.pageTitle = "Organization members";
+        prc.members   = contactsService.listContactsForOrganization( me.getOrganizationId() );
+
+        // id -> office name, resolved once to avoid an N+1 in the table.
+        prc.officesById = {};
+        for ( var o in contactsService.listOfficesForOrganization( me.getOrganizationId() ) ) {
+            prc.officesById[ o.getId() ] = o.getName();
+        }
+        prc.myId = me.getId();
+        event.setView( "members/index" );
+    }
+
+    function new( event, rc, prc ){
+        var me = requireOrgAdmin( prc );
+        if ( isNull( me ) ) return;
+
+        prc.pageTitle = "Invite member";
+        prc.offices   = contactsService.listOfficesForOrganization( me.getOrganizationId() );
+        prc.formData  = { email : "", firstName : "", lastName : "", officeId : "", makeAdmin : false };
+        event.setView( "members/new" );
+    }
+
+    function create( event, rc, prc ){
+        var me = requireOrgAdmin( prc );
+        if ( isNull( me ) ) return;
+
+        param rc.email     = "";
+        param rc.firstName = "";
+        param rc.lastName  = "";
+        param rc.officeId  = "";
+        param rc.makeAdmin = "false";
+
+        var errors = validateInvite( rc );
+        if ( arrayLen( errors ) ) {
+            messagebox.error( errors.toList( "<br>" ) );
+            prc.pageTitle = "Invite member";
+            prc.offices   = contactsService.listOfficesForOrganization( me.getOrganizationId() );
+            prc.formData  = {
+                email : rc.email, firstName : rc.firstName, lastName : rc.lastName,
+                officeId : rc.officeId, makeAdmin : toBool( rc.makeAdmin )
+            };
+            event.setView( "members/new" );
+            return;
+        }
+
+        try {
+            inviteService.invite( {
+                organizationId     : me.getOrganizationId(),
+                email              : rc.email,
+                firstName          : trim( rc.firstName ),
+                lastName           : trim( rc.lastName ),
+                officeId           : trim( rc.officeId ),
+                makeAdmin          : toBool( rc.makeAdmin ),
+                invitedByContactId : me.getId()
+            } );
+            messagebox.info( "Invitation sent to " & lCase( trim( rc.email ) ) & ". They'll get an email to set their password." );
+            relocate( uri = "/account/members" );
+        } catch ( any e ) {
+            messagebox.error( "Could not send the invitation: " & e.message );
+            relocate( uri = "/account/members/new" );
+        }
+    }
+
+    function edit( event, rc, prc ){
+        var me = requireOrgAdmin( prc );
+        if ( isNull( me ) ) return;
+
+        var member = loadOrgMember( rc.id ?: "", me );
+        if ( isNull( member ) ) return;
+
+        prc.pageTitle  = "Edit member";
+        prc.member     = member;
+        prc.isSelf     = ( member.getId() == me.getId() );
+        prc.memberIsOrgAdmin = member.isOrganizationAdmin();
+        prc.offices    = contactsService.listOfficesForOrganization( me.getOrganizationId() );
+        prc.formData   = {
+            firstName   : member.getFirstName()   ?: "",
+            lastName    : member.getLastName()    ?: "",
+            officeId    : member.getOfficeId()    ?: "",
+            phone       : member.getPhone()       ?: "",
+            mobilePhone : member.getMobilePhone() ?: "",
+            jobTitle    : member.getJobTitle()    ?: "",
+            timezone    : member.getTimezone()    ?: "",
+            locale      : member.getLocale()      ?: ""
+        };
+        event.setView( "members/edit" );
+    }
+
+    function update( event, rc, prc ){
+        var me = requireOrgAdmin( prc );
+        if ( isNull( me ) ) return;
+
+        var member = loadOrgMember( rc.id ?: "", me );
+        if ( isNull( member ) ) return;
+
+        // Unchecked checkboxes do not post, so default both to false.
+        param rc.organizationAdmin = "false";
+        param rc.isActive          = "false";
+        var wantOrgAdmin = toBool( rc.organizationAdmin );
+        var wantActive   = toBool( rc.isActive );
+
+        // Last-admin guard: if this member is currently an ACTIVE admin
+        // and the change would stop them being one, refuse it when they
+        // are the organization's only active admin.
+        var wasActiveAdmin  = ( member.getIsActive() && member.isOrganizationAdmin() );
+        var willBeActiveAdmin = ( wantActive && wantOrgAdmin );
+        if ( wasActiveAdmin && !willBeActiveAdmin && contactsService.countActiveOrgAdmins( me.getOrganizationId() ) <= 1 ) {
+            messagebox.error( "You can't remove the organization's last admin. Promote another active member to admin first." );
+            relocate( uri = "/account/members/" & member.getId() & "/edit" );
+            return;
+        }
+
+        // Profile + office + active. isVip and notes are intentionally
+        // omitted (agent-only); office is org-admin-editable.
+        contactsService.updateContactProfile( member.getId(), {
+            firstName   : trim( rc.firstName   ?: "" ),
+            lastName    : trim( rc.lastName    ?: "" ),
+            officeId    : trim( rc.officeId    ?: "" ),
+            phone       : trim( rc.phone       ?: "" ),
+            mobilePhone : trim( rc.mobilePhone ?: "" ),
+            jobTitle    : trim( rc.jobTitle    ?: "" ),
+            timezone    : trim( rc.timezone    ?: "" ),
+            locale      : trim( rc.locale      ?: "" ),
+            isActive    : wantActive
+        } );
+
+        if ( wantOrgAdmin ) {
+            contactsService.assignRole( contactId : member.getId(), roleKey : "organization-admin" );
+        } else {
+            contactsService.revokeRole( contactId : member.getId(), roleKey : "organization-admin" );
+        }
+
+        messagebox.info( "Member updated." );
+        relocate( uri = "/account/members" );
+    }
+
+    // ---------- internals ----------
+
+    /**
+     * Returns the signed-in Contact when they are an Organization
+     * Admin; otherwise flashes and relocates and returns null so the
+     * caller can `if ( isNull( me ) ) return;`.
+     */
+    private any function requireOrgAdmin( required struct prc ){
+        var me = arguments.prc.currentContact ?: javaCast( "null", "" );
+        if ( isNull( me ) ) {
+            relocate( uri = "/login" );
+            return javaCast( "null", "" );
+        }
+        if ( !me.isOrganizationAdmin() ) {
+            messagebox.warn( "You don't have permission to manage organization members." );
+            relocate( uri = "/account" );
+            return javaCast( "null", "" );
+        }
+        return me;
+    }
+
+    /**
+     * Load a member by id and enforce that they belong to the admin's
+     * organization. Flashes + relocates and returns null on miss or
+     * cross-org access.
+     */
+    private any function loadOrgMember( required string id, required any me ){
+        var member = len( arguments.id ) ? contactsService.getContactById( arguments.id ) : javaCast( "null", "" );
+        if ( isNull( member ) || ( member.getOrganizationId() ?: "" ) != ( arguments.me.getOrganizationId() ?: "" ) ) {
+            messagebox.warn( "That member is not in your organization." );
+            relocate( uri = "/account/members" );
+            return javaCast( "null", "" );
+        }
+        return member;
+    }
+
+    private array function validateInvite( required struct rc ){
+        var errors = [];
+        var email  = trim( arguments.rc.email ?: "" );
+        if ( !len( email ) ) {
+            errors.append( "Email is required." );
+        } else if ( !isValid( "email", email ) ) {
+            errors.append( "Enter a valid email address." );
+        } else if ( !isNull( contactsService.getContactByEmail( email ) ) ) {
+            errors.append( "A member with that email already exists." );
+        }
+        return errors;
+    }
+
+    private boolean function toBool( required any value ){
+        if ( isBoolean( arguments.value ) ) return arguments.value;
+        return ( arguments.value == "true" || arguments.value == "1" || arguments.value == "on" );
+    }
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        if ( isNull( u ) ) return javaCast( "null", "" );
+        return u;
+    }
+
+}

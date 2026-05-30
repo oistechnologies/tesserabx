@@ -1,0 +1,49 @@
+<bx:output>
+<div class="row g-3">
+    <div class="col-12 col-lg-3">
+        <div class="card">
+            <div class="card-header bg-body-secondary"><i class="bi bi-collection me-1"></i> <strong>Categories</strong></div>
+            <div class="list-group list-group-flush">
+                <bx:set local.allCls = "list-group-item list-group-item-action" >
+                <bx:if !len( prc.activeCategorySlug ?: "" ) && !len( prc.q ?: "" )><bx:set local.allCls &= " active" ></bx:if>
+                <a href="/kb" class="#local.allCls#">All articles</a>
+                <bx:loop array="#prc.categories ?: []#" item="local.c">
+                    <bx:set local.cls = "list-group-item list-group-item-action" >
+                    <bx:if ( prc.activeCategorySlug ?: "" ) eq local.c.getSlug()><bx:set local.cls &= " active" ></bx:if>
+                    <a href="/kb/category/#encodeForHTMLAttribute( local.c.getSlug() )#" class="#local.cls#">#encodeForHTML( local.c.getName() )#</a>
+                </bx:loop>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-lg-9">
+        <form action="/kb" method="get" role="search" class="mb-3">
+            <div class="input-group">
+                <span class="input-group-text bg-body"><i class="bi bi-search"></i></span>
+                <input type="search" name="q" value="#encodeForHTMLAttribute( prc.q ?: "" )#" class="form-control" placeholder="Search the knowledge base...">
+                <button class="btn btn-primary" type="submit">Search</button>
+            </div>
+        </form>
+
+        <bx:if len( prc.q ?: "" )>
+            <p class="text-body-secondary">Results for &ldquo;#encodeForHTML( prc.q )#&rdquo;</p>
+        </bx:if>
+
+        <bx:if arrayLen( prc.articles ?: [] )>
+            <div class="list-group">
+                <bx:loop array="#prc.articles#" item="local.a">
+                    <a href="/kb/#encodeForHTMLAttribute( local.a.getSlug() )#" class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="h6 mb-0 me-2">#encodeForHTML( local.a.getTitle() )#</span>
+                            <span class="badge text-bg-light text-black ms-2"><i class="bi bi-eye"></i> #encodeForHTML( local.a.getViewCount() )#</span>
+                        </div>
+                    </a>
+                </bx:loop>
+            </div>
+        <bx:else>
+            <div class="alert alert-light border">
+                No articles found.<bx:if len( prc.q ?: "" )> Try a different search, or <a href="/contact">contact support</a>.</bx:if>
+            </div>
+        </bx:if>
+    </div>
+</div>
+</bx:output>

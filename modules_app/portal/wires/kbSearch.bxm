@@ -1,0 +1,33 @@
+<bx:output>
+<bx:script>
+    local.hits  = results();
+    local.query = trim( q ?: "" );
+</bx:script>
+<div>
+    <div class="input-group input-group-lg">
+        <span class="input-group-text bg-body"><i class="bi bi-search"></i></span>
+        <input type="search" class="form-control" placeholder="Search for answers..."
+               aria-label="Search the knowledge base"
+               autocomplete="off"
+               wire:model.live.debounce.300ms="q">
+    </div>
+    <bx:if len( local.query ) gte 2>
+        <bx:if arrayLen( local.hits )>
+            <div class="list-group mt-2 shadow-sm">
+                <bx:loop array="#local.hits#" item="local.h">
+                    <a href="#encodeForHTMLAttribute( local.h.url )#" class="list-group-item list-group-item-action">
+                        <i class="bi bi-file-earmark-text text-body-secondary me-1"></i> #encodeForHTML( local.h.title )#
+                    </a>
+                </bx:loop>
+                <a href="/kb?q=#encodeForURL( local.query )#" class="list-group-item list-group-item-action text-primary">
+                    <i class="bi bi-search me-1"></i> See all results for &ldquo;#encodeForHTML( local.query )#&rdquo;
+                </a>
+            </div>
+        <bx:else>
+            <div class="mt-2 text-body-secondary small">
+                No articles matched. <a href="/contact">Contact support</a> and we'll help.
+            </div>
+        </bx:if>
+    </bx:if>
+</div>
+</bx:output>

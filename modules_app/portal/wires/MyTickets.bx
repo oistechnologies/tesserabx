@@ -1,0 +1,105 @@
+/**
+ * MyTickets: the client dashboard's live ticket list.
+ *
+ * Renders the signed-in Contact's most recently updated tickets with a
+ * status filter and SLA badges, auto-refreshing via wire:poll so a
+ * status change an agent made shows up without a manual reload.
+ * Organization Admins get a "Mine / All org" scope toggle; regular
+ * contacts are locked to their own tickets.
+ *
+ * The component resolves the contact from cbauth itself (session-backed,
+ * so it works on the background /cbwire/update request) rather than
+ * trusting a mount param, and every read goes through TicketsService so
+ * the tenant scope and accountless-exclusion rules are enforced.
+ */
+class extends="cbwire.models.Component" {
+
+    property name="ticketsService" inject="TicketsService@tickets";
+    property name="slaService"     inject="SlaService@sla";
+    property name="auth"           inject="AuthenticationService@cbauth";
+
+    variables.MAX_ROWS = 8;
+
+    data = {
+        "statusFilter" : "",      // "" = all statuses
+        "scope"        : "mine"   // "mine" | "org" (org honored for admins only)
+    };
+
+    function onMount(){
+        // Org admins land on the org-wide view; everyone else is "mine".
+        data.scope = isOrgAdmin() ? "org" : "mine";
+    }
+
+    // ---------- per-render helpers ----------
+
+    function rows(){
+        var me = currentContact();
+        if ( isNull( me ) ) return [];
+
+        var useOrg = ( data.scope == "org" && me.isOrganizationAdmin() );
+        var list = useOrg
+            ? ticketsService.listTicketsForOrganization( me.getOrganizationId() ?: "" )
+            : ticketsService.listTicketsForContact( me.getId() );
+
+        var filtered = [];
+        for ( var t in list ) {
+            if ( len( data.statusFilter ) && t.getStatus() != data.statusFilter ) continue;
+            filtered.append( t );
+        }
+        // Most recent activity first.
+        filtered.sort( function( a, b ){
+            return dateCompare( b.getUpdatedAt(), a.getUpdatedAt() );
+        } );
+
+        var out = [];
+        var n = 0;
+        for ( var t in filtered ) {
+            out.append( {
+                "id"        : t.getId(),
+                "number"    : t.getTicketNumber(),
+                "subject"   : t.getSubject() ?: "",
+                "status"    : t.getStatus() ?: "",
+                "priority"  : t.getPriority() ?: "",
+                "updatedAt" : dateTimeFormat( t.getUpdatedAt(), "yyyy-mm-dd HH:nn" ),
+                "url"       : "/tickets/" & t.getId(),
+                "sla"       : slaStatus( t )
+            } );
+            n++;
+            if ( n >= variables.MAX_ROWS ) break;
+        }
+        return out;
+    }
+
+    function statuses(){ return ticketsService.listStatuses(); }
+
+    function showScopeToggle(){ return isOrgAdmin(); }
+
+    // ---------- actions ----------
+
+    function setScope( s ){
+        if ( !isOrgAdmin() ) return;
+        data.scope = ( arguments.s == "org" ) ? "org" : "mine";
+    }
+
+    // ---------- internals ----------
+
+    private string function slaStatus( required any ticket ){
+        try {
+            return slaService.slaSummaryForTicket( arguments.ticket ).status ?: "none";
+        } catch ( any e ) {
+            return "none";
+        }
+    }
+
+    private boolean function isOrgAdmin(){
+        var me = currentContact();
+        return isNull( me ) ? false : me.isOrganizationAdmin();
+    }
+
+    private any function currentContact(){
+        if ( !auth.isLoggedIn() ) return javaCast( "null", "" );
+        var u = auth.getUser();
+        return isNull( u ) ? javaCast( "null", "" ) : u;
+    }
+
+}

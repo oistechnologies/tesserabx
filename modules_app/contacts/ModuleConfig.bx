@@ -80,6 +80,9 @@ class {
         binder.map( "ContactsService@contacts" )
               .to( "#moduleMapping#.models.ContactsService" )
               .asSingleton();
+        binder.map( "ContactInviteService@contacts" )
+              .to( "#moduleMapping#.models.ContactInviteService" )
+              .asSingleton();
         binder.map( "UserService@contacts" )
               .to( "#moduleMapping#.models.UserService" )
               .asSingleton();

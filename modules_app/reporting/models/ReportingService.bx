@@ -167,6 +167,160 @@ class singleton=true {
         return out;
     }
 
+    // =====================================================================
+    // Organization-scoped variants.
+    //
+    // The methods above aggregate across every organization (the
+    // provider-wide agent dashboards). These mirror them but filter to
+    // a single organization_id, backing the Organization Admin section
+    // of the client portal dashboard. Accountless tickets carry no
+    // organization_id and are therefore excluded from all of them.
+    // =====================================================================
+
+    public struct function overviewTilesForOrganization( required string organizationId ){
+        if ( !len( arguments.organizationId ) ) {
+            return {
+                "openTickets" : 0, "createdToday" : 0, "avgFirstResponseMinutes" : 0,
+                "slaCompliancePct" : 0, "slaMet" : 0, "slaTotal" : 0
+            };
+        }
+        var p = { o : arguments.organizationId };
+
+        var open       = queryExecute( "SELECT COUNT(*) AS n FROM tickets WHERE organization_id = :o AND status NOT IN ( 'resolved', 'closed' )", p );
+        var openTotal  = open.n[ 1 ];
+
+        var today      = queryExecute( "SELECT COUNT(*) AS n FROM tickets WHERE organization_id = :o AND created_at >= CURRENT_DATE", p );
+        var todayCount = today.n[ 1 ];
+
+        var avgFirstResponseRow = queryExecute(
+            "SELECT AVG( EXTRACT( EPOCH FROM ( first_response_at - created_at ) ) / 60.0 ) AS avg_minutes
+             FROM   tickets
+             WHERE  organization_id = :o
+             AND    first_response_at IS NOT NULL
+             AND    created_at >= NOW() - INTERVAL '30 days'",
+            p
+        );
+        var avgFirstResponseMinutes = val( avgFirstResponseRow.avg_minutes[ 1 ] ?: 0 );
+
+        var slaRow = queryExecute(
+            "SELECT
+                COUNT( * ) FILTER ( WHERE first_response_at IS NOT NULL AND first_response_at <= first_response_due_at ) AS met,
+                COUNT( * ) FILTER ( WHERE first_response_at IS NOT NULL ) AS total
+             FROM tickets
+             WHERE organization_id = :o
+             AND   sla_policy_id IS NOT NULL
+             AND   first_response_due_at IS NOT NULL
+             AND   created_at >= NOW() - INTERVAL '30 days'",
+            p
+        );
+        var slaMet   = slaRow.met[ 1 ];
+        var slaTotal = slaRow.total[ 1 ];
+        var slaPct   = slaTotal > 0 ? ( slaMet / slaTotal ) * 100 : 0;
+
+        return {
+            "openTickets"             : openTotal,
+            "createdToday"            : todayCount,
+            "avgFirstResponseMinutes" : round( avgFirstResponseMinutes ),
+            "slaCompliancePct"        : round( slaPct ),
+            "slaMet"                  : slaMet,
+            "slaTotal"                : slaTotal
+        };
+    }
+
+    /**
+     * Counts grouped by an enumerated column, scoped to one
+     * organization. `column` is whitelisted exactly as the all-org
+     * variant to keep the route param safe.
+     */
+    public array function ticketCountsByColumnForOrganization( required string organizationId, required string column ){
+        if ( !len( arguments.organizationId ) ) return [];
+        var allowed = [ "status", "priority", "source", "ticket_type" ];
+        if ( !arrayContainsNoCase( allowed, arguments.column ) ) return [];
+        var rows = queryExecute(
+            "SELECT " & arguments.column & " AS label, COUNT(*) AS n
+             FROM   tickets
+             WHERE  organization_id = :o
+             GROUP  BY " & arguments.column & "
+             ORDER  BY n DESC",
+            { o : arguments.organizationId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( { "label" : rows.label[ i ] ?: "(none)", "count" : rows.n[ i ] } );
+        }
+        return out;
+    }
+
+    /**
+     * Ticket counts per day for the last `windowDays`, scoped to one
+     * organization. Zero-filled so the chart x-axis is continuous.
+     */
+    public array function ticketVolumePerDayForOrganization( required string organizationId, numeric windowDays = 30 ){
+        if ( !len( arguments.organizationId ) ) return [];
+        var rows = queryExecute(
+            "WITH days AS (
+                 SELECT generate_series(
+                     cast( CURRENT_DATE - ( cast( :n as integer ) - 1 ) * INTERVAL '1 day' as date ),
+                     CURRENT_DATE,
+                     INTERVAL '1 day'
+                 ) AS d
+             )
+             SELECT cast( d as date ) AS day,
+                    COALESCE( c.n, 0 ) AS count
+             FROM   days
+             LEFT JOIN (
+                 SELECT cast( created_at as date ) AS d, COUNT(*) AS n
+                 FROM   tickets
+                 WHERE  organization_id = :o
+                 AND    created_at >= ( CURRENT_DATE - ( cast( :n as integer ) - 1 ) * INTERVAL '1 day' )
+                 GROUP  BY 1
+             ) c USING ( d )
+             ORDER  BY day",
+            { n : int( arguments.windowDays ), o : arguments.organizationId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            out.append( { "day" : dateTimeFormat( rows.day[ i ], "yyyy-mm-dd" ), "count" : rows.count[ i ] } );
+        }
+        return out;
+    }
+
+    /**
+     * Per-contact open-ticket load within one organization, for the
+     * Organization Admin "team" roster on the portal dashboard. Mirrors
+     * agentOpenLoad but groups by requester contact and scopes to the
+     * org. Contacts with zero open tickets are still listed (LEFT JOIN)
+     * so the roster doubles as a lightweight directory.
+     */
+    public array function contactOpenLoadForOrganization( required string organizationId ){
+        if ( !len( arguments.organizationId ) ) return [];
+        var rows = queryExecute(
+            "SELECT c.id, c.email, c.first_name, c.last_name, COUNT( t.id ) AS open_count
+             FROM   contacts c
+             LEFT   JOIN tickets t
+                    ON t.requester_contact_id = c.id
+                   AND t.status NOT IN ( 'resolved', 'closed' )
+             WHERE  c.organization_id = :o
+             GROUP  BY c.id, c.email, c.first_name, c.last_name
+             ORDER  BY open_count DESC, c.email ASC
+             LIMIT  10",
+            { o : arguments.organizationId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) {
+            var first = rows.first_name[ i ] ?: "";
+            var last  = rows.last_name[ i ] ?: "";
+            var name  = trim( first & " " & last );
+            out.append( {
+                "id"        : rows.id[ i ],
+                "email"     : rows.email[ i ],
+                "name"      : len( name ) ? name : rows.email[ i ],
+                "openCount" : rows.open_count[ i ]
+            } );
+        }
+        return out;
+    }
+
     /**
      * Return a CSV string of ticket rows the agent UI can offer as a
      * download. Synchronous for now; large exports get a cbq job
