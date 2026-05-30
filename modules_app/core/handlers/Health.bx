@@ -4,37 +4,6 @@
 class {
 
     function index( event, rc, prc ){
-        // TEMPORARY proxy/forwarded-header diagnostic. Hit /health?proxy=1 to
-        // see exactly what the app receives behind the reverse proxy and what
-        // an ssl-forced link (the same call cbSecurity's redirect makes)
-        // produces. Remove once the agent-login redirect is verified.
-        if ( structKeyExists( rc, "proxy" ) ) {
-            event.renderData(
-                type       = "json",
-                statusCode = 200,
-                data       = {
-                    "cgi" : {
-                        "http_host"          : ( structKeyExists( cgi,"http_host" )          ? cgi.http_host          : "" ),
-                        "server_name"        : ( structKeyExists( cgi,"server_name" )        ? cgi.server_name        : "" ),
-                        "server_port"        : ( structKeyExists( cgi,"server_port" )        ? cgi.server_port        : "" ),
-                        "server_port_secure" : ( structKeyExists( cgi,"server_port_secure" ) ? cgi.server_port_secure : "" ),
-                        "https"              : ( structKeyExists( cgi,"https" )              ? cgi.https              : "" )
-                    },
-                    "headers" : {
-                        "host"              : event.getHTTPHeader( "host", "(none)" ),
-                        "x-forwarded-host"  : event.getHTTPHeader( "x-forwarded-host", "(none)" ),
-                        "x-forwarded-proto" : event.getHTTPHeader( "x-forwarded-proto", "(none)" ),
-                        "x-forwarded-for"   : event.getHTTPHeader( "x-forwarded-for", "(none)" ),
-                        "x-scheme"          : event.getHTTPHeader( "x-scheme", "(none)" )
-                    },
-                    "isSSL"          : event.isSSL(),
-                    "SESBaseURL"     : event.getSESBaseURL(),
-                    "sampleRedirect" : event.buildLink( to = "agent/login", ssl = event.isSSL() )
-                }
-            );
-            return;
-        }
-
         var result = {
             "status"    : "ok",
             "service"   : "tesserabx-app",
