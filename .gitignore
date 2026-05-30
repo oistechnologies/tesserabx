@@ -51,6 +51,12 @@ modules/cbstreams/
 compose.override.yaml
 compose.override.yml
 
+# Operator add-on manifest. Lists the third-party add-ons this
+# deployment installs (see tasks/InstallAddons.cfc and the committed
+# box.addons.example.json template). Git-ignored so a core `git pull`
+# never overwrites the operator's add-on list.
+box.addons.json
+
 # Build artifacts
 build/
 dist/
@@ -59,7 +65,7 @@ dist/
 logs/
 *.log
 
-# CBFS local storage and uploads (root-anchored — there is also
+# CBFS local storage and uploads (root-anchored; there is also
 # an admin view folder named "storage" we do want to track).
 /storage/
 

@@ -43,11 +43,18 @@ COPY ./ ${APP_DIR}/
 
 WORKDIR ${APP_DIR}
 
-# Install CommandBox-managed dependencies declared in box.json,
-# including devDependencies (testbox, cbdebugger, etc.). The
-# `--production` flag is deferred to Phase 6 hardening when we'll
-# split a separate production-targeted build.
-RUN box install
+# Install only production dependencies declared in box.json. This
+# excludes the dev-only tooling (testbox, cbdebugger, the cfformat and
+# cfconfig CLIs). The migration tooling the entrypoint needs at runtime
+# (commandbox-migrations, commandbox-dotenv) is a regular dependency,
+# so `--production` still installs it.
+RUN box install --production
+
+# Install any third-party add-ons declared in the git-ignored
+# box.addons.json manifest into modules/. Each is installed with
+# save=false so the tracked root box.json is never modified. No-op when
+# the manifest is absent (a fresh clone with no add-ons).
+RUN box task run tasks/InstallAddons
 
 # Warmup: boots the server once during build to trigger
 # onServerInitialInstall (which installs the bx-* server modules into
@@ -65,7 +72,7 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=60s \
 
 ENTRYPOINT [ "/usr/bin/tini", "--" ]
 
-# Default command applies pending migrations (idempotent — no-op when
+# Default command applies pending migrations (idempotent, no-op when
 # nothing is pending) and then starts the server via the Ortus run.sh.
 # Worker and scheduler containers share this image but override CMD in
 # compose.yaml to skip migrations; the app container owns the schema

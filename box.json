@@ -27,6 +27,7 @@
     "scripts":{
         "install:dependencies":"install --production",
         "install:dev":"install",
+        "install:addons":"task run tasks/InstallAddons",
         "format":"echo 'no formatter configured yet'",
         "migrate:up":"task run tasks/Migrate up",
         "migrate:down":"task run tasks/Migrate down",
@@ -59,15 +60,16 @@
         "quick":"^12.0.12",
         "hyper":"^8.2.2",
         "bcrypt":"^3.2.0",
-        "s3sdk":"^5.8.1+119"
+        "s3sdk":"^5.8.1+119",
+        "commandbox-migrations":"^5.3.0",
+        "commandbox-dotenv":"^2.4.1"
     },
+    "_dependencyNote":"commandbox-migrations and commandbox-dotenv are runtime (not dev) dependencies: the app container entrypoint runs `box migrate` at boot, and the migrate tasks load `.env`. They must survive `box install --production`.",
     "devDependencies":{
         "testbox":"^7.0.0",
         "cbdebugger":"^4.4.0",
-        "commandbox-dotenv":"^2.4.1",
         "commandbox-cfformat":"^0.21.0",
-        "commandbox-cfconfig":"^2.2.1",
-        "commandbox-migrations":"^5.3.0"
+        "commandbox-cfconfig":"^2.2.1"
     },
     "installPaths":{
         "coldbox":"coldbox/",

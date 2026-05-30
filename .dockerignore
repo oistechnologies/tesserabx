@@ -1,0 +1,85 @@
+# TesseraBX production image build context excludes.
+#
+# The production image is built from the working tree (COPY ./ /app/).
+# This file keeps three classes of content OUT of the image:
+#   1. Secrets and local state that must never live in image layers.
+#   2. Content the build re-creates anyway (box.json-managed installs
+#      and the BoxLang serverHome, which warmup-server.sh rebuilds).
+#   3. First-party demo add-ons, which are dev and CI reference only
+#      and must not ship to production.
+#
+# Anything NOT listed here is copied in. In particular, operator add-on
+# source vendored under modules/<slug>/ (for example
+# modules/tesserabx-pm/) and the git-ignored box.addons.json manifest
+# ARE copied in on purpose.
+#
+# Maintenance note: the "box.json-managed installs" block below mirrors
+# the vendored-module list in .gitignore. When a core dependency is
+# added to or removed from box.json, update both files.
+
+# --- Secrets and version control ---
+.git
+.github
+.env
+.env.local
+.env.*.local
+.claude
+.DS_Store
+
+# --- BoxLang serverHome (warmup-server.sh rebuilds it in-image) ---
+.engine
+
+# --- box.json-managed installs (box install --production recreates) ---
+coldbox
+testbox
+modules/coldbox
+modules/cbq
+modules/cbfs
+modules/cbauth
+modules/cbsecurity
+modules/cbsswagger
+modules/cbswagger
+modules/cbvalidation
+modules/cbmailservices
+modules/cbmessagebox
+modules/cbstorages
+modules/cbjwt
+modules/cbwire
+modules/cfmigrations
+modules/mementifier
+modules/qb
+modules/quick
+modules/cbdebugger
+modules/testbox
+modules/mockbox
+modules/cbi18n
+modules/cbpaginator
+modules/cors
+modules/hyper
+modules/cbantisamy
+modules/cbcsrf
+modules/bcrypt
+modules/s3sdk
+modules/cbstreams
+
+# --- First-party demo add-ons: dev and CI reference only, never prod ---
+sample-addons
+
+# --- Local build, log, and data artifacts ---
+build
+dist
+logs
+*.log
+.tmp
+storage
+backups
+tests/results
+
+# --- Developer compose overrides and IDE files ---
+compose.override.yaml
+compose.override.yml
+.idea
+.vscode
+*.iml
+.fleet
+.history

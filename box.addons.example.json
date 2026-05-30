@@ -1,0 +1,7 @@
+{
+    "_comment":"Copy this file to box.addons.json (git-ignored) and list the third-party TesseraBX add-ons this deployment should install. Each entry is any CommandBox-resolvable endpoint: a ForgeBox slug, a slug@semver, a git URL (optionally with a #ref tag or branch suffix), or a local path. Add-ons install into modules/<slug>/ with save=false, so the tracked root box.json is never modified, and box.addons.json is git-ignored so 'git pull' never overwrites your add-on list. See tasks/InstallAddons.cfc and the README 'Installing and updating add-ons' section.",
+    "_comment_private":"tesserabx-pm is not published to ForgeBox, so it installs from its git repo URL. For a private repo, use an SSH endpoint (git+ssh://git@github.com/oistechnologies/tesserabx-pm.git#v1.0.0) or make HTTPS credentials available to the build environment.",
+    "addons":[
+        "https://github.com/oistechnologies/tesserabx-pm.git#v1.0.0"
+    ]
+}

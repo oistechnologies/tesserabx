@@ -93,8 +93,16 @@ The `admin` module is a child module physically nested inside `agent` and resolv
 
 ### Add-on framework
 
-- Third-party ColdBox modules ship into a TesseraBX deployment at `modules/` (ForgeBox install path) or in-tree under [`sample-addons/`](sample-addons/) for first-party demos.
-- Add-ons declare contributions via a `settings.tesserabx` block in their `ModuleConfig`: navigation, admin pages, ticket panels, dashboard widgets, channel adapters, automation actions, AI features, API resources, webhook events, notification templates and channels, custom field types, audit event types, per-tenant settings, help pages, roles, and permissions.
+TesseraBX modules fall into three tiers, distinguished by where the code lives and whether it ships in this repository:
+
+| Tier | Location | In this repo | Ships to production | On update (`git pull`) |
+| --- | --- | --- | --- | --- |
+| Core first-party modules | `modules_app/<m>/` | Yes | Yes | Replaced wholesale; this is the application |
+| First-party demo add-ons | `sample-addons/<m>/` | Yes | No (dev and CI reference only) | Not applicable in production |
+| Third-party add-ons | `modules/<slug>/` | No (own repo) | Yes | Preserved; reinstalled from the add-on manifest |
+
+- All three tiers may declare contributions via a `settings.tesserabx` block in their `ModuleConfig`: navigation, admin pages, ticket panels, dashboard widgets, channel adapters, automation actions, AI features, API resources, webhook events, notification templates and channels, custom field types, audit event types, per-tenant settings, help pages, roles, and permissions. Using the manifest does not make a module an add-on; core modules are the application and always ship.
+- Third-party add-ons install into `modules/<slug>/`. See [Installing and updating add-ons](#installing-and-updating-add-ons) for the production workflow.
 - Live contract in [docs/EXTENSIONS.md](docs/EXTENSIONS.md); worked reference in [`sample-addons/example-sync/`](sample-addons/example-sync/).
 
 ### AI assist (optional)
@@ -138,19 +146,19 @@ When enabled, AI powers ticket triage, suggested agent replies, thread summaries
 | `hyper` | HTTP client |
 | `bcrypt` | Password hashing |
 | `s3sdk` | AWS S3 client (used by CBFS S3 and B2 providers) |
+| `commandbox-migrations` | Migration runner the `app` entrypoint invokes at container start |
+| `commandbox-dotenv` | `.env` loader the migration tasks use |
 
 ### Dev-only dependencies (`box.json` `devDependencies`)
 
-These are **not** installed in production deploys. CommandBox installs them only when `box install` is run without `--production`.
+These are **not** installed in production deploys. The production image builds with `box install --production` (see [Build hygiene](#build-hygiene)); CommandBox installs these only when `box install` is run without `--production`.
 
 | Module | Purpose |
 | --- | --- |
 | `testbox` | BDD and unit test framework |
 | `cbdebugger` | In-page debug overlay |
-| `commandbox-dotenv` | `.env` loader for CommandBox tasks |
 | `commandbox-cfformat` | Code formatter |
 | `commandbox-cfconfig` | CommandBox server config tool |
-| `commandbox-migrations` | Migration runner CLI |
 
 ## Quick Deploy
 
@@ -260,6 +268,31 @@ See [Quick Deploy](#quick-deploy) above for the minimum five-step recipe. The ad
 - `depends_on: condition: service_healthy` makes the worker and scheduler wait for the new `app` to be healthy before swapping in.
 - Scale the worker pool with `docker compose up -d --scale worker=N` once the baseline is in place. The scheduler is intended as a single replica.
 
+### Installing and updating add-ons
+
+Third-party add-ons (for example [`tesserabx-pm`](https://github.com/oistechnologies/tesserabx-pm)) are declared in `box.addons.json`, a git-ignored manifest at the project root. Copy the committed template and list the add-ons this deployment should install:
+
+```bash
+cp box.addons.example.json box.addons.json
+# edit box.addons.json, then rebuild
+```
+
+```json
+{
+    "addons": [
+        "https://github.com/oistechnologies/tesserabx-pm.git#v1.0.0"
+    ]
+}
+```
+
+Each entry is any CommandBox-resolvable endpoint: a ForgeBox slug, a `slug@semver`, a git URL (optionally with a `#ref` tag or branch suffix), or a local path. `tesserabx-pm` is not published to ForgeBox, so it installs from its git repo URL as shown; for a private repo, use an SSH endpoint (`git+ssh://git@github.com/oistechnologies/tesserabx-pm.git#v1.0.0`) or make HTTPS credentials available to the build environment. On `docker compose up --build`, the image build installs each add-on into `modules/<slug>/` with `save=false` (so the tracked root `box.json` is never modified), and the `app` entrypoint stages and applies the add-on's migrations on the next boot.
+
+Why `box.addons.json` and not `box.json`: the root `box.json` is tracked and is overwritten by `git pull` on every core update, so declaring add-ons there would make updates clobber your add-on list. `box.addons.json` is git-ignored, so a core update never touches it.
+
+Per-tenant add-on configuration (enable and disable, per-organization settings) lives in the database (`addons`, `addon_organization_enablement`, `addon_settings`) and persists in the `db_data` volume across updates.
+
+Local add-on development uses a different path: bind-mount the add-on's working tree into the container with a git-ignored `compose.override.yaml` (see the add-on's own `compose.override.yaml.example`) instead of installing from the manifest.
+
 ### Updating an existing deploy
 
 ```bash
@@ -269,6 +302,22 @@ docker compose up -d --build
 ```
 
 `docker compose up --build` re-runs the Dockerfile from the new working tree. Containers are rebuilt and recreated; the named volumes (`db_data`, `redis_data`) persist across this. Migrations run automatically on the new `app` container at start.
+
+What survives an update:
+
+- **Your add-on list.** `box.addons.json` is git-ignored, so `git pull` never overwrites it; the rebuild reinstalls the same add-ons.
+- **Add-on configuration and data.** The `addons`, `addon_organization_enablement`, and `addon_settings` tables (and each add-on's own tables) persist in the `db_data` volume.
+- **Secrets and environment.** `.env` is git-ignored and injected at runtime; it is no longer baked into the image (see [Build hygiene](#build-hygiene)).
+
+Do not wire add-ons in by editing tracked files (`box.json`, `compose.yaml`, `config/Coldbox.bx`); `git pull` will fight those edits. Use `box.addons.json` for add-ons and a git-ignored `compose.override.yaml` for any container-level changes.
+
+> **Warning.** `git clean -fdx` deletes untracked and ignored files, which includes `box.addons.json`, `.env`, and any add-on source vendored under `modules/`. Do not run it on a deploy host unless those are backed up.
+
+### Build hygiene
+
+A [.dockerignore](.dockerignore) keeps secrets and local state out of the image: `.env`, `.git`, the BoxLang serverHome (`.engine`), local `storage` and `backups`, and the first-party `sample-addons/` demos do not ship to production. Production builds install only production dependencies (`box install --production`), so the dev-only tooling (`testbox`, `cbdebugger`, the formatter and config CLIs) is excluded; the migration tooling the entrypoint needs (`commandbox-migrations`, `commandbox-dotenv`) is a runtime dependency and is installed.
+
+If you deployed an earlier build that baked `.env` into the image, rotate the secrets it contained (`DB_PASSWORD`, `JWT_SECRET`, `NOTIFICATIONS_UNSUBSCRIBE_SECRET`, mail and storage credentials).
 
 ### What the proxy must route to `app:8080`
 
