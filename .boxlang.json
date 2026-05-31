@@ -12,6 +12,21 @@
     // Mail object's config (to/from/subject/body) but not its own
     // configured properties (server/port) through to cfmail.
     //
+    // IMPORTANT: username and password use the env placeholder with NO
+    // default suffix (no trailing colon). BoxLang's config placeholder
+    // pattern only treats text after the colon as a default when that
+    // default is non-empty, so a placeholder written with an empty
+    // default (env var name followed by a colon and nothing else) does
+    // NOT match the pattern at all and is passed through verbatim. The
+    // SMTP transport then authenticates as that literal placeholder
+    // string, which a real mail server rejects with "535 Authentication
+    // failed". Written without any default, the placeholder resolves to
+    // the env value, including an empty string when the var is blank,
+    // which correctly skips SMTP auth (the mailpit / no-auth case). Keep
+    // MAIL_USERNAME and MAIL_PASSWORD defined in every .env even when
+    // blank; a fully absent var makes the no-default placeholder throw at
+    // config load.
+    //
     // Dev maps these env vars at mailpit; production overrides them
     // in the deploy host's .env. spoolEnable is off so sends are
     // synchronous and visible in Mailpit immediately rather than
@@ -20,8 +35,8 @@
         {
             "host": "${env.MAIL_HOST:mailpit}",
             "port": "${env.MAIL_PORT:1025}",
-            "username": "${env.MAIL_USERNAME:}",
-            "password": "${env.MAIL_PASSWORD:}",
+            "username": "${env.MAIL_USERNAME}",
+            "password": "${env.MAIL_PASSWORD}",
             "tls": "${env.MAIL_TLS:false}",
             "ssl": "${env.MAIL_SSL:false}"
         }
