@@ -83,7 +83,57 @@ class {
         prc.pageTitle = a.getTitle();
         prc.bodyHtml  = markdown( a.getBody() ?: "" );
         prc.feedback  = kbService.feedbackTotalsForArticle( a.getId() );
+
+        // Category name for the meta line (one lookup for the single article).
+        prc.categoryName = "";
+        var catId = a.getCategoryId() ?: "";
+        if ( len( catId ) ) {
+            var cat = kbService.getCategoryById( catId );
+            if ( !isNull( cat ) ) prc.categoryName = cat.getName();
+        }
+
+        // Only a signed-in contact may vote; the aggregate count shows to all.
+        prc.canVote = !isNull( currentContact() );
         event.setView( "kb/show" );
+    }
+
+    /**
+     * Record a helpful / not-helpful vote. Restricted to logged-in contacts;
+     * anonymous visitors and agents are rejected (the aggregate count still
+     * shows on the article page, but only a signed-in client can vote).
+     */
+    function feedback( event, rc, prc ){
+        param rc.rating  = "0";
+        param rc.comment = "";
+
+        var a = kbService.getArticleBySlug( rc.slug ?: "" );
+        if ( isNull( a ) || !kbService.canRead( tbxKbViewer(), a ) ) {
+            prc.pageTitle = "Article not available";
+            event.setView( "kb/not_found" );
+            return;
+        }
+
+        var me = currentContact();
+        if ( isNull( me ) ) {
+            relocate( uri = "/kb/" & a.getSlug() );
+            return;
+        }
+
+        var rating = ( rc.rating == "up" || rc.rating == "1" ) ? 1
+                   : ( rc.rating == "down" || rc.rating == "-1" ) ? -1
+                   : 0;
+        if ( rating == 0 ) {
+            relocate( uri = "/kb/" & a.getSlug() );
+            return;
+        }
+
+        kbService.submitFeedback( {
+            articleId : a.getId(),
+            rating    : rating,
+            contactId : me.getId(),
+            comment   : rc.comment
+        } );
+        relocate( uri = "/kb/" & a.getSlug() & "?thanks=1" );
     }
 
     private any function currentContact(){

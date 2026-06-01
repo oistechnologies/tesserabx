@@ -1,65 +1,101 @@
 <bx:output>
-<bx:set local.isNew = !structKeyExists( prc, "article" ) >
-<bx:set local.postUrl = local.isNew ? "/agent/admin/kb/new" : "/agent/admin/kb/" & encodeForHTMLAttribute( prc.article.getId() ) >
+<bx:set local.isNew     = !structKeyExists( prc, "article" ) >
+<bx:set local.articleId = local.isNew ? "" : prc.article.getId() >
+<bx:set local.postUrl   = local.isNew ? "/agent/admin/kb/new" : "/agent/admin/kb/" & encodeForHTMLAttribute( local.articleId ) >
+<bx:set local.heading   = local.isNew ? "New article" : "Edit article" >
+
+<link rel="stylesheet" href="/includes/vendor/easymde-2.20.0/css/easymde.min.css">
 
 <div class="row g-3">
+    <!-- Main column: the article itself -->
     <div class="col-12 col-lg-8">
-        <form method="post" action="#local.postUrl#" class="card">
-            <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-12 col-md-9">
+        <form method="post" action="#local.postUrl#" id="kbArticleForm">
+            <input type="hidden" name="bodyB64" id="bodyB64" value="">
+
+            <div class="card card-primary card-outline mb-3">
+                <div class="card-header"><div class="card-title">#encodeForHTML( local.heading )#</div></div>
+                <div class="card-body">
+                    <div class="mb-3">
                         <label class="form-label" for="title">Title <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="title" name="title" required value="#encodeForHTMLAttribute( prc.formData.title ?: "" )#">
+                        <input type="text" class="form-control form-control-lg" id="title" name="title" required value="#encodeForHTMLAttribute( prc.formData.title ?: "" )#" placeholder="A clear, search-friendly title">
                     </div>
-                    <div class="col-12 col-md-3">
+                    <div class="mb-3">
                         <label class="form-label" for="slug">Slug</label>
-                        <input type="text" class="form-control" id="slug" name="slug" value="#encodeForHTMLAttribute( prc.formData.slug ?: "" )#" placeholder="auto from title">
+                        <div class="input-group">
+                            <span class="input-group-text">/kb/</span>
+                            <input type="text" class="form-control" id="slug" name="slug" value="#encodeForHTMLAttribute( prc.formData.slug ?: "" )#" placeholder="auto from title">
+                        </div>
+                        <div class="form-text">The public URL. Leave blank to generate it from the title.</div>
                     </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label" for="visibility">Visibility</label>
-                        <select class="form-select" id="visibility" name="visibility" onchange="document.getElementById('orgs-row').style.display = this.value === 'organization' ? '' : 'none';">
-                            <option value="public"      <bx:if ( prc.formData.visibility ?: "" ) eq "public"> selected</bx:if>>Public</option>
-                            <option value="organization"<bx:if ( prc.formData.visibility ?: "" ) eq "organization"> selected</bx:if>>Organization-scoped</option>
-                            <option value="internal"    <bx:if ( prc.formData.visibility ?: "" ) eq "internal"> selected</bx:if>>Internal (agents only)</option>
-                        </select>
-                    </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label" for="categoryId">Category</label>
-                        <select class="form-select" id="categoryId" name="categoryId">
-                            <option value="">No category</option>
-                            <bx:loop array="#prc.categories#" item="c">
-                                <option value="#encodeForHTMLAttribute( c.getId() )#"<bx:if ( prc.formData.categoryId ?: "" ) eq c.getId()> selected</bx:if>>#encodeForHTML( c.getName() )#</option>
-                            </bx:loop>
-                        </select>
-                    </div>
-                    <div class="col-12" id="orgs-row" style="display: <bx:if ( prc.formData.visibility ?: "" ) eq "organization">block<bx:else>none</bx:if>;">
-                        <label class="form-label" for="organizationIds">Organizations that can see this</label>
-                        <select class="form-select" id="organizationIds" name="organizationIds" multiple size="6">
-                            <bx:loop array="#prc.organizations#" item="org">
-                                <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if arrayFindNoCase( prc.formData.organizationIds ?: [], org.getId() )> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
-                            </bx:loop>
-                        </select>
-                        <div class="form-text">Hold Ctrl / Cmd to select multiple.</div>
-                    </div>
-                    <div class="col-12">
+                    <div class="mb-0">
                         <label class="form-label" for="body">Body</label>
-                        <textarea class="form-control font-monospace" id="body" name="body" rows="18">#encodeForHTML( prc.formData.body ?: "" )#</textarea>
+                        <textarea class="form-control" id="body" name="body">#encodeForHTML( prc.formData.body ?: "" )#</textarea>
+                        <div class="form-text">Markdown. Drag, paste, or use the image button to add pictures. Toggle the preview to see exactly how readers will see it.</div>
                     </div>
                 </div>
-                <div class="d-flex justify-content-between mt-4">
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <strong>Visibility &amp; category</strong>
+                    <a class="small" href="/agent/admin/kb/categories"><i class="bi bi-folder me-1"></i>Manage categories</a>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="visibility">Visibility</label>
+                            <select class="form-select" id="visibility" name="visibility">
+                                <option value="public"      <bx:if ( prc.formData.visibility ?: "" ) eq "public"> selected</bx:if>>Public</option>
+                                <option value="organization"<bx:if ( prc.formData.visibility ?: "" ) eq "organization"> selected</bx:if>>Organization-scoped</option>
+                                <option value="internal"    <bx:if ( prc.formData.visibility ?: "" ) eq "internal"> selected</bx:if>>Internal (agents only)</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label" for="categoryId">Category</label>
+                            <select class="form-select" id="categoryId" name="categoryId">
+                                <option value="">No category</option>
+                                <bx:loop array="#prc.categories#" item="c">
+                                    <option value="#encodeForHTMLAttribute( c.getId() )#"<bx:if ( prc.formData.categoryId ?: "" ) eq c.getId()> selected</bx:if>>#encodeForHTML( c.getName() )#</option>
+                                </bx:loop>
+                            </select>
+                            <bx:if !arrayLen( prc.categories )>
+                                <div class="form-text">No categories yet. <a href="/agent/admin/kb/categories">Create some</a>.</div>
+                            </bx:if>
+                        </div>
+                        <div class="col-12" id="orgs-row" style="display: <bx:if ( prc.formData.visibility ?: "" ) eq "organization">block<bx:else>none</bx:if>;">
+                            <label class="form-label" for="organizationIds">Organizations that can see this</label>
+                            <select class="form-select" id="organizationIds" name="organizationIds" multiple size="6">
+                                <bx:loop array="#prc.organizations#" item="org">
+                                    <option value="#encodeForHTMLAttribute( org.getId() )#"<bx:if arrayFindNoCase( prc.formData.organizationIds ?: [], org.getId() )> selected</bx:if>>#encodeForHTML( org.getName() )#</option>
+                                </bx:loop>
+                            </select>
+                            <div class="form-text">Hold Ctrl / Cmd to select multiple.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer d-flex justify-content-between">
                     <a class="btn btn-outline-secondary" href="/agent/admin/kb">Cancel</a>
-                    <button class="btn btn-primary" type="submit">Save</button>
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-check-lg me-1"></i> Save</button>
                 </div>
             </div>
         </form>
     </div>
 
-    <bx:if !local.isNew>
-        <div class="col-12 col-lg-4">
+    <!-- Sidebar: lifecycle actions (separate forms, kept out of the article form) -->
+    <div class="col-12 col-lg-4">
+        <bx:if local.isNew>
+            <div class="card">
+                <div class="card-header"><strong>Before you publish</strong></div>
+                <div class="card-body small text-body-secondary">
+                    <p>Saving creates a <strong>draft</strong>. Drafts never appear on the portal.</p>
+                    <p class="mb-0">After the first save you can publish it, upload images into the body, and see version history.</p>
+                </div>
+            </div>
+        <bx:else>
             <div class="card mb-3">
                 <div class="card-header"><strong>Status</strong></div>
                 <div class="card-body">
-                    <p class="mb-2">
+                    <p class="mb-3">
                         <bx:if prc.article.isPublished()>
                             <span class="badge text-bg-success">published</span>
                             <span class="text-body-secondary small ms-2">since #encodeForHTML( dateTimeFormat( prc.article.getPublishedAt(), "yyyy-mm-dd HH:nn" ) )#</span>
@@ -69,26 +105,135 @@
                         </bx:if>
                     </p>
                     <bx:if prc.article.isPublished()>
-                        <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( prc.article.getId() )#/unpublish">
-                            <button class="btn btn-outline-warning w-100" type="submit">Unpublish</button>
+                        <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( local.articleId )#/unpublish">
+                            <button class="btn btn-outline-warning w-100" type="submit"><i class="bi bi-eye-slash me-1"></i> Unpublish</button>
                         </form>
                     <bx:else>
-                        <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( prc.article.getId() )#/publish">
+                        <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( local.articleId )#/publish">
                             <input type="text" class="form-control form-control-sm mb-2" name="changeNote" placeholder="Change note (optional)">
-                            <button class="btn btn-success w-100" type="submit">Publish</button>
+                            <button class="btn btn-success w-100" type="submit"><i class="bi bi-send me-1"></i> Publish</button>
                         </form>
+                    </bx:if>
+                    <bx:if !isNull( prc.article.getViewCount() )>
+                        <div class="text-body-secondary small mt-3"><i class="bi bi-eye me-1"></i> #encodeForHTML( prc.article.getViewCount() )# views</div>
                     </bx:if>
                 </div>
             </div>
-            <div class="card">
-                <div class="card-header"><strong>Danger zone</strong></div>
+            <div class="card border-danger">
+                <div class="card-header text-danger"><strong>Danger zone</strong></div>
                 <div class="card-body">
-                    <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( prc.article.getId() )#/delete" onsubmit="return confirm('Delete this article and all its versions and feedback?');">
-                        <button class="btn btn-outline-danger w-100" type="submit">Delete</button>
+                    <form method="post" action="/agent/admin/kb/#encodeForHTMLAttribute( local.articleId )#/delete" onsubmit="return confirm('Delete this article and all its versions and feedback?');">
+                        <button class="btn btn-outline-danger w-100" type="submit"><i class="bi bi-trash me-1"></i> Delete</button>
                     </form>
                 </div>
             </div>
-        </div>
-    </bx:if>
+        </bx:if>
+    </div>
 </div>
+
+<script src="/includes/vendor/easymde-2.20.0/js/easymde.min.js"></script>
+<script>
+(function(){
+    window.__kbArticleId = "#encodeForJavaScript( local.articleId )#";
+    var bodyEl = document.getElementById("body");
+    if ( !bodyEl || typeof EasyMDE === "undefined" ) return;
+
+    function insertCallout( editor ){
+        var cm = editor.codemirror;
+        cm.replaceSelection("> **Note:** " + ( cm.getSelection() || "" ));
+        cm.focus();
+    }
+
+    var easyMDE = new EasyMDE({
+        element: bodyEl,
+        autoDownloadFontAwesome: false,
+        // Namespace each toolbar button's CSS class as kbmde-<name>. Without a
+        // prefix EasyMDE sets the class to the bare button name, so the "table"
+        // button gets class="table" and collides with Bootstrap's .table rule
+        // (display:table; width:100%), breaking the toolbar layout. The glyphs
+        // come from the per-button `icon` HTML, so the prefix is purely a
+        // class-namespacing fix and does not affect icon rendering.
+        toolbarButtonClassPrefix: "kbmde",
+        spellChecker: false,
+        nativeSpellcheck: true,
+        placeholder: "Write the article in markdown...",
+        minHeight: "360px",
+        status: ["lines", "words"],
+        autosave: {
+            enabled: true,
+            uniqueId: "kb-article-" + ( window.__kbArticleId || "new" ),
+            delay: 10000
+        },
+        renderingConfig: {
+            codeSyntaxHighlighting: true,
+            hljs: window.hljs
+        },
+        uploadImage: true,
+        imageUploadFunction: function( file, onSuccess, onError ){
+            var fd = new FormData();
+            fd.append("image", file);
+            fd.append("articleId", window.__kbArticleId || "");
+            fetch("/agent/admin/kb/images", { method: "POST", body: fd, headers: { "X-Requested-With": "XMLHttpRequest" } })
+                .then(function( res ){ return res.json().then(function( j ){ return { ok: res.ok, body: j }; }); })
+                .then(function( r ){
+                    if ( r.ok && r.body && r.body.url ) { onSuccess( r.body.url ); }
+                    else { onError( ( r.body && r.body.error ) ? r.body.error : "Upload failed" ); }
+                })
+                .catch(function(){ onError("Upload failed"); });
+        },
+        previewRender: function( plainText, preview ){
+            var b64 = btoa( unescape( encodeURIComponent( plainText ) ) );
+            var fd = new FormData();
+            fd.append("bodyB64", b64);
+            fetch("/agent/admin/kb/preview", { method: "POST", body: fd, headers: { "X-Requested-With": "XMLHttpRequest" } })
+                .then(function( res ){ return res.text(); })
+                .then(function( html ){
+                    preview.innerHTML = '<div class="kb-article-body">' + html + '</div>';
+                    if ( window.hljs ) {
+                        preview.querySelectorAll("pre code").forEach(function( el ){ window.hljs.highlightElement( el ); });
+                    }
+                })
+                .catch(function(){ preview.innerHTML = '<div class="text-danger p-2">Preview failed.</div>'; });
+            return "Loading preview...";
+        },
+        // Icons use EasyMDE's native Font Awesome class mechanism: it moves the
+        // "fa fa-*" tokens into an inner <i>, so the glyphs come from the
+        // vendored Font Awesome 4.7 font linked in the layout head. (FA is what
+        // EasyMDE is designed for; Bootstrap Icons did not render here.)
+        toolbar: [
+            { name: "bold",           action: EasyMDE.toggleBold,            className: "fa fa-bold",            title: "Bold" },
+            { name: "italic",         action: EasyMDE.toggleItalic,          className: "fa fa-italic",          title: "Italic" },
+            { name: "heading",        action: EasyMDE.toggleHeadingSmaller,  className: "fa fa-header",          title: "Heading" },
+            "|",
+            { name: "quote",          action: EasyMDE.toggleBlockquote,      className: "fa fa-quote-left",      title: "Quote" },
+            { name: "unordered-list", action: EasyMDE.toggleUnorderedList,   className: "fa fa-list-ul",         title: "Bulleted list" },
+            { name: "ordered-list",   action: EasyMDE.toggleOrderedList,      className: "fa fa-list-ol",         title: "Numbered list" },
+            "|",
+            { name: "link",           action: EasyMDE.drawLink,              className: "fa fa-link",            title: "Insert link" },
+            { name: "upload-image",   action: EasyMDE.drawUploadedImage,     className: "fa fa-image",           title: "Upload image (or drag / paste)" },
+            { name: "table",          action: EasyMDE.drawTable,             className: "fa fa-table",           title: "Insert table" },
+            { name: "code",           action: EasyMDE.toggleCodeBlock,        className: "fa fa-code",            title: "Code block" },
+            { name: "callout",        action: insertCallout,                 className: "fa fa-info-circle",     title: "Insert callout" },
+            "|",
+            { name: "preview",        action: EasyMDE.togglePreview,         className: "fa fa-eye",             title: "Toggle preview", noDisable: true },
+            { name: "side-by-side",   action: EasyMDE.toggleSideBySide,      className: "fa fa-columns",         title: "Side by side", noDisable: true, noMobile: true },
+            { name: "fullscreen",     action: EasyMDE.toggleFullScreen,      className: "fa fa-arrows-alt",      title: "Fullscreen", noDisable: true, noMobile: true },
+            "|",
+            { name: "guide",          action: "https://www.markdownguide.org/basic-syntax/", className: "fa fa-question-circle", title: "Markdown guide" }
+        ]
+    });
+
+    var form = document.getElementById("kbArticleForm");
+    if ( form ) {
+        form.addEventListener("submit", function(){
+            document.getElementById("bodyB64").value = btoa( unescape( encodeURIComponent( easyMDE.value() ) ) );
+        });
+    }
+
+    var vis  = document.getElementById("visibility");
+    var orgs = document.getElementById("orgs-row");
+    function syncOrgs(){ if ( orgs ) { orgs.style.display = ( vis && vis.value === "organization" ) ? "block" : "none"; } }
+    if ( vis ) { vis.addEventListener("change", syncOrgs); syncOrgs(); }
+})();
+</script>
 </bx:output>

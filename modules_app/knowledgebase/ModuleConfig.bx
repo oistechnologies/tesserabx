@@ -70,6 +70,9 @@ class {
         binder.map( "KnowledgebaseService@knowledgebase" )
               .to( "#moduleMapping#.models.KnowledgebaseService" )
               .asSingleton();
+        binder.map( "KbImageService@knowledgebase" )
+              .to( "#moduleMapping#.models.KbImageService" )
+              .asSingleton();
     }
 
     function onUnload(){}

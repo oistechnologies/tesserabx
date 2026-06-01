@@ -64,6 +64,13 @@
     <link rel="stylesheet" href="/includes/vendor/highlightjs-11.10.0/styles/atom-one-dark.min.css">
     <link rel="stylesheet" href="/includes/vendor/highlightjs-copy-1.0.6/highlightjs-copy.min.css">
 
+    <!-- Font Awesome 4.7: the icon font EasyMDE's markdown editor toolbar is
+         built for (the KB article editor at /agent/admin/kb). Self-hosted. -->
+    <link rel="stylesheet" href="/includes/vendor/font-awesome-4.7.0/css/font-awesome.min.css">
+
+    <!-- TesseraBX application stylesheet (custom rules over the vendor CSS). -->
+    <link rel="stylesheet" href="/includes/css/tesserabx.css">
+
     <!-- Brand primary color override. Drives every Bootstrap utility that
          keys off --bs-primary (.btn-primary, .text-bg-primary, ...). -->
     <style>:root { --bs-primary: #encodeForCSS( local.brand.primaryColor )#; }</style>

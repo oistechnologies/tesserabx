@@ -1,0 +1,100 @@
+/* ---------------------------------------------------------------------------
+ * TesseraBX application stylesheet.
+ *
+ * Custom rules layered on top of the vendored AdminLTE 4 / Bootstrap 5 CSS.
+ * Loaded from modules_app/core/views/_partials/layout_head.bxm on both
+ * surfaces, after the vendor stylesheets.
+ * ------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+ * Rendered knowledge-base article body (markdown -> HTML via the markdown()
+ * BIF). Applied to the public /kb article page and the agent editor preview
+ * so the two render alike. Inline images are constrained, tables get light
+ * borders, and code blocks inherit the highlight.js theme loaded in the head.
+ * ------------------------------------------------------------------------- */
+.kb-article-body {
+    line-height: 1.7;
+    word-wrap: break-word;
+}
+
+.kb-article-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.375rem;
+    margin: 0.5rem 0;
+}
+
+.kb-article-body h1,
+.kb-article-body h2,
+.kb-article-body h3,
+.kb-article-body h4 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+}
+
+.kb-article-body h1:first-child,
+.kb-article-body h2:first-child,
+.kb-article-body h3:first-child {
+    margin-top: 0;
+}
+
+.kb-article-body p,
+.kb-article-body ul,
+.kb-article-body ol {
+    margin-bottom: 1rem;
+}
+
+.kb-article-body table {
+    width: 100%;
+    margin-bottom: 1rem;
+    border-collapse: collapse;
+}
+
+.kb-article-body table th,
+.kb-article-body table td {
+    border: 1px solid var(--bs-border-color);
+    padding: 0.5rem 0.75rem;
+    vertical-align: top;
+}
+
+.kb-article-body table th {
+    background-color: var(--bs-tertiary-bg);
+    text-align: left;
+}
+
+.kb-article-body blockquote {
+    border-left: 4px solid var(--bs-border-color);
+    padding: 0.25rem 0 0.25rem 1rem;
+    margin: 0 0 1rem 0;
+    color: var(--bs-secondary-color);
+}
+
+.kb-article-body pre {
+    padding: 1rem;
+    border-radius: 0.375rem;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+}
+
+/* Inline code (not inside a highlighted <pre>) stays readable in both themes. */
+.kb-article-body :not(pre) > code {
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.25rem;
+    background-color: var(--bs-tertiary-bg);
+    color: var(--bs-emphasis-color);
+    font-size: 0.875em;
+}
+
+/* ---------------------------------------------------------------------------
+ * EasyMDE toolbar.
+ *
+ * Toolbar glyphs come from Font Awesome 4.7 via EasyMDE's native "fa fa-*"
+ * class mechanism (FA is linked in the layout head). This block only centers
+ * the inner glyph in each button for a consistent look.
+ * ------------------------------------------------------------------------- */
+.editor-toolbar button {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+}

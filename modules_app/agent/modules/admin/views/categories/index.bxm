@@ -1,0 +1,91 @@
+<bx:output>
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h4 mb-0">KB categories</h1>
+            <a class="btn btn-outline-secondary btn-sm" href="/agent/admin/kb">
+                <i class="bi bi-arrow-left me-1"></i> Back to articles
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-12 col-lg-4">
+        <div class="card">
+            <div class="card-header"><strong>Add category</strong></div>
+            <form method="post" action="/agent/admin/kb/categories" class="card-body">
+                <div class="mb-3">
+                    <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="name" name="name" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="slug">Slug</label>
+                    <input type="text" class="form-control" id="slug" name="slug" placeholder="auto from name">
+                    <div class="form-text">Used in URLs. Leave blank to generate from the name.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="parentId">Parent</label>
+                    <select class="form-select" id="parentId" name="parentId">
+                        <option value="">No parent (top level)</option>
+                        <bx:loop array="#prc.parents#" item="p">
+                            <option value="#encodeForHTMLAttribute( p.getId() )#">#encodeForHTML( p.getName() )#</option>
+                        </bx:loop>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="sortOrder">Sort order</label>
+                    <input type="number" class="form-control" id="sortOrder" name="sortOrder" value="0">
+                    <div class="form-text">Lower numbers sort first.</div>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i> Add category</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-8">
+        <div class="card">
+            <div class="card-header"><strong>Categories</strong></div>
+            <bx:if arrayLen( prc.categories )>
+                <div class="card-body p-0">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Slug</th>
+                                <th>Parent</th>
+                                <th class="text-end">Articles</th>
+                                <th class="text-end">Order</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <bx:loop array="#prc.categories#" item="cat">
+                                <tr>
+                                    <td>#encodeForHTML( cat.name )#</td>
+                                    <td class="text-body-secondary"><code>#encodeForHTML( cat.slug )#</code></td>
+                                    <td class="text-body-secondary">
+                                        <bx:if len( cat.parentName )>#encodeForHTML( cat.parentName )#<bx:else><span class="text-body-tertiary">&mdash;</span></bx:if>
+                                    </td>
+                                    <td class="text-end"><span class="badge text-bg-light text-black">#encodeForHTML( cat.articleCount )#</span></td>
+                                    <td class="text-end">#encodeForHTML( cat.sortOrder )#</td>
+                                    <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-secondary" href="/agent/admin/kb/categories/#encodeForHTMLAttribute( cat.id )#">edit</a>
+                                        <form method="post" action="/agent/admin/kb/categories/#encodeForHTMLAttribute( cat.id )#/delete" class="d-inline" onsubmit="return confirm('Delete this category? Its articles will be left uncategorized and any child categories moved to the top level.');">
+                                            <button class="btn btn-sm btn-outline-danger" type="submit">delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            </bx:loop>
+                        </tbody>
+                    </table>
+                </div>
+            <bx:else>
+                <div class="card-body text-body-secondary">
+                    No categories yet. Add one using the form on the left.
+                </div>
+            </bx:if>
+        </div>
+    </div>
+</div>
+</bx:output>

@@ -22,7 +22,7 @@
             <a href="/agent/tickets" class="btn btn-outline-secondary">
                 <i class="bi bi-collection me-1"></i>All tickets
             </a>
-            <a href="/agent/admin/knowledgebase/articles" class="btn btn-outline-secondary">
+            <a href="/agent/admin/kb" class="btn btn-outline-secondary">
                 <i class="bi bi-book me-1"></i>Knowledge base
             </a>
             <a href="/agent/reports" class="btn btn-outline-secondary">

@@ -71,6 +71,71 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( a.getId() );
             } );
 
+            describe( "category management", function(){
+
+                it( "creates a category and slugifies the name when no slug is given", function(){
+                    var c = variables.kb.createCategory( { name : "How Do I  Reset?" } );
+                    expect( c.getSlug() ).toBe( "how-do-i-reset" );
+                    cleanupCategory( c.getId() );
+                } );
+
+                it( "loads a category by id and returns null for an unknown id", function(){
+                    var c = variables.kb.createCategory( { name : "Lookup " & createUUID() } );
+                    expect( variables.kb.getCategoryById( c.getId() ).getName() ).toBe( c.getName() );
+                    expect( isNull( variables.kb.getCategoryById( createUUID() ) ) ).toBeTrue();
+                    cleanupCategory( c.getId() );
+                } );
+
+                it( "updates name, slug, and sort order", function(){
+                    var c = variables.kb.createCategory( { name : "Old " & createUUID(), slug : "old-" & lCase( replace( createUUID(), "-", "", "all" ) ), sortOrder : 1 } );
+                    var updated = variables.kb.updateCategory( c.getId(), { name : "New Name", slug : "new-name-" & lCase( replace( createUUID(), "-", "", "all" ) ), sortOrder : 9 } );
+                    expect( updated.getName() ).toBe( "New Name" );
+                    expect( val( updated.getSortOrder() ) ).toBe( 9 );
+                    cleanupCategory( c.getId() );
+                } );
+
+                it( "regenerates the slug from the name when the slug is cleared", function(){
+                    var c = variables.kb.createCategory( { name : "Keep " & createUUID(), slug : "keep-" & lCase( replace( createUUID(), "-", "", "all" ) ) } );
+                    var updated = variables.kb.updateCategory( c.getId(), { name : "Renamed Thing", slug : "" } );
+                    expect( updated.getSlug() ).toBe( "renamed-thing" );
+                    cleanupCategory( c.getId() );
+                } );
+
+                it( "never lets a category become its own parent", function(){
+                    var c = variables.kb.createCategory( { name : "Self " & createUUID() } );
+                    var updated = variables.kb.updateCategory( c.getId(), { parentId : c.getId() } );
+                    expect( updated.getParentId() ?: "" ).toBeEmpty();
+                    cleanupCategory( c.getId() );
+                } );
+
+                it( "lists categories with a live article count", function(){
+                    var cat = variables.kb.createCategory( { name : "Counted " & createUUID() } );
+                    var a   = variables.kb.createArticle( { title : "In Counted " & createUUID(), body : "x", categoryId : cat.getId() } );
+                    var rows  = variables.kb.listCategoriesWithCounts();
+                    var found = rows.filter( ( r ) => r.id == cat.getId() );
+                    expect( found.len() ).toBe( 1 );
+                    expect( found[ 1 ].articleCount ).toBe( 1 );
+                    cleanup( a.getId() );
+                    cleanupCategory( cat.getId() );
+                } );
+
+                it( "orphans articles and re-roots children when a category is deleted", function(){
+                    var parent = variables.kb.createCategory( { name : "Doomed " & createUUID() } );
+                    var child  = variables.kb.createCategory( { name : "Child " & createUUID(), parentId : parent.getId() } );
+                    var a      = variables.kb.createArticle( { title : "Orphan " & createUUID(), body : "x", categoryId : parent.getId() } );
+
+                    variables.kb.deleteCategory( parent.getId() );
+
+                    expect( isNull( variables.kb.getCategoryById( parent.getId() ) ) ).toBeTrue();
+                    expect( variables.kb.getArticleById( a.getId() ).getCategoryId() ?: "" ).toBeEmpty();
+                    expect( variables.kb.getCategoryById( child.getId() ).getParentId() ?: "" ).toBeEmpty();
+
+                    cleanup( a.getId() );
+                    cleanupCategory( child.getId() );
+                } );
+
+            } );
+
             describe( "canRead visibility decisions", function(){
 
                 it( "agent sees everything regardless of status", function(){
@@ -258,6 +323,10 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
         queryExecute( "DELETE FROM kb_article_organizations WHERE article_id = :id", { id : arguments.id } );
         queryExecute( "DELETE FROM audit_events          WHERE entity_id  = :id", { id : arguments.id } );
         queryExecute( "DELETE FROM kb_articles           WHERE id         = :id", { id : arguments.id } );
+    }
+
+    private void function cleanupCategory( required string id ){
+        queryExecute( "DELETE FROM kb_categories WHERE id = :id", { id : arguments.id } );
     }
 
 }

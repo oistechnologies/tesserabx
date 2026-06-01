@@ -1,58 +1,66 @@
 <bx:output>
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <p class="mb-0 text-body-secondary">All articles across every visibility tier. Drafts never reach the public surfaces.</p>
-    <div class="d-flex gap-2">
-        <bx:if ( prc.aiEnabled ?: false )>
-            <form method="post" action="/agent/admin/kb/reindex-embeddings" class="m-0">
-                <button class="btn btn-outline-info" type="submit" title="Generate vector embeddings for any published article that is missing one.">
-                    <i class="bi bi-stars"></i> Reindex embeddings
-                    <bx:if ( prc.missingEmbeddingCount ?: 0 ) gt 0>
-                        <span class="badge text-bg-warning ms-1">#prc.missingEmbeddingCount#</span>
-                    </bx:if>
-                </button>
-            </form>
-        </bx:if>
-        <a class="btn btn-primary" href="/agent/admin/kb/new"><i class="bi bi-plus-lg"></i> New article</a>
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1 class="h4 mb-0">Knowledge base</h1>
+            <div class="d-flex gap-2">
+                <bx:if prc.aiEnabled && prc.missingEmbeddingCount gt 0>
+                    <form method="post" action="/agent/admin/kb/reindex-embeddings">
+                        <button class="btn btn-outline-secondary" type="submit">
+                            <i class="bi bi-arrow-repeat"></i> Reindex embeddings (#prc.missingEmbeddingCount#)
+                        </button>
+                    </form>
+                </bx:if>
+                <a class="btn btn-outline-secondary" href="/agent/admin/kb/categories"><i class="bi bi-folder"></i> Manage categories</a>
+                <a class="btn btn-primary" href="/agent/admin/kb/new"><i class="bi bi-plus-lg"></i> New article</a>
+            </div>
+        </div>
     </div>
 </div>
 
 <div class="card">
     <div class="card-body p-0">
-        <div class="table-responsive">
-        <table class="table table-striped table-hover mb-0 align-middle">
-            <thead>
-                <tr>
-                    <th>Title</th>
-                    <th>Slug</th>
-                    <th>Visibility</th>
-                    <th>Status</th>
-                    <th>Views</th>
-                    <th>Updated</th>
-                </tr>
-            </thead>
-            <tbody>
-                <bx:if !arrayLen( prc.articles )>
-                    <tr><td colspan="6" class="text-center text-body-secondary py-4">No articles yet. <a href="/agent/admin/kb/new">Author one.</a></td></tr>
-                </bx:if>
-                <bx:loop array="#prc.articles#" item="a">
+        <bx:if arrayLen( prc.articles )>
+            <table class="table table-hover align-middle mb-0">
+                <thead>
                     <tr>
-                        <td><a href="/agent/admin/kb/#encodeForURL( a.getId() )#">#encodeForHTML( a.getTitle() )#</a></td>
-                        <td><code>#encodeForHTML( a.getSlug() )#</code></td>
-                        <td><span class="badge text-bg-secondary">#encodeForHTML( a.getVisibility() )#</span></td>
-                        <td>
-                            <bx:if a.isPublished()>
-                                <span class="badge text-bg-success">published</span>
-                            <bx:else>
-                                <span class="badge text-bg-warning">draft</span>
-                            </bx:if>
-                        </td>
-                        <td>#encodeForHTML( a.getViewCount() )#</td>
-                        <td><small>#encodeForHTML( dateTimeFormat( a.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#</small></td>
+                        <th>Title</th>
+                        <th>Category</th>
+                        <th>Visibility</th>
+                        <th>Status</th>
+                        <th class="text-end">Views</th>
+                        <th class="text-end">Updated</th>
                     </tr>
-                </bx:loop>
-            </tbody>
-        </table>
-        </div>
+                </thead>
+                <tbody>
+                    <bx:loop array="#prc.articles#" item="a">
+                        <bx:set local.catId = a.getCategoryId() ?: "" >
+                        <tr style="cursor:pointer" onclick="window.location='/agent/admin/kb/#encodeForHTMLAttribute( a.getId() )#'">
+                            <td>#encodeForHTML( a.getTitle() )#</td>
+                            <td class="text-body-secondary">
+                                <bx:if len( local.catId ) && structKeyExists( prc.categoryNames, local.catId )>
+                                    #encodeForHTML( prc.categoryNames[ local.catId ] )#
+                                <bx:else>
+                                    <span class="text-body-tertiary">&mdash;</span>
+                                </bx:if>
+                            </td>
+                            <td><span class="badge text-bg-light text-black">#encodeForHTML( a.getVisibility() )#</span></td>
+                            <td>
+                                <bx:if a.isPublished()>
+                                    <span class="badge text-bg-success">published</span>
+                                <bx:else>
+                                    <span class="badge text-bg-warning">draft</span>
+                                </bx:if>
+                            </td>
+                            <td class="text-end">#encodeForHTML( a.getViewCount() )#</td>
+                            <td class="text-end">#encodeForHTML( dateTimeFormat( a.getUpdatedAt(), "yyyy-mm-dd" ) )#</td>
+                        </tr>
+                    </bx:loop>
+                </tbody>
+            </table>
+        <bx:else>
+            <div class="card-body text-body-secondary">No articles yet. Author one.</div>
+        </bx:if>
     </div>
 </div>
 </bx:output>

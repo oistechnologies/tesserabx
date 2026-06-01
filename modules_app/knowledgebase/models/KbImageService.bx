@@ -1,0 +1,105 @@
+/**
+ * KbImageService: store inline article images on the PUBLIC CBFS disk
+ * so they can be referenced straight from <img src> in rendered
+ * markdown, no app round-trip.
+ *
+ * Mirrors ImageProcessingService@core for the disk write (cbfs.get(
+ * publicProvider).create(...) with default, world-readable mode) and
+ * builds the browser URL from cbfsPublicBaseUrl the way AvatarHelper
+ * does. Validation is image-only: extension allowlist, size cap, and a
+ * magic-byte sniff so a renamed non-image is rejected.
+ */
+class singleton=true {
+
+    property name="cbfs"           inject="DiskService@cbfs";
+    property name="publicProvider" inject="coldbox:setting:cbfsPublicProvider";
+    property name="publicBaseUrl"  inject="coldbox:setting:cbfsPublicBaseUrl";
+    // The per-image size cap is read straight from the environment with
+    // getSystemSetting (the same way TicketsService.validateUpload reads
+    // UPLOAD_MAX_BYTES) rather than via a registered coldbox:setting, so
+    // the service has no dependency on the config struct carrying it.
+
+    variables.ALLOWED = {
+        "png"  : "image/png",
+        "jpg"  : "image/jpeg",
+        "jpeg" : "image/jpeg",
+        "gif"  : "image/gif",
+        "webp" : "image/webp"
+    };
+
+    /**
+     * Validate and store an uploaded image. Throws
+     * KbImageService.Rejected with a human message on any failure.
+     *
+     * @sourcePath       temp path of the uploaded file on disk
+     * @originalFilename used only for the extension
+     * @articleId        groups images under the article; "" -> _unassigned
+     *
+     * Returns { url, path } where url is the browser-facing public URL.
+     */
+    public struct function storeArticleImage(
+        required string sourcePath,
+        required string originalFilename,
+        string articleId = ""
+    ){
+        var ext = lCase( listLast( arguments.originalFilename, "." ) );
+        if ( !structKeyExists( variables.ALLOWED, ext ) ) {
+            throw(
+                type    = "KbImageService.Rejected",
+                message = "Unsupported image type [.#ext#]. Allowed: png, jpg, jpeg, gif, webp."
+            );
+        }
+
+        var bytes = fileReadBinary( arguments.sourcePath );
+        var cap   = val( getSystemSetting( "KB_IMAGE_MAX_BYTES", "5242880" ) );
+        if ( cap > 0 && arrayLen( bytes ) > cap ) {
+            throw(
+                type    = "KbImageService.Rejected",
+                message = "Image is too large. The maximum is " & int( cap / 1024 / 1024 ) & "MB."
+            );
+        }
+        if ( !looksLikeImage( bytes, ext ) ) {
+            throw(
+                type    = "KbImageService.Rejected",
+                message = "That file does not look like a valid image."
+            );
+        }
+
+        var folder  = len( trim( arguments.articleId ) ) ? trim( arguments.articleId ) : "_unassigned";
+        var relPath = "kb/articles/" & folder & "/" & createUUID() & "." & ext;
+
+        cbfs.get( variables.publicProvider ).create(
+            path      = relPath,
+            contents  = bytes,
+            overwrite = true
+        );
+
+        return {
+            "url"  : variables.publicBaseUrl & "/" & relPath,
+            "path" : relPath
+        };
+    }
+
+    // ---------------- internals ----------------
+
+    /**
+     * Sniff the first bytes for PNG / JPEG / GIF / WEBP signatures.
+     * Bytes come back signed from fileReadBinary, so bitAnd( b, 255 )
+     * normalizes each to 0..255 before hex formatting.
+     */
+    private boolean function looksLikeImage( required any bytes, required string ext ){
+        var n = min( 12, arrayLen( arguments.bytes ) );
+        if ( n < 4 ) return false;
+        var head = "";
+        for ( var i = 1; i <= n; i++ ) {
+            head &= right( "0" & formatBaseN( bitAnd( arguments.bytes[ i ], 255 ), 16 ), 2 );
+        }
+        head = lCase( head );
+        if ( left( head, 8 ) == "89504e47" ) return true;                                  // PNG
+        if ( left( head, 6 ) == "ffd8ff" )   return true;                                  // JPEG
+        if ( left( head, 6 ) == "474946" )   return true;                                  // GIF8
+        if ( left( head, 8 ) == "52494646" && mid( head, 17, 8 ) == "57454250" ) return true; // RIFF....WEBP
+        return false;
+    }
+
+}

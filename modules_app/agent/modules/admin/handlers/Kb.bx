@@ -10,6 +10,7 @@
 class {
 
     property name="kb"              inject="KnowledgebaseService@knowledgebase";
+    property name="kbImages"        inject="KbImageService@knowledgebase";
     property name="contactsService" inject="ContactsService@contacts";
     property name="aiCapability"    inject="AiCapability@ai";
     property name="kbIndexer"       inject="KbIndexingService@ai";
@@ -25,6 +26,12 @@ class {
         prc.articles     = kb.listVisibleArticles(
             viewer = { kind : "agent" }
         );
+        // id -> name map so the list can show a category column
+        // without an N+1 relationship hit per row.
+        prc.categoryNames = {};
+        for ( var c in kb.listCategories() ) {
+            prc.categoryNames[ c.getId() ] = c.getName();
+        }
         prc.organizations = contactsService.listOrganizations();
         prc.aiEnabled     = aiCapability.isEnabled();
         prc.missingEmbeddingCount = prc.aiEnabled
@@ -142,6 +149,43 @@ class {
         relocate( uri = "/agent/admin/kb" );
     }
 
+    /**
+     * EasyMDE image upload target. Accepts a single multipart file in
+     * the "image" field plus an optional articleId, stores it on the
+     * public disk, and returns JSON { url } (or { error } on failure).
+     */
+    function uploadImage( event, rc, prc ){
+        var dest = getTempDirectory() & "/kb-img-" & createUUID() & "/";
+        try {
+            directoryCreate( dest, true, true );
+            var upload  = fileUpload( dest, "image", "", "makeunique" );
+            var stored  = kbImages.storeArticleImage(
+                sourcePath       = dest & upload.serverFile,
+                originalFilename = upload.clientFile ?: upload.serverFile,
+                articleId        = rc.articleId ?: ""
+            );
+            event.renderData( type = "json", data = { "url" : stored.url } );
+        } catch ( KbImageService.Rejected e ) {
+            event.setHTTPHeader( statusCode = 400 );
+            event.renderData( type = "json", data = { "error" : e.message } );
+        } catch ( any e ) {
+            event.setHTTPHeader( statusCode = 400 );
+            event.renderData( type = "json", data = { "error" : "Upload failed: " & e.message } );
+        } finally {
+            try { directoryDelete( dest, true ); } catch ( any ignore ) {}
+        }
+    }
+
+    /**
+     * Server-side markdown preview for EasyMDE's previewRender, so the
+     * editor preview matches the public /kb render exactly (Flexmark
+     * via markdown(), not the editor's bundled marked.js). Body arrives
+     * base64-encoded to survive the cbantisamy request interceptor.
+     */
+    function preview( event, rc, prc ){
+        event.renderData( type = "html", data = markdown( decodeBody( rc ) ) );
+    }
+
     // ---------- internals ----------
 
     private struct function readArticleFields( required struct rc ){
@@ -157,11 +201,28 @@ class {
         return {
             title           : trim( arguments.rc.title ),
             slug            : trim( arguments.rc.slug ),
-            body            : arguments.rc.body,
+            body            : decodeBody( arguments.rc ),
             visibility      : arguments.rc.visibility,
             categoryId      : trim( arguments.rc.categoryId ),
             organizationIds : orgIds
         };
+    }
+
+    /**
+     * The EasyMDE body is posted base64-encoded in bodyB64 so the
+     * cbantisamy request interceptor cannot collapse its newlines or
+     * encode its quotes. Decode that when present; otherwise fall back
+     * to a plain body field. Mirrors CustomFields.parseOptions.
+     */
+    private string function decodeBody( required struct rc ){
+        if ( structKeyExists( arguments.rc, "bodyB64" ) && len( trim( arguments.rc.bodyB64 ) ) ) {
+            try {
+                return toString( binaryDecode( trim( arguments.rc.bodyB64 ), "base64" ), "utf-8" );
+            } catch ( any e ) {
+                // fall through to the plain body
+            }
+        }
+        return arguments.rc.body ?: "";
     }
 
     private string function currentAgentId(){

@@ -124,6 +124,10 @@ class extends="coldbox.system.web.routing.Router" {
         // Declare the specific routes before the single-segment :slug
         // catch so /kb/category/<slug> is not swallowed by /kb/:slug.
         route( "/kb/category/:slug" ).withVerbs( "GET" ).to( "portal:Kb.category" );
+        // Article feedback (helpful / not helpful). POST-only and
+        // declared before /kb/:slug so the GET show route is not
+        // shadowed. Restricted to logged-in contacts in the handler.
+        route( "/kb/:slug/feedback" ).withVerbs( "POST" ).to( "portal:Kb.feedback" );
         route( "/kb/:slug" ).withVerbs( "GET" ).to( "portal:Kb.show" );
         route( "/kb" ).withVerbs( "GET" ).to( "portal:Kb.index" );
 

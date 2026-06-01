@@ -1,20 +1,16 @@
 /**
  * knowledgebase module router.
  *
- * Routes prefixed /kb (per entryPoint). Public read surface only;
- * authoring lives in agent/admin and calls KnowledgebaseService.
+ * The public read surface lives in the portal module (portal:Kb at
+ * /kb, declared in the app-level config/Router.bx) so there is a
+ * single source of truth that renders markdown bodies. This module
+ * owns the Article / Category / feedback entities, the
+ * KnowledgebaseService, the agent dashboard widgets, and the KB image
+ * service; it intentionally declares no public routes of its own.
  */
 class {
 
     function configure(){
-        // /kb/<slug>/feedback POST (helpful / not helpful).
-        route( ":slug/feedback" ).withVerbs( "POST" ).to( "Articles.feedback" );
-
-        // /kb/<slug>
-        route( ":slug" ).to( "Articles.show" );
-
-        // /kb
-        route( "/" ).to( "Articles.index" );
     }
 
 }

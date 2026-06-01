@@ -35,6 +35,25 @@ class {
             "GET"  : "new",
             "POST" : "create"
         } );
+
+        // KB category taxonomy. Declared before kb/:id so "categories"
+        // is not captured as an article id.
+        route( "kb/categories/:id/delete" ).withVerbs( "POST" ).to( "Categories.remove" );
+        route( "kb/categories/:id" ).withHandler( "Categories" ).toAction( {
+            "GET"  : "edit",
+            "POST" : "update"
+        } );
+        route( "kb/categories" ).withHandler( "Categories" ).toAction( {
+            "GET"  : "index",
+            "POST" : "create"
+        } );
+
+        // KB editor support endpoints (EasyMDE): image upload to the
+        // public disk and server-side markdown preview. Both POST-only
+        // and declared before kb/:id.
+        route( "kb/images" ).withVerbs( "POST" ).to( "Kb.uploadImage" );
+        route( "kb/preview" ).withVerbs( "POST" ).to( "Kb.preview" );
+
         route( "kb/:id/publish" ).withVerbs( "POST" ).to( "Kb.publish" );
         route( "kb/:id/unpublish" ).withVerbs( "POST" ).to( "Kb.unpublish" );
         route( "kb/:id/delete" ).withVerbs( "POST" ).to( "Kb.remove" );

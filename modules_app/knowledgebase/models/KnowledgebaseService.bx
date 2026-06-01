@@ -46,6 +46,103 @@ class singleton=true {
         return c;
     }
 
+    public any function getCategoryById( required string id ){
+        var c = wirebox.getInstance( "Category@knowledgebase" )
+            .where( "id", arguments.id ).first();
+        return isNull( c ) ? javaCast( "null", "" ) : c;
+    }
+
+    /**
+     * Update a category. name / slug / sortOrder go through Quick;
+     * parent_id is handled with targeted SQL so it can be cleared
+     * (and a category can never be its own parent). kb_categories has
+     * no exotic columns, so Quick .save() is safe here.
+     */
+    public any function updateCategory( required string id, required struct data ){
+        var c = getCategoryById( arguments.id );
+        if ( isNull( c ) ) {
+            throw( type = "KnowledgebaseService.UnknownCategory", message = "No category [#arguments.id#]." );
+        }
+        if ( structKeyExists( arguments.data, "name" ) && len( trim( arguments.data.name ) ) ) {
+            c.setName( trim( arguments.data.name ) );
+        }
+        if ( structKeyExists( arguments.data, "slug" ) ) {
+            c.setSlug( len( trim( arguments.data.slug ) ) ? trim( arguments.data.slug ) : slugify( c.getName() ) );
+        }
+        if ( structKeyExists( arguments.data, "sortOrder" ) ) {
+            c.setSortOrder( val( arguments.data.sortOrder ) );
+        }
+        var clearParent = false;
+        if ( structKeyExists( arguments.data, "parentId" ) ) {
+            var pid = trim( arguments.data.parentId );
+            if ( len( pid ) && pid != arguments.id ) {
+                c.setParentId( pid );
+            } else {
+                clearParent = true;
+            }
+        }
+        c.setUpdatedAt( now() );
+        c.save();
+        if ( clearParent ) {
+            queryExecute(
+                "UPDATE kb_categories SET parent_id = NULL WHERE id = :id",
+                { id : arguments.id }
+            );
+        }
+        return getCategoryById( arguments.id );
+    }
+
+    /**
+     * Delete a category. There are no DB foreign keys on category_id /
+     * parent_id, so detach by hand first: orphan its articles (no
+     * category) and re-root its child categories, then remove the row.
+     */
+    public void function deleteCategory( required string id ){
+        queryExecute(
+            "UPDATE kb_articles SET category_id = NULL WHERE category_id = :id",
+            { id : arguments.id }
+        );
+        queryExecute(
+            "UPDATE kb_categories SET parent_id = NULL WHERE parent_id = :id",
+            { id : arguments.id }
+        );
+        queryExecute(
+            "DELETE FROM kb_categories WHERE id = :id",
+            { id : arguments.id }
+        );
+    }
+
+    /**
+     * Categories for the management UI: each row carries its parent
+     * name and a live article count. Returns an array of structs
+     * ordered by sort_order then name.
+     */
+    public array function listCategoriesWithCounts(){
+        var rows = queryExecute(
+            "SELECT c.id, c.name, c.slug, c.parent_id, c.sort_order,
+                    p.name AS parent_name,
+                    ( SELECT COUNT(*) FROM kb_articles a WHERE a.category_id = c.id ) AS article_count
+             FROM   kb_categories c
+             LEFT JOIN kb_categories p ON p.id = c.parent_id
+             ORDER  BY c.sort_order, c.name",
+            {},
+            { returntype : "array" }
+        );
+        var out = [];
+        for ( var r in rows ) {
+            out.append( {
+                "id"           : r.id,
+                "name"         : r.name ?: "",
+                "slug"         : r.slug ?: "",
+                "parentId"     : r.parent_id ?: "",
+                "parentName"   : r.parent_name ?: "",
+                "sortOrder"    : val( r.sort_order ?: 0 ),
+                "articleCount" : val( r.article_count ?: 0 )
+            } );
+        }
+        return out;
+    }
+
     // ------------------ Articles (writes) ------------------
 
     public any function createArticle( required struct data, string authorAgentId = "" ){
@@ -486,7 +583,13 @@ class singleton=true {
     }
 
     private string function slugify( required string text ){
-        return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+        // Lower-case, collapse every non-alphanumeric run to a single
+        // dash, then strip leading/trailing dashes with a single
+        // alternation pass ("^-+|-+$" + "all"). A title ending in
+        // punctuation (e.g. "Reset?") would otherwise leave a dangling
+        // dash that leaks into article and category URLs.
+        var dashed = lCase( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ) );
+        return reReplace( dashed, "^-+|-+$", "", "all" );
     }
 
     // =====================================================================
@@ -521,7 +624,7 @@ class singleton=true {
                 "slug"      : rows.slug[ i ] ?: "",
                 "title"     : rows.title[ i ] ?: "",
                 "viewCount" : rows.view_count[ i ] ?: 0,
-                "url"       : "/agent/admin/knowledgebase/articles/" & rows.id[ i ]
+                "url"       : "/agent/admin/kb/" & rows.id[ i ]
             } );
         }
         return { "rows" : out };
@@ -591,7 +694,7 @@ class singleton=true {
                 "slug"      : rows.slug[ i ] ?: "",
                 "title"     : rows.title[ i ] ?: "(untitled)",
                 "updatedAt" : dateTimeFormat( rows.updated_at[ i ], "yyyy-mm-dd HH:nn" ),
-                "url"       : "/agent/admin/knowledgebase/articles/" & rows.id[ i ]
+                "url"       : "/agent/admin/kb/" & rows.id[ i ]
             } );
         }
         return { "rows" : out };

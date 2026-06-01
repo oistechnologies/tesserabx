@@ -1,0 +1,106 @@
+/**
+ * admin:Categories handler.
+ *
+ * Knowledge-base category taxonomy management at /agent/admin/kb/categories.
+ * Thin controller over KnowledgebaseService; never touches the Category
+ * entity directly. Admin-only via the cbSecurity rule on /agent/admin/*.
+ */
+class {
+
+    property name="kb"         inject="KnowledgebaseService@knowledgebase";
+    property name="messagebox" inject="messagebox@cbmessagebox";
+
+    function preHandler( event, rc, prc, action, eventArguments ){
+        event.setLayout( name = "Agent", module = "core" );
+    }
+
+    function index( event, rc, prc ){
+        prc.pageTitle  = "KB categories";
+        prc.categories = kb.listCategoriesWithCounts();
+        prc.parents    = kb.listCategories();
+        event.setView( "categories/index" );
+    }
+
+    function create( event, rc, prc ){
+        var data = readCategoryFields( rc );
+        if ( !len( data.name ) ) {
+            messagebox.warn( "A category name is required." );
+            relocate( uri = "/agent/admin/kb/categories" );
+            return;
+        }
+        try {
+            kb.createCategory( data );
+            messagebox.success( "Category created." );
+        } catch ( any e ) {
+            messagebox.error( slugConflictMessage( e, data.slug ) );
+        }
+        relocate( uri = "/agent/admin/kb/categories" );
+    }
+
+    function edit( event, rc, prc ){
+        var category = kb.getCategoryById( rc.id ?: "" );
+        if ( isNull( category ) ) {
+            messagebox.warn( "That category does not exist." );
+            relocate( uri = "/agent/admin/kb/categories" );
+            return;
+        }
+        prc.pageTitle = "Edit category";
+        prc.category  = category;
+        prc.parents   = kb.listCategories();
+        event.setView( "categories/edit" );
+    }
+
+    function update( event, rc, prc ){
+        var category = kb.getCategoryById( rc.id ?: "" );
+        if ( isNull( category ) ) {
+            messagebox.warn( "That category does not exist." );
+            relocate( uri = "/agent/admin/kb/categories" );
+            return;
+        }
+        var data = readCategoryFields( rc );
+        if ( !len( data.name ) ) {
+            messagebox.warn( "A category name is required." );
+            relocate( uri = "/agent/admin/kb/categories/" & category.getId() );
+            return;
+        }
+        try {
+            kb.updateCategory( category.getId(), data );
+            messagebox.success( "Category updated." );
+            relocate( uri = "/agent/admin/kb/categories" );
+        } catch ( any e ) {
+            messagebox.error( slugConflictMessage( e, data.slug ) );
+            relocate( uri = "/agent/admin/kb/categories/" & category.getId() );
+        }
+    }
+
+    function remove( event, rc, prc ){
+        kb.deleteCategory( rc.id ?: "" );
+        messagebox.success( "Category deleted. Its articles were left uncategorized." );
+        relocate( uri = "/agent/admin/kb/categories" );
+    }
+
+    // ---------- internals ----------
+
+    private struct function readCategoryFields( required struct rc ){
+        param arguments.rc.name      = "";
+        param arguments.rc.slug      = "";
+        param arguments.rc.parentId  = "";
+        param arguments.rc.sortOrder = "0";
+        return {
+            name      : trim( arguments.rc.name ),
+            slug      : trim( arguments.rc.slug ),
+            parentId  : trim( arguments.rc.parentId ),
+            sortOrder : val( arguments.rc.sortOrder )
+        };
+    }
+
+    private string function slugConflictMessage( required any e, required string slug ){
+        if ( findNoCase( "duplicate", e.message ) || findNoCase( "unique", e.message ) ) {
+            return "That slug is already in use"
+                & ( len( arguments.slug ) ? " (" & arguments.slug & ")" : "" )
+                & ". Pick a different name or slug.";
+        }
+        return "Could not save the category: " & e.message;
+    }
+
+}
