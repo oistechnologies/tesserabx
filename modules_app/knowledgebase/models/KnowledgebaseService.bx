@@ -583,13 +583,21 @@ class singleton=true {
     }
 
     private string function slugify( required string text ){
-        // Lower-case, collapse every non-alphanumeric run to a single
-        // dash, then strip leading/trailing dashes with a single
-        // alternation pass ("^-+|-+$" + "all"). A title ending in
-        // punctuation (e.g. "Reset?") would otherwise leave a dangling
-        // dash that leaks into article and category URLs.
-        var dashed = lCase( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ) );
-        return reReplace( dashed, "^-+|-+$", "", "all" );
+        // Lower-case and collapse every non-alphanumeric run to a single
+        // dash. The collapse leaves at most one dash at each end (a title
+        // ending in punctuation like "Reset?" would otherwise leak a
+        // trailing dash into article and category URLs), so strip those
+        // with straight-line if checks. An anchored trim reReplace
+        // ("^-+|-+$") and a while loop both misbehave inside a class
+        // method on the current BoxLang build, so neither is used here.
+        var slug = lCase( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ) );
+        if ( len( slug ) && left( slug, 1 ) == "-" ) {
+            slug = mid( slug, 2, len( slug ) );
+        }
+        if ( len( slug ) && right( slug, 1 ) == "-" ) {
+            slug = left( slug, len( slug ) - 1 );
+        }
+        return slug;
     }
 
     // =====================================================================

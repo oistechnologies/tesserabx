@@ -1068,7 +1068,17 @@ class singleton=true {
     }
 
     private string function slugify( required string text ){
-        return lCase( reReplace( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ), "(^-|-$)", "", "all" ) );
+        // Collapse non-alphanumeric runs to a dash, then strip the ends
+        // with plain string ops; BoxLang's anchored "-$" reReplace
+        // leaves a dangling trailing dash for names ending in punctuation.
+        var slug = lCase( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ) );
+        if ( len( slug ) && left( slug, 1 ) == "-" ) {
+            slug = mid( slug, 2, len( slug ) );
+        }
+        if ( len( slug ) && right( slug, 1 ) == "-" ) {
+            slug = left( slug, len( slug ) - 1 );
+        }
+        return slug;
     }
 
     /**

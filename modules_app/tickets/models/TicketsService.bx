@@ -387,7 +387,16 @@ class singleton=true {
     private string function slugifyTag( required string name ){
         var s = lCase( trim( arguments.name ) );
         s = reReplace( s, "[^a-z0-9]+", "-", "all" );
-        s = reReplace( s, "^-+|-+$", "", "all" );
+        // Strip a leading/trailing dash with straight-line if checks; the
+        // collapse above leaves at most one dash at each end. An anchored
+        // trim reReplace and a while loop both misbehave inside a class
+        // method on the current BoxLang build.
+        if ( len( s ) && left( s, 1 ) == "-" ) {
+            s = mid( s, 2, len( s ) );
+        }
+        if ( len( s ) && right( s, 1 ) == "-" ) {
+            s = left( s, len( s ) - 1 );
+        }
         return left( s, 80 );
     }
 
