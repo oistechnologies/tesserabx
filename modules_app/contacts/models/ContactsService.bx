@@ -96,7 +96,7 @@ class singleton=true {
         var org = wirebox.getInstance( "Organization@contacts" );
         org.setId( newId() );
         org.setName( arguments.data.name );
-        org.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : slugify( arguments.data.name ) );
+        org.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : makeSlug( arguments.data.name ) );
         applyOrganizationData( org, arguments.data );
         // Organizations carry no jsonb/PGobject column, so Quick's
         // save() is safe here (unlike Contact, which must use a
@@ -137,7 +137,7 @@ class singleton=true {
             org.setName( arguments.data.name );
         }
         if ( structKeyExists( arguments.data, "slug" ) && len( arguments.data.slug ) ) {
-            org.setSlug( slugify( arguments.data.slug ) );
+            org.setSlug( makeSlug( arguments.data.slug ) );
         }
         applyOrganizationData( org, arguments.data );
         org.save();
@@ -1067,10 +1067,11 @@ class singleton=true {
         return createObject( "java", "java.util.UUID" ).randomUUID().toString();
     }
 
-    private string function slugify( required string text ){
-        // Collapse non-alphanumeric runs to a dash, then strip the ends
-        // with plain string ops; BoxLang's anchored "-$" reReplace
-        // leaves a dangling trailing dash for names ending in punctuation.
+    // NOT named "slugify": that collides with BoxLang's slugify() BIF,
+    // which would shadow this method and skip the dash trim below.
+    private string function makeSlug( required string text ){
+        // Collapse non-alphanumeric runs to a dash, then strip a
+        // leading/trailing dash (the collapse leaves at most one per end).
         var slug = lCase( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ) );
         if ( len( slug ) && left( slug, 1 ) == "-" ) {
             slug = mid( slug, 2, len( slug ) );

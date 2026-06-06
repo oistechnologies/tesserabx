@@ -39,7 +39,7 @@ class singleton=true {
         var c = wirebox.getInstance( "Category@knowledgebase" );
         c.setId( newId() );
         c.setName( arguments.data.name );
-        c.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : slugify( arguments.data.name ) );
+        c.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : makeSlug( arguments.data.name ) );
         if ( len( arguments.data.parentId ?: "" ) ) c.setParentId( arguments.data.parentId );
         c.setSortOrder( arguments.data.sortOrder ?: 0 );
         c.save();
@@ -67,7 +67,7 @@ class singleton=true {
             c.setName( trim( arguments.data.name ) );
         }
         if ( structKeyExists( arguments.data, "slug" ) ) {
-            c.setSlug( len( trim( arguments.data.slug ) ) ? trim( arguments.data.slug ) : slugify( c.getName() ) );
+            c.setSlug( len( trim( arguments.data.slug ) ) ? trim( arguments.data.slug ) : makeSlug( c.getName() ) );
         }
         if ( structKeyExists( arguments.data, "sortOrder" ) ) {
             c.setSortOrder( val( arguments.data.sortOrder ) );
@@ -149,7 +149,7 @@ class singleton=true {
         var a = wirebox.getInstance( "Article@knowledgebase" );
         a.setId( newId() );
         a.setTitle( arguments.data.title );
-        a.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : slugify( arguments.data.title ) );
+        a.setSlug( len( arguments.data.slug ?: "" ) ? arguments.data.slug : makeSlug( arguments.data.title ) );
         a.setBody( arguments.data.body ?: "" );
         a.setVisibility( arguments.data.visibility ?: "internal" );
         a.setStatus( "draft" );
@@ -582,14 +582,20 @@ class singleton=true {
         return createObject( "java", "java.util.UUID" ).randomUUID().toString();
     }
 
-    private string function slugify( required string text ){
-        // Lower-case and collapse every non-alphanumeric run to a single
-        // dash. The collapse leaves at most one dash at each end (a title
-        // ending in punctuation like "Reset?" would otherwise leak a
-        // trailing dash into article and category URLs), so strip those
-        // with straight-line if checks. An anchored trim reReplace
-        // ("^-+|-+$") and a while loop both misbehave inside a class
-        // method on the current BoxLang build, so neither is used here.
+    /**
+     * Build a URL slug from arbitrary text.
+     *
+     * Deliberately NOT named "slugify": BoxLang ships a built-in
+     * slugify() BIF that shadows a same-named component method, so a
+     * call to slugify(...) elsewhere in this class would invoke the BIF
+     * (which lower-cases and collapses but does NOT strip a leading or
+     * trailing dash), leaving "How Do I  Reset?" as "how-do-i-reset-".
+     * Naming this makeSlug() ensures our own logic is the one that runs.
+     */
+    private string function makeSlug( required string text ){
+        // Collapse every non-alphanumeric run to a single dash, then trim
+        // a leading/trailing dash. The collapse leaves at most one dash at
+        // each end, so single if checks suffice.
         var slug = lCase( reReplace( arguments.text, "[^A-Za-z0-9]+", "-", "all" ) );
         if ( len( slug ) && left( slug, 1 ) == "-" ) {
             slug = mid( slug, 2, len( slug ) );
