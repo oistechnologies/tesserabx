@@ -12,9 +12,14 @@
 class {
 
     property name="contactsService" inject="ContactsService@contacts";
+    property name="imageProcessing" inject="ImageProcessingService@core";
     property name="messagebox"      inject="messagebox@cbmessagebox";
     property name="validator"       inject="ValidationManager@cbvalidation";
     property name="auth"            inject="AuthenticationService@cbauth";
+
+    // Contact avatars share the agent pipeline under this public-disk
+    // prefix (the portal self-service upload uses the same one).
+    variables.AVATAR_PREFIX = "contacts";
 
     function preHandler( event, rc, prc, action, eventArguments ){
         event.setLayout( name = "Agent", module = "core" );
@@ -42,6 +47,27 @@ class {
         prc.pageTitle     = "Contact: " & prc.contact.getEmail();
         prc.organization  = contactsService.getOrganizationById( prc.contact.getOrganizationId() );
         prc.roles         = contactsService.listRolesForContact( prc.contact.getId() );
+
+        // Office is an optional FK; resolve the display name when set.
+        prc.officeName = "";
+        var officeId = prc.contact.getOfficeId() ?: "";
+        if ( len( officeId ) ) {
+            var office = contactsService.getOfficeById( officeId );
+            if ( !isNull( office ) ) prc.officeName = office.getName() ?: "";
+        }
+
+        // Avatar render data. AvatarHelper draws the uploaded image when
+        // present and a deterministic initials badge otherwise, so the
+        // view always has a placeholder.
+        prc.hasAvatar = len( prc.contact.getProfileImageOriginalPath() ?: "" ) > 0;
+        prc.avatar = {
+            id         : prc.contact.getId(),
+            firstName  : prc.contact.getFirstName() ?: "",
+            lastName   : prc.contact.getLastName()  ?: "",
+            email      : prc.contact.getEmail()     ?: "",
+            hasAvatar  : prc.hasAvatar,
+            uploadedAt : prc.contact.getProfileImageUploadedAt()
+        };
         event.setView( "contacts/show" );
     }
 
@@ -159,6 +185,74 @@ class {
 
         messagebox.info( "Contact updated." );
         relocate( uri = "/agent/contacts/" & contact.getId() );
+    }
+
+    /**
+     * Multipart profile-image upload for a contact. Mirrors
+     * admin:Users.uploadAvatar but targets a Contact under the
+     * "contacts" public-disk prefix via ContactsService. Lives outside
+     * any cbwire component because cbwire's FileUpload object can't
+     * survive BoxLang's snapshot duplicate().
+     */
+    function uploadAvatar( event, rc, prc ){
+        param rc.id = "";
+        var contact = contactsService.getContactById( rc.id );
+        if ( isNull( contact ) ) {
+            messagebox.warn( "That contact does not exist." );
+            relocate( uri = "/agent/contacts" );
+            return;
+        }
+        if ( !structKeyExists( form, "profileImage" ) || !len( form.profileImage ?: "" ) ) {
+            messagebox.error( "Pick a file before submitting." );
+            relocate( uri = "/agent/contacts/" & rc.id );
+            return;
+        }
+        try {
+            var dest = getTempDirectory() & "/contact-avatar-" & createUUID() & "/";
+            directoryCreate( dest );
+            var result = fileUpload(
+                destination  = dest,
+                fileField    = "profileImage",
+                accept       = "image/jpeg,image/png,image/gif,image/webp",
+                nameConflict = "makeUnique"
+            );
+            var srcPath     = dest & result.serverFile;
+            var contentType = result.contentType & "/" & result.contentSubType;
+
+            var v = imageProcessing.validateUpload( srcPath, contentType );
+            if ( !v.ok ) {
+                messagebox.error( v.error );
+                directoryDelete( dest, true );
+                relocate( uri = "/agent/contacts/" & rc.id );
+                return;
+            }
+
+            var paths = imageProcessing.processProfileImage( rc.id, srcPath, contentType, variables.AVATAR_PREFIX );
+            contactsService.setProfileImage( rc.id, paths.original, contentType );
+            directoryDelete( dest, true );
+            messagebox.info( "Profile picture updated." );
+        } catch ( any e ) {
+            messagebox.error( "Profile picture upload failed: " & e.message );
+        }
+        relocate( uri = "/agent/contacts/" & rc.id );
+    }
+
+    function clearAvatar( event, rc, prc ){
+        param rc.id = "";
+        var contact = contactsService.getContactById( rc.id );
+        if ( isNull( contact ) ) {
+            messagebox.warn( "That contact does not exist." );
+            relocate( uri = "/agent/contacts" );
+            return;
+        }
+        try {
+            imageProcessing.deleteProfileImages( rc.id, variables.AVATAR_PREFIX );
+            contactsService.clearProfileImage( rc.id );
+            messagebox.info( "Profile picture removed." );
+        } catch ( any e ) {
+            messagebox.error( "Could not remove the picture: " & e.message );
+        }
+        relocate( uri = "/agent/contacts/" & rc.id );
     }
 
     // ---------------- internals ----------------

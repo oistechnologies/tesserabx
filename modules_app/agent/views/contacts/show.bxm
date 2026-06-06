@@ -3,44 +3,146 @@
     <div class="col-12 col-lg-8">
         <div class="card">
             <div class="card-body">
-                <h2 class="card-title h4">
-                    #encodeForHTML( prc.contact.getEmail() )#
-                    <bx:if isBoolean( prc.contact.getIsVip() ) and prc.contact.getIsVip()>
-                        <span class="badge text-bg-warning text-dark align-middle"><i class="bi bi-star-fill"></i> VIP</span>
-                    </bx:if>
-                </h2>
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <div class="flex-shrink-0">
+                        #getInstance( "AvatarHelper@core" ).renderFromStruct( prc.avatar, 128, "contacts" )#
+                    </div>
+                    <div class="flex-grow-1">
+                        <h2 class="h4 mb-1">
+                            <bx:set local.fullName = trim( ( prc.contact.getFirstName() ?: "" ) & " " & ( prc.contact.getLastName() ?: "" ) ) >
+                            <bx:if len( local.fullName )>#encodeForHTML( local.fullName )#<bx:else><span class="text-body-secondary fst-italic">No name on file</span></bx:if>
+                        </h2>
+                        <div class="text-body-secondary">#encodeForHTML( prc.contact.getEmail() )#</div>
+                        <div class="mt-2 d-flex flex-wrap gap-1">
+                            <bx:if prc.contact.getIsActive()>
+                                <span class="badge text-bg-success">Active</span>
+                            <bx:else>
+                                <span class="badge text-bg-secondary">Inactive</span>
+                            </bx:if>
+                            <bx:if isBoolean( prc.contact.getIsVip() ) and prc.contact.getIsVip()>
+                                <span class="badge text-bg-warning text-dark"><i class="bi bi-star-fill"></i> VIP</span>
+                            </bx:if>
+                            <bx:if isBoolean( prc.contact.getMfaEnabled() ) and prc.contact.getMfaEnabled()>
+                                <span class="badge text-bg-info"><i class="bi bi-shield-lock"></i> MFA</span>
+                            </bx:if>
+                        </div>
+                    </div>
+                </div>
+
+                <hr>
+
                 <dl class="row mb-0">
-                    <dt class="col-sm-3">Name</dt>
-                    <dd class="col-sm-9">#encodeForHTML( ( prc.contact.getFirstName() ?: "" ) & " " & ( prc.contact.getLastName() ?: "" ) )#</dd>
-
-                    <dt class="col-sm-3">Organization</dt>
-                    <dd class="col-sm-9">
-                        <bx:if !isNull( prc.organization )>
-                            #encodeForHTML( prc.organization.getName() )#
-                        </bx:if>
+                    <dt class="col-sm-4">Organization</dt>
+                    <dd class="col-sm-8">
+                        <bx:if !isNull( prc.organization )>#encodeForHTML( prc.organization.getName() )#<bx:else><span class="text-body-secondary">None</span></bx:if>
                     </dd>
 
-                    <dt class="col-sm-3">Status</dt>
-                    <dd class="col-sm-9">
-                        <bx:if prc.contact.getIsActive()>
-                            <span class="badge text-bg-success">Active</span>
+                    <dt class="col-sm-4">Office</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.officeName )>#encodeForHTML( prc.officeName )#<bx:else><span class="text-body-secondary">None</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Job title</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.contact.getJobTitle() ?: "" )>#encodeForHTML( prc.contact.getJobTitle() )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Phone</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.contact.getPhone() ?: "" )>#encodeForHTML( prc.contact.getPhone() )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Mobile</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.contact.getMobilePhone() ?: "" )>#encodeForHTML( prc.contact.getMobilePhone() )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Time zone</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.contact.getTimezone() ?: "" )>#encodeForHTML( prc.contact.getTimezone() )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Locale</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.contact.getLocale() ?: "" )>#encodeForHTML( prc.contact.getLocale() )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Source</dt>
+                    <dd class="col-sm-8">
+                        <bx:if len( prc.contact.getSource() ?: "" )>#encodeForHTML( prc.contact.getSource() )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Two-factor</dt>
+                    <dd class="col-sm-8">
+                        <bx:if isBoolean( prc.contact.getMfaEnabled() ) and prc.contact.getMfaEnabled()>
+                            <span class="badge text-bg-info">Enabled</span>
                         <bx:else>
-                            <span class="badge text-bg-secondary">Inactive</span>
+                            <span class="badge text-bg-light text-black">Disabled</span>
                         </bx:if>
                     </dd>
 
-                    <dt class="col-sm-3">Created</dt>
-                    <dd class="col-sm-9">#encodeForHTML( dateTimeFormat( prc.contact.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+                    <dt class="col-sm-4">Last login</dt>
+                    <dd class="col-sm-8">
+                        <bx:if !isNull( prc.contact.getLastLoginAt() )>#encodeForHTML( dateTimeFormat( prc.contact.getLastLoginAt(), "yyyy-mm-dd HH:nn" ) )#<bx:else><span class="text-body-secondary">Never</span></bx:if>
+                    </dd>
+
+                    <dt class="col-sm-4">Created</dt>
+                    <dd class="col-sm-8">#encodeForHTML( dateTimeFormat( prc.contact.getCreatedAt(), "yyyy-mm-dd HH:nn" ) )#</dd>
+
+                    <dt class="col-sm-4">Updated</dt>
+                    <dd class="col-sm-8">
+                        <bx:if !isNull( prc.contact.getUpdatedAt() )>#encodeForHTML( dateTimeFormat( prc.contact.getUpdatedAt(), "yyyy-mm-dd HH:nn" ) )#<bx:else><span class="text-body-secondary">Not set</span></bx:if>
+                    </dd>
                 </dl>
+
+                <bx:if len( prc.contact.getNotes() ?: "" )>
+                    <hr>
+                    <h3 class="h6 text-body-secondary">
+                        Internal notes <span class="badge text-bg-light text-black">Agent only</span>
+                    </h3>
+                    <p class="mb-0" style="white-space:pre-wrap;">#encodeForHTML( prc.contact.getNotes() )#</p>
+                </bx:if>
             </div>
             <div class="card-footer text-end">
-                <a class="btn btn-outline-secondary" href="/agent/contacts?organizationId=#encodeForURL( prc.contact.getOrganizationId() )#">Back to list</a>
+                <a class="btn btn-outline-secondary" href="/agent/contacts?organizationId=#encodeForURL( prc.contact.getOrganizationId() ?: "" )#">Back to list</a>
                 <a class="btn btn-primary" href="/agent/contacts/#encodeForURL( prc.contact.getId() )#/edit">Edit</a>
             </div>
         </div>
     </div>
 
     <div class="col-12 col-lg-4">
+        <div class="card mb-3">
+            <div class="card-header"><strong>Profile picture</strong></div>
+            <div class="card-body">
+                <form method="post"
+                      action="/agent/contacts/#encodeForHTMLAttribute( prc.contact.getId() )#/avatar"
+                      enctype="multipart/form-data"
+                      class="mb-2">
+                    <label class="form-label small text-body-secondary">Upload a new picture</label>
+                    <div class="input-group input-group-sm">
+                        <input type="file"
+                               name="profileImage"
+                               class="form-control"
+                               accept="image/jpeg,image/png,image/gif,image/webp"
+                               required>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-cloud-upload"></i> Upload
+                        </button>
+                    </div>
+                    <div class="form-text small">JPG, PNG, GIF, or WebP. Cropped square; resized to 32/64/128/256 px.</div>
+                </form>
+                <bx:if prc.hasAvatar>
+                    <form method="post"
+                          action="/agent/contacts/#encodeForHTMLAttribute( prc.contact.getId() )#/avatar/clear"
+                          onsubmit="return confirm('Remove this profile picture?');">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> Clear picture
+                        </button>
+                    </form>
+                </bx:if>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-header"><strong>Roles</strong></div>
             <div class="card-body">

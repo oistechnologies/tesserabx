@@ -86,6 +86,12 @@ class {
         // /contacts/:id.
         route( "contacts/new" ).to( "Contacts.new" );
         route( "contacts/:id/edit" ).to( "Contacts.edit" );
+        // Profile-image upload + clear for a contact. Plain multipart
+        // POSTs (not cbwire) for the same FileUpload-snapshot reason as
+        // the agent / admin avatar forms. Declared above /contacts/:id
+        // so the three-segment patterns are matched explicitly.
+        route( "contacts/:id/avatar/clear" ).withVerbs( "POST" ).to( "Contacts.clearAvatar" );
+        route( "contacts/:id/avatar" ).withVerbs( "POST" ).to( "Contacts.uploadAvatar" );
         route( "contacts/:id" ).withHandler( "Contacts" ).toAction( {
             "GET"  : "show",
             "POST" : "update"
