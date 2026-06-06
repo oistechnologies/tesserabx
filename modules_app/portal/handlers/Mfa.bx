@@ -198,10 +198,17 @@ class {
         return session;
     }
 
-    private array function parseRecoveryCodes( required string raw ){
-        if ( !len( arguments.raw ) ) return [];
+    private array function parseRecoveryCodes( required any raw ){
+        // Quick hands back the mfa_recovery_codes Postgres `json`
+        // column as a PGobject (a Java object), not a string. Coerce
+        // it to its text value before parsing; passing the PGobject
+        // straight into a string-typed param throws a cast error. A
+        // NULL/blank column means the account has no recovery codes.
+        if ( isArray( arguments.raw ) ) return arguments.raw;
+        var text = isSimpleValue( arguments.raw ) ? arguments.raw : arguments.raw.toString();
+        if ( !len( trim( text ) ) ) return [];
         try {
-            var arr = jsonDeserialize( arguments.raw );
+            var arr = jsonDeserialize( text );
             return isArray( arr ) ? arr : [];
         } catch ( any e ) {
             return [];
