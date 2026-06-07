@@ -242,10 +242,76 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
 
             } );
 
+            describe( "password reset (R3)", function(){
+
+                it( "issueResetToken + confirmPasswordReset sets a new password and consumes the token", function(){
+                    var id    = variables.svc.createAgent( data : { email : uniqueEmail(), password : "orig-pass-1234" } );
+                    var token = variables.svc.issueResetToken( id );
+                    expect( len( token ) ).toBeGTE( 32 );
+
+                    var result = variables.svc.confirmPasswordReset( token, "new-pass-5678" );
+                    expect( result.ok ).toBeTrue();
+                    expect( result.agentId ).toBe( id );
+
+                    var agent = variables.svc.getAgentById( id );
+                    expect( variables.bcrypt.checkPassword( "new-pass-5678", agent.getPasswordHash() ) ).toBeTrue();
+                    expect( resetConsumedCount( id ) ).toBe( 1 );
+                    cleanupAgent( id );
+                } );
+
+                it( "confirmPasswordReset rejects a replayed (already-consumed) token", function(){
+                    var id    = variables.svc.createAgent( data : { email : uniqueEmail(), password : "orig-pass-1234" } );
+                    var token = variables.svc.issueResetToken( id );
+                    variables.svc.confirmPasswordReset( token, "new-pass-5678" );
+                    expect( variables.svc.confirmPasswordReset( token, "other-pass-9999" ).ok ).toBeFalse();
+                    cleanupAgent( id );
+                } );
+
+                it( "confirmPasswordReset rejects an expired token", function(){
+                    var id    = variables.svc.createAgent( data : { email : uniqueEmail(), password : "orig-pass-1234" } );
+                    var token = variables.svc.issueResetToken( id );
+                    queryExecute(
+                        "UPDATE agent_password_tokens SET expires_at = NOW() - INTERVAL '1 hour' WHERE agent_id = :id",
+                        { id : id }
+                    );
+                    expect( variables.svc.confirmPasswordReset( token, "new-pass-5678" ).ok ).toBeFalse();
+                    cleanupAgent( id );
+                } );
+
+                it( "confirmPasswordReset rejects a too-short password", function(){
+                    var id    = variables.svc.createAgent( data : { email : uniqueEmail(), password : "orig-pass-1234" } );
+                    var token = variables.svc.issueResetToken( id );
+                    expect( variables.svc.confirmPasswordReset( token, "short" ).ok ).toBeFalse();
+                    cleanupAgent( id );
+                } );
+
+                it( "setPassword overwrites without a current-password check", function(){
+                    var id = variables.svc.createAgent( data : { email : uniqueEmail(), password : "orig-pass-1234" } );
+                    variables.svc.setPassword( id, "brand-new-9999" );
+                    var agent = variables.svc.getAgentById( id );
+                    expect( variables.bcrypt.checkPassword( "brand-new-9999", agent.getPasswordHash() ) ).toBeTrue();
+                    cleanupAgent( id );
+                } );
+
+                it( "requestPasswordReset is a silent no-op for an unknown email", function(){
+                    expect( function(){
+                        variables.svc.requestPasswordReset( "nobody-" & createUUID() & "@example.com" );
+                    } ).notToThrow();
+                } );
+
+            } );
+
         } );
     }
 
     // ---------------- helpers ----------------
+
+    private numeric function resetConsumedCount( required string agentId ){
+        return queryExecute(
+            "SELECT COUNT(*) AS n FROM agent_password_tokens WHERE agent_id = :id AND consumed_at IS NOT NULL",
+            { id : arguments.agentId }, { returntype : "array" }
+        )[ 1 ].n;
+    }
 
     private string function uniqueEmail(){
         return "agent-spec-" & replace( createUUID(), "-", "", "all" ) & "@example.com";

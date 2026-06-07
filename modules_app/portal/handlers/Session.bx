@@ -47,13 +47,17 @@ class {
     }
 
     /**
-     * Public set-password page for a member invite link
-     * (/set-password?token=...). Whitelisted in PortalSecurityRules.
-     * The form posts the token back in a hidden field.
+     * Public set-password page. Serves both the member invite link
+     * (/set-password?token=...) and the password-reset link
+     * (/set-password?reset=1&token=...); the reset flag only switches
+     * the page copy. Whitelisted in PortalSecurityRules. The form
+     * posts the token (and reset flag) back in hidden fields.
      */
     function setPasswordForm( event, rc, prc ){
         param rc.token = "";
-        prc.pageTitle = "Set your password";
+        param rc.reset = "";
+        prc.isReset   = ( rc.reset == "1" );
+        prc.pageTitle = prc.isReset ? "Reset your password" : "Set your password";
         event.setLayout( name = "Auth", module = "core" );
         prc.token = trim( rc.token );
         event.setView( "session/set-password" );
@@ -61,23 +65,54 @@ class {
 
     function setPasswordSubmit( event, rc, prc ){
         param rc.token              = "";
+        param rc.reset              = "";
         param rc.newPassword        = "";
         param rc.newPasswordConfirm = "";
         event.setLayout( name = "Auth", module = "core" );
 
+        // Preserve the reset flag across redirects so the page copy
+        // stays consistent through a validation bounce.
+        var suffix = "token=" & urlEncodedFormat( rc.token )
+                   & ( rc.reset == "1" ? "&reset=1" : "" );
+
         if ( rc.newPassword != rc.newPasswordConfirm ) {
             messagebox.error( "The passwords do not match." );
-            relocate( uri = "/set-password?token=" & urlEncodedFormat( rc.token ) );
+            relocate( uri = "/set-password?" & suffix );
             return;
         }
         var result = inviteService.confirmSetPassword( trim( rc.token ), rc.newPassword );
         if ( result.ok ) {
-            messagebox.info( "Your password is set. You can now sign in." );
+            messagebox.info(
+                rc.reset == "1"
+                    ? "Your password has been reset. You can now sign in."
+                    : "Your password is set. You can now sign in."
+            );
             relocate( uri = "/login" );
             return;
         }
         messagebox.error( result.error );
-        relocate( uri = "/set-password?token=" & urlEncodedFormat( rc.token ) );
+        relocate( uri = "/set-password?" & suffix );
+    }
+
+    /**
+     * Public "forgot password" request page (/forgot-password).
+     * Whitelisted in PortalSecurityRules. GET renders the email form;
+     * POST always shows the same neutral confirmation regardless of
+     * whether the address has an account, so it cannot be used to
+     * enumerate registered emails.
+     */
+    function forgotPasswordForm( event, rc, prc ){
+        prc.pageTitle = "Reset your password";
+        event.setLayout( name = "Auth", module = "core" );
+        event.setView( "session/forgot-password" );
+    }
+
+    function forgotPasswordSubmit( event, rc, prc ){
+        param rc.email = "";
+        event.setLayout( name = "Auth", module = "core" );
+        inviteService.requestPasswordReset( rc.email );
+        messagebox.info( "If an account exists for that email, we have sent a link to reset the password." );
+        relocate( uri = "/login" );
     }
 
 }

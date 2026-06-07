@@ -397,7 +397,7 @@ class {
                         // agent (role "agent"). Login/logout pages are
                         // whitelisted.
                         {
-                            whitelist   : "^agent/(login|logout)(/|$)",
+                            whitelist   : "^agent/(login|logout|forgot-password|reset-password)(/|$)",
                             secureList  : "^agent($|/)",
                             match       : "url",
                             roles       : "agent",

@@ -228,7 +228,82 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( agentId, "" );
             } );
 
+            // ---- Email audit R1: ticket.assigned ----
+
+            it( "dispatches ticket.assigned to the new agent on inapp + email (R1)", function(){
+                var agentId = createUUID();
+                var created = variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.assigned",
+                    recipients : [ { "type" : "agent", "id" : agentId } ],
+                    context    : {
+                        "ticketId"     : "spec-assigned",
+                        "ticketNumber" : 4321,
+                        "subject"      : "need help",
+                        "status"       : "open"
+                    }
+                );
+                // One agent recipient, two seeded templates (inapp + email).
+                var byChannel = {};
+                for ( var n in created ) byChannel[ n.getChannel() ] = n;
+                expect( byChannel ).toHaveKey( "inapp" );
+                expect( byChannel ).toHaveKey( "email" );
+                expect( byChannel.inapp.getStatus() ).toBe( "sent" );
+                expect( byChannel.inapp.getTitle() ).toInclude( "4321" );
+                expect( byChannel.inapp.getBody() ).toInclude( "need help" );
+                cleanup( agentId, "" );
+            } );
+
+            // ---- Email audit R2: customer-reply email to the agent ----
+
+            it( "ticket.message_added now reaches the agent on email too (R2)", function(){
+                var agentId = createUUID();
+                variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.message_added",
+                    recipients : [ { "type" : "agent", "id" : agentId } ],
+                    context    : {
+                        "ticketId"     : "t",
+                        "ticketNumber" : 7,
+                        "subject"      : "reopen please",
+                        "authorLabel"  : "Customer",
+                        "status"       : "open"
+                    }
+                );
+                var channels = channelsFor( agentId );
+                expect( channels ).toInclude( "inapp" );
+                expect( channels ).toInclude( "email" );
+                cleanup( agentId, "" );
+            } );
+
+            it( "ticket.message_added still does NOT email the contact (no double-send invariant)", function(){
+                var contactId = createUUID();
+                variables.svc.dispatchForEvent(
+                    eventKey   : "ticket.message_added",
+                    recipients : [ { "type" : "contact", "id" : contactId } ],
+                    context    : {
+                        "ticketId"     : "t",
+                        "ticketNumber" : 8,
+                        "subject"      : "thanks",
+                        "authorLabel"  : "Agent",
+                        "status"       : "open"
+                    }
+                );
+                var channels = channelsFor( contactId );
+                expect( channels ).toInclude( "inapp" );
+                expect( channels ).notToInclude( "email" );
+                cleanup( "", contactId );
+            } );
+
         } );
+    }
+
+    private array function channelsFor( required string recipientId ){
+        var rows = queryExecute(
+            "SELECT channel FROM notifications WHERE recipient_id = :id",
+            { id : arguments.recipientId }
+        );
+        var out = [];
+        for ( var i = 1; i <= rows.recordCount; i++ ) out.append( rows.channel[ i ] );
+        return out;
     }
 
     private void function cleanup( required string agentId, required string contactId ){

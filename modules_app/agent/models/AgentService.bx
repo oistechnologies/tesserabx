@@ -25,6 +25,7 @@ class singleton=true {
     property name="bcrypt"              inject="@BCrypt";
     property name="interceptorService"  inject="coldbox:interceptorService";
     property name="eventPayloadBuilder" inject="EventPayloadBuilder@core";
+    property name="mailComposer"        inject="MailComposerService@core";
 
     // Whitelist for sortable columns on listAgents. Anything outside
     // this set falls back to email.
@@ -705,6 +706,131 @@ class singleton=true {
             { id : arguments.agentId, h : hash }
         );
         recordAudit( "agent.password_changed", arguments.agentId, arguments.agentId, {} );
+    }
+
+    // -------------------------------------------------------------
+    //  Password reset (self-service, token-based)
+    // -------------------------------------------------------------
+
+    /**
+     * Overwrite an agent's password with no current-password check.
+     * Backs the token-consume step of the self-service reset. Does not
+     * touch is_active or MFA: login still enforces the agent's MFA
+     * factor on the far side, so a reset only swaps the password.
+     */
+    public void function setPassword( required string agentId, required string newPassword ){
+        if ( len( arguments.newPassword ) < 8 ) {
+            throw( type : "AgentService.WeakPassword", message : "Password must be at least 8 characters." );
+        }
+        var hash = bcrypt.hashPassword( arguments.newPassword );
+        queryExecute(
+            "UPDATE agents SET password_hash = :h, updated_at = NOW() WHERE id = :id",
+            { id : arguments.agentId, h : hash }
+        );
+        recordAudit( "agent.password_changed", arguments.agentId, "", { "via" : "reset" } );
+    }
+
+    /**
+     * Self-service reset request. Looks up the agent by email and,
+     * when found, issues a short-lived token and emails an
+     * /agent/reset-password link. Returns nothing and never reveals
+     * whether an account exists for the address (no user enumeration);
+     * the handler shows the same neutral message either way.
+     */
+    public void function requestPasswordReset( required string email ){
+        var clean = lCase( trim( arguments.email ) );
+        if ( !len( clean ) ) return;
+        var agent = getAgentByEmail( clean );
+        if ( isNull( agent ) ) return;
+        var rawToken = issueResetToken( agent.getId() );
+        sendResetEmail( clean, rawToken );
+    }
+
+    /**
+     * Write a fresh single-use reset token for an agent and return the
+     * raw value (the row stores only its SHA-256 hash). TTL is
+     * PASSWORD_RESET_TTL_HOURS hours (default 2).
+     */
+    public string function issueResetToken( required string agentId ){
+        var rawToken  = generateResetToken();
+        var tokenHash = hash( rawToken, "SHA-256" );
+        var ttlHours  = int( getSystemSetting( "PASSWORD_RESET_TTL_HOURS", 2 ) );
+        queryExecute(
+            "INSERT INTO agent_password_tokens
+                ( id, agent_id, token_hash, purpose, expires_at, created_at )
+             VALUES
+                ( :id, :aid, :h, 'reset', NOW() + cast( :ttl as interval ), NOW() )",
+            { id : createUUID(), aid : arguments.agentId, h : tokenHash, ttl : ttlHours & " hours" }
+        );
+        return rawToken;
+    }
+
+    /**
+     * Consume a reset token: validate (unexpired, unconsumed), set the
+     * new password, stamp consumed_at. Returns { ok, error, agentId };
+     * never throws on a bad token so the public page can show one
+     * friendly message.
+     */
+    public struct function confirmPasswordReset( required string token, required string newPassword ){
+        if ( !len( arguments.token ) ) return { ok : false, error : "This link is invalid." };
+        if ( len( arguments.newPassword ) < 8 ) return { ok : false, error : "Password must be at least 8 characters." };
+
+        var tokenHash = hash( arguments.token, "SHA-256" );
+        var rows = queryExecute(
+            "SELECT id, agent_id
+             FROM   agent_password_tokens
+             WHERE  token_hash  = :h
+               AND  consumed_at IS NULL
+               AND  expires_at  > NOW()",
+            { h : tokenHash }
+        );
+        if ( !rows.recordCount ) {
+            return { ok : false, error : "This link is invalid, expired, or already used." };
+        }
+        var tokenId = rows.id[ 1 ];
+        var agentId = rows.agent_id[ 1 ];
+        setPassword( agentId, arguments.newPassword );
+        queryExecute(
+            "UPDATE agent_password_tokens SET consumed_at = NOW() WHERE id = :id",
+            { id : tokenId }
+        );
+        return { ok : true, error : "", agentId : agentId };
+    }
+
+    private string function generateResetToken(){
+        return replace( createUUID(), "-", "", "all" )
+             & replace( createUUID(), "-", "", "all" );
+    }
+
+    private void function sendResetEmail( required string toEmail, required string rawToken ){
+        try {
+            var rawBase = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var base    = isSimpleValue( rawBase ) ? rawBase : "http://localhost:8080";
+            var link    = base & "/agent/reset-password?token=" & arguments.rawToken;
+            var nl      = char( 10 );
+            var body = "Hello," & nl & nl
+                & "We received a request to reset the password on your TesseraBX agent account." & nl
+                & "Click the link below to choose a new password:" & nl & nl
+                & link & nl & nl
+                & "If you did not request this you can safely ignore this message; your password will not change." & nl & nl
+                & "Multi-factor authentication on your account is unchanged: you will still be asked for your authenticator code at sign in." & nl;
+            var mail = mailComposer.compose(
+                to            = arguments.toEmail,
+                subject       = "Reset your TesseraBX agent password",
+                body          = body,
+                bodyFormat    = "text",
+                recipientType = "agent",
+                eventKey      = "agent.password_reset.request",
+                preheader     = "Reset your TesseraBX agent password."
+            );
+            mailComposer.send( mail );
+        } catch ( any e ) {
+            writeLog(
+                text : "AgentService reset email send failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
     }
 
     // -------------------------------------------------------------

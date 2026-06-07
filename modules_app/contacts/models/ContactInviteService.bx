@@ -57,20 +57,54 @@ class singleton=true {
 
     /**
      * Write a fresh set-password token for a contact and return the
-     * raw value. Reusable by a future "resend invite" / password-reset.
+     * raw value. Used by both the invite flow (purpose "invite") and
+     * the self-service password reset (purpose "reset"); the consume
+     * path (confirmSetPassword) treats both the same, so the only
+     * difference is the token's purpose label and its lifetime.
+     *
+     * @purpose   "invite" (default) or "reset". Stored on the row.
+     * @ttlHours  Lifetime override; <= 0 falls back to the invite TTL.
      */
-    public string function issueToken( required string contactId ){
+    public string function issueToken(
+        required string contactId,
+        string purpose = "invite",
+        numeric ttlHours = 0
+    ){
         var rawToken  = generateToken();
         var tokenHash = hash( rawToken, "SHA-256" );
-        var ttlHours  = int( getSystemSetting( "CONTACT_INVITE_TTL_HOURS", variables.defaultTtlHours ) );
+        var hours     = arguments.ttlHours > 0
+            ? arguments.ttlHours
+            : int( getSystemSetting( "CONTACT_INVITE_TTL_HOURS", variables.defaultTtlHours ) );
         queryExecute(
             "INSERT INTO contact_password_tokens
                 ( id, contact_id, token_hash, purpose, expires_at, created_at )
              VALUES
-                ( :id, :cid, :h, 'invite', NOW() + cast( :ttl as interval ), NOW() )",
-            { id : createUUID(), cid : arguments.contactId, h : tokenHash, ttl : ttlHours & " hours" }
+                ( :id, :cid, :h, :purpose, NOW() + cast( :ttl as interval ), NOW() )",
+            { id : createUUID(), cid : arguments.contactId, h : tokenHash, purpose : arguments.purpose, ttl : hours & " hours" }
         );
         return rawToken;
+    }
+
+    /**
+     * Self-service password reset request (R3). Looks up the contact
+     * by email and, when found, issues a short-lived reset token and
+     * emails a /set-password link. Returns nothing and never reveals
+     * whether an account exists for the address: the portal handler
+     * shows the same neutral message either way, so this is not a user
+     * enumeration oracle.
+     *
+     * The reset token rides the same contact_password_tokens table and
+     * /set-password consume path as an invite, so no new consume code
+     * is needed; only the email copy and TTL differ.
+     */
+    public void function requestPasswordReset( required string email ){
+        var clean = lCase( trim( arguments.email ) );
+        if ( !len( clean ) ) return;
+        var contact = contactsService.getContactByEmail( clean );
+        if ( isNull( contact ) ) return;
+        var ttl      = int( getSystemSetting( "PASSWORD_RESET_TTL_HOURS", 2 ) );
+        var rawToken = issueToken( contact.getId(), "reset", ttl );
+        sendResetEmail( clean, rawToken );
     }
 
     /**
@@ -137,6 +171,39 @@ class singleton=true {
         } catch ( any e ) {
             writeLog(
                 text : "ContactInviteService email send failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    private void function sendResetEmail( required string toEmail, required string rawToken ){
+        try {
+            var rawBase = getSystemSetting( "APP_BASE_URL", "http://localhost:8080" );
+            var base    = isSimpleValue( rawBase ) ? rawBase : "http://localhost:8080";
+            // The reset link rides the existing /set-password consume
+            // page; the reset=1 flag only switches the page copy from
+            // "activate your account" to "choose a new password".
+            var link    = base & "/set-password?reset=1&token=" & arguments.rawToken;
+            var nl      = char( 10 );
+            var body = "Hello," & nl & nl
+                & "We received a request to reset the password on your support portal account." & nl
+                & "Click the link below to choose a new password:" & nl & nl
+                & link & nl & nl
+                & "If you did not request this you can safely ignore this message; your password will not change." & nl;
+            var mail = mailComposer.compose(
+                to            = arguments.toEmail,
+                subject       = "Reset your support portal password",
+                body          = body,
+                bodyFormat    = "text",
+                recipientType = "raw",
+                eventKey      = "portal.password_reset.request",
+                preheader     = "Reset your support portal password."
+            );
+            mailComposer.send( mail );
+        } catch ( any e ) {
+            writeLog(
+                text : "ContactInviteService reset email send failed: " & e.message,
                 log  : "tesserabx",
                 type : "warning"
             );

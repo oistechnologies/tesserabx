@@ -7,9 +7,10 @@
  */
 class {
 
-    property name="auth"       inject="AuthenticationService@cbauth";
-    property name="agentAuth"  inject="AgentAuthService@agent";
-    property name="messagebox" inject="messagebox@cbmessagebox";
+    property name="auth"         inject="AuthenticationService@cbauth";
+    property name="agentAuth"    inject="AgentAuthService@agent";
+    property name="agentService" inject="AgentService@agent";
+    property name="messagebox"   inject="messagebox@cbmessagebox";
 
     function new( event, rc, prc ){
         prc.pageTitle = "Agent Sign in";
@@ -47,6 +48,60 @@ class {
     function delete( event, rc, prc ){
         auth.logout();
         relocate( uri = "/agent/login" );
+    }
+
+    /**
+     * Public "forgot password" request page (/agent/forgot-password).
+     * Whitelisted so a signed-out agent can reach it. POST always shows
+     * the same neutral confirmation regardless of whether the address
+     * has an account (no user enumeration).
+     */
+    function forgotPasswordForm( event, rc, prc ){
+        prc.pageTitle = "Reset your password";
+        event.setLayout( name = "Auth", module = "core" );
+        event.setView( "session/forgot-password" );
+    }
+
+    function forgotPasswordSubmit( event, rc, prc ){
+        param rc.email = "";
+        event.setLayout( name = "Auth", module = "core" );
+        agentService.requestPasswordReset( rc.email );
+        messagebox.info( "If an account exists for that email, we have sent a link to reset the password." );
+        relocate( uri = "/agent/login" );
+    }
+
+    /**
+     * Public reset-password page (/agent/reset-password?token=...).
+     * Whitelisted; consumes the token and sets a new password. MFA is
+     * untouched, so the next sign-in still challenges for the code.
+     */
+    function resetPasswordForm( event, rc, prc ){
+        param rc.token = "";
+        prc.pageTitle = "Reset your password";
+        event.setLayout( name = "Auth", module = "core" );
+        prc.token = trim( rc.token );
+        event.setView( "session/reset-password" );
+    }
+
+    function resetPasswordSubmit( event, rc, prc ){
+        param rc.token              = "";
+        param rc.newPassword        = "";
+        param rc.newPasswordConfirm = "";
+        event.setLayout( name = "Auth", module = "core" );
+
+        if ( rc.newPassword != rc.newPasswordConfirm ) {
+            messagebox.error( "The passwords do not match." );
+            relocate( uri = "/agent/reset-password?token=" & urlEncodedFormat( rc.token ) );
+            return;
+        }
+        var result = agentService.confirmPasswordReset( trim( rc.token ), rc.newPassword );
+        if ( result.ok ) {
+            messagebox.info( "Your password has been reset. You can now sign in." );
+            relocate( uri = "/agent/login" );
+            return;
+        }
+        messagebox.error( result.error );
+        relocate( uri = "/agent/reset-password?token=" & urlEncodedFormat( rc.token ) );
     }
 
     function unauthorized( event, rc, prc ){

@@ -7,6 +7,7 @@
  *   onTicketMessageAdded  -> the OTHER party (agent if the customer
  *                            wrote, requester if an agent wrote);
  *                            internal notes never fan out
+ *   onTicketAssigned      -> the newly assigned agent only
  *   onTicketStatusChanged -> both sides
  *
  * Per-listener try/catch keeps a notification miss from breaking
@@ -193,6 +194,49 @@ class {
         } catch ( any e ) {
             writeLog(
                 text : "TicketEventsInterceptor.onTicketStatusChanged failed: " & e.message,
+                log  : "tesserabx",
+                type : "warning"
+            );
+        }
+    }
+
+    /**
+     * onTicketAssigned -> the newly assigned agent.
+     *
+     * Unlike the other ticket hooks, the assignment announce carries
+     * the canonical event envelope (entity.id + before/after.
+     * assignedToAgentId + actorId), not the `interceptData.ticket`
+     * entity, so we read the new assignee out of `after` and load the
+     * ticket through the tickets service to build the template context.
+     *
+     * Only the agent who just received the ticket is notified. An
+     * unassignment (blank new assignee) and a self-assignment (the
+     * agent handed the ticket to themselves) both fan out to nobody:
+     * there is no new person to tell.
+     */
+    function onTicketAssigned( event, interceptData, rc, prc ){
+        try {
+            var data       = arguments.interceptData;
+            var entity     = data.entity ?: {};
+            var after      = data.after  ?: {};
+            var ticketId   = entity.id ?: "";
+            var newAgentId = after.assignedToAgentId ?: "";
+            if ( !len( ticketId ) || !len( newAgentId ) ) return;
+
+            // Self-assignment: the agent already knows they own it.
+            if ( newAgentId == ( data.actorId ?: "" ) ) return;
+
+            var ticket = wirebox.getInstance( "TicketsService@tickets" ).getTicket( ticketId );
+            if ( isNull( ticket ) ) return;
+
+            wirebox.getInstance( "NotificationsService@notifications" ).dispatchForEvent(
+                eventKey  : "ticket.assigned",
+                recipients: [ { "type" : "agent", "id" : newAgentId } ],
+                context   : contextForTicket( ticket )
+            );
+        } catch ( any e ) {
+            writeLog(
+                text : "TicketEventsInterceptor.onTicketAssigned failed: " & e.message,
                 log  : "tesserabx",
                 type : "warning"
             );

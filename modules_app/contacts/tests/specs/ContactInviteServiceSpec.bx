@@ -89,7 +89,62 @@ class extends="coldbox.system.testing.BaseTestCase" appMapping="/" {
                 cleanup( result.contact.getId(), org.getId() );
             } );
 
+            // ---- Email audit R3: self-service password reset ----
+
+            it( "requestPasswordReset issues a reset-purpose token for a known email", function(){
+                var org    = makeOrg();
+                var email  = "resetme-" & createUUID() & "@example.com";
+                var result = variables.invites.invite( { organizationId : org.getId(), email : email } );
+                variables.invites.confirmSetPassword( result.token, "fresh-secret-9" );
+                var cid = result.contact.getId();
+
+                variables.invites.requestPasswordReset( email );
+                expect( resetTokenCount( cid ) ).toBe( 1 );
+
+                cleanup( cid, org.getId() );
+            } );
+
+            it( "requestPasswordReset is a silent no-op for an unknown email", function(){
+                var before = totalResetTokens();
+                expect( function(){
+                    variables.invites.requestPasswordReset( "nobody-" & createUUID() & "@example.com" );
+                } ).notToThrow();
+                expect( totalResetTokens() ).toBe( before );
+            } );
+
+            it( "a reset-purpose token sets a new password through the shared consume path", function(){
+                var org    = makeOrg();
+                var result = variables.invites.invite( { organizationId : org.getId(), email : "resetme-" & createUUID() & "@example.com" } );
+                var cid    = result.contact.getId();
+                variables.invites.confirmSetPassword( result.token, "fresh-secret-9" );
+
+                // Mint a reset token the way requestPasswordReset does and
+                // consume it through the same confirmSetPassword path.
+                var resetToken = variables.invites.issueToken( cid, "reset", 2 );
+                var confirm    = variables.invites.confirmSetPassword( resetToken, "rotated-secret-7" );
+                expect( confirm.ok ).toBeTrue();
+
+                var c = variables.contacts.getContactById( cid );
+                expect( variables.bcrypt.checkPassword( "rotated-secret-7", c.getPasswordHash() ) ).toBeTrue();
+
+                cleanup( cid, org.getId() );
+            } );
+
         } );
+    }
+
+    private numeric function resetTokenCount( required string contactId ){
+        return queryExecute(
+            "SELECT COUNT(*) AS n FROM contact_password_tokens WHERE contact_id = :id AND purpose = 'reset'",
+            { id : arguments.contactId }, { returntype : "array" }
+        )[ 1 ].n;
+    }
+
+    private numeric function totalResetTokens(){
+        return queryExecute(
+            "SELECT COUNT(*) AS n FROM contact_password_tokens WHERE purpose = 'reset'",
+            {}, { returntype : "array" }
+        )[ 1 ].n;
     }
 
     // ---------------- helpers ----------------

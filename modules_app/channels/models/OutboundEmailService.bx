@@ -28,7 +28,9 @@ class singleton=true {
     /**
      * Auto-acknowledgement on ticket creation. Skipped when:
      *   - the requester address is empty
-     *   - AUTO_ACK_ENABLED is anything but "true"
+     *   - OUTBOUND_EMAIL_ENABLED is anything but "true" (the same
+     *     global kill switch that gates agent replies; there is no
+     *     separate auto-ack-only flag)
      *   - the ticket source isn't an inbound channel
      *     (we only ack mail, portal, widget, and contact-form; not
      *     tickets an agent created from the dashboard, which already

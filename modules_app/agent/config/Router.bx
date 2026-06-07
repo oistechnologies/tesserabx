@@ -40,6 +40,17 @@ class {
         } );
         route( "logout" ).to( "Session.delete" );
 
+        // Self-service password reset (whitelisted in AgentSecurityRules
+        // and the global firewall so a signed-out agent can reach them).
+        route( "forgot-password" ).withHandler( "Session" ).toAction( {
+            "GET"  : "forgotPasswordForm",
+            "POST" : "forgotPasswordSubmit"
+        } );
+        route( "reset-password" ).withHandler( "Session" ).toAction( {
+            "GET"  : "resetPasswordForm",
+            "POST" : "resetPasswordSubmit"
+        } );
+
         // MFA enrollment + recovery-codes display.
         route( "mfa/setup" ).withHandler( "Mfa" ).toAction( {
             "GET"  : "setupForm",

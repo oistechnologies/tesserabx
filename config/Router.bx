@@ -49,12 +49,21 @@ class extends="coldbox.system.web.routing.Router" {
         } );
         route( "/logout" ).to( "portal:Session.delete" );
 
-        // Public set-password landing for a member invite link.
+        // Public set-password landing for a member invite link and the
+        // password-reset link (/set-password?reset=1&token=...).
         // Whitelisted in PortalSecurityRules (the contact has no usable
         // password yet, so it must be reachable while signed out).
         route( "/set-password" ).withHandler( "portal:Session" ).toAction( {
             "GET"  : "setPasswordForm",
             "POST" : "setPasswordSubmit"
+        } );
+
+        // Public "forgot password" request page. Reachable while signed
+        // out; the submit issues a reset token and emails a
+        // /set-password link.
+        route( "/forgot-password" ).withHandler( "portal:Session" ).toAction( {
+            "GET"  : "forgotPasswordForm",
+            "POST" : "forgotPasswordSubmit"
         } );
 
         // MFA enrollment + recovery-codes display. Enrollment lives

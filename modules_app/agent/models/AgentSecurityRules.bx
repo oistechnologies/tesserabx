@@ -10,7 +10,7 @@ class singleton=true {
     public array function getSecurityRules(){
         return [
             {
-                whitelist   : "^agent/(login|logout)(/|$)|^agent$",
+                whitelist   : "^agent/(login|logout|forgot-password|reset-password)(/|$)|^agent$",
                 secureList  : "^agent(/|$)",
                 match       : "url",
                 roles       : "agent",
